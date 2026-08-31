@@ -1,0 +1,124 @@
+bind_addr: "127.0.0.1:7878"
+log_level: "info"
+
+agents:
+  persistent:
+    - id: default
+      kind: subprocess
+      command: "agent"
+      protocol: json-rpc
+      transport: stdio
+      restart_policy: on-failure
+
+  ephemeral_templates: []
+
+# ─── Per-session subprocess pool (real per-chat parallelism) ─────────────
+# Each chat session whose `agent_id` matches a key here gets its own
+# dedicated subprocess. The process handles all messages of that session
+# via JSON-RPC over stdio and is killed when the session is cancelled,
+# deleted, evicted for idleness, or the daemon shuts down.
+#
+# This replaces the legacy in-process default path for chat: each
+# chat's history lives in its own process and is physically isolated
+# from every other chat. Upper bound is hardware (RSS × N).
+#
+# `command` is the agent binary to spawn. `env` and `${env:VAR}` are
+# expanded by the daemon at spawn time. `idle_timeout_secs` is the
+# sweeper threshold (default 1800s). `max_sessions` is an optional soft
+# cap (None = unlimited).
+session_agents:
+  agents:
+    default:
+      command: "agent"
+      args: []
+      env: {}
+      idle_timeout_secs: 1800
+      # max_sessions: 200   # optional soft cap
+    # variant with a different model — frontend can pick which agent_id to use
+    # at session creation time:
+    # default_agent_sonnet:
+    #   command: "agent"
+    #   args: ["--model", "claude-3-5-sonnet-latest"]
+    #   env:
+    #     MINIMAX_API_KEY: "${env:MINIMAX_API_KEY}"
+
+
+# External services probed and exposed in GET /v1/services.
+# (neurox is always included automatically by the daemon.)
+services:
+  - id: memory
+    name: Memory
+    description: "Persistent memory backend (plugin: memory v2). Uses MiniMax / SQLite / FTS5."
+    kind: daemon
+    http: "http://127.0.0.1:9999"
+    health_path: /health
+    metadata:
+      provider: "plugin"
+      version: "2.0.0"
+      capabilities: "memory,knowledge,recall,store"
+
+# EP-0004 — Plugin registry (default).
+plugins_registry: https://raw.githubusercontent.com/Andresfernandezp94/neurox-registry/main/registry.json
+
+# EP-0009 — Multi-provider LLM registry.
+#
+# Providers declared here mirror those supported by agent-studio
+# (PROVIDER_PRESETS in src-ui/modules/shared/services/providersCatalog.ts),
+# plus Anthropic (added in EP-0009-03).
+#
+# Each provider is fully configurable: id, kind, base_url, model, api_key_env.
+# To activate a provider that requires auth, set the matching env var in
+# /home/andres_fernandez/.local/share/neurox/.env (the EnvironmentFile
+# of the systemd unit).
+llm:
+  default_provider: minimax
+  providers:
+    # ─── MiniMax (active by default; key already in .env) ──────────────
+    - id: minimax
+      kind: minimax
+      api_key_env: MINIMAX_API_KEY
+      # base_url + model fall back to spec 04 defaults:
+      #   base_url: https://api.minimaxi.chat/v1
+      #   model:    MiniMax-M3
+
+    # ─── Anthropic (declared; configure ANTHROPIC_API_KEY to activate) ──
+    - id: anthropic
+      kind: anthropic
+      api_key_env: ANTHROPIC_API_KEY
+      # defaults: base_url https://api.anthropic.com, model claude-3-5-haiku-latest
+
+    # ─── OpenRouter (declared; configure OPENROUTER_API_KEY to activate) ─
+    - id: openrouter
+      kind: openai_compat
+      base_url: https://openrouter.ai/api/v1
+      api_key_env: OPENROUTER_API_KEY
+      # default model: gpt-4o-mini. Override per-model in the UI once the
+      # /v1/llm/providers/:id/models discovery endpoint is added (follow-up).
+
+    # ─── Mistral (declared; configure MISTRAL_API_KEY to activate) ───────
+    - id: mistral
+      kind: openai_compat
+      base_url: https://api.mistral.ai/v1
+      api_key_env: MISTRAL_API_KEY
+      # default model: gpt-4o-mini
+
+    # ─── Local llama-server (EP-0018: the daemon starts and supervises it) ─
+    # The daemon spawns `local_command` on startup and health-checks
+    # http://127.0.0.1:{local_port}/health until Ready.
+    # Placeholders: {{model_path}} (tilde-expanded) and {{port}}.
+    # When base_url is empty and local_port is set, the effective base URL is
+    # derived as http://127.0.0.1:{port}/v1.
+    - id: local-llama
+      kind: openai_compat
+      model: qwen2.5-1.5b-instruct
+      local_command: llama-server
+      local_args:
+        - "--model"
+        - "{{model_path}}"
+        - "--port"
+        - "{{port}}"
+        - "--host"
+        - "127.0.0.1"
+      local_model_path: "~/models/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+      local_port: 11435
+      # No api_key_env: llama-server runs without auth.

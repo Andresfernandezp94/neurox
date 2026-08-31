@@ -1,0 +1,9 @@
+/* ============================================================
+ * error-boundary.css — EP-0016 FU-0016-01 migration
+ * Consumed by ErrorBoundary.tsx.
+ * ============================================================ */
+
+.error-boundary__card { margin: 2rem auto; max-width: 32rem; }
+.error-boundary__title { margin-bottom: 0.5rem; color: var(--status-danger); }
+.error-boundary__message { margin-bottom: 0.5rem; }
+.error-boundary__trace { background: var(--bg-elevated); padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 1rem; overflow: auto; }

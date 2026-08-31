@@ -1,0 +1,15 @@
+# Project-wide clippy configuration.
+# https://doc.rust-lang.org/clippy/configuration.html
+#
+# Note: most clippy options are configured via lint attributes in code,
+# not via this file. This file only holds the (very few) global knobs
+# that clippy supports.
+
+# Cognitive complexity threshold for `clippy::cognitive_complexity`.
+cognitive-complexity-threshold = 30
+
+# Function "too many arguments" threshold.
+too-many-arguments-threshold = 8
+
+# "Too many lines" threshold (per function).
+too-many-lines-threshold = 150

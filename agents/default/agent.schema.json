@@ -1,0 +1,358 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Neurox Agent Manifest v2",
+  "description": "Schema for agent manifests. schema_version 2 adds: llm.sampling, tools.config (replaces media section), memory tiers, guardrails, output format, streaming, budget, stop_conditions, sub_agents, observability, expanded permissions.sandbox. Removes: media (folded into tools.config), ui (derived from meta), tools.requires_approval (folded into policy).",
+  "type": "object",
+  "required": ["version", "schema_version", "kind", "meta", "files", "llm", "tools", "output", "streaming", "budget", "stop_conditions", "permissions"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Agent version (semver)"
+    },
+    "schema_version": {
+      "type": "integer",
+      "enum": [2],
+      "description": "Manifest schema version — bump when fields change shape"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["agent", "template", "preset"],
+      "description": "What this file represents"
+    },
+
+    "meta": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9_-]*$" },
+        "name": { "type": "string" },
+        "display_name": { "type": "string" },
+        "description": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "author": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "extends": {
+          "type": ["string", "null"],
+          "description": "Name of the parent agent to inherit from"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "files": {
+      "type": "object",
+      "required": ["prompt", "harness", "skills_dir"],
+      "properties": {
+        "prompt": { "type": "string", "description": "Path to prompt.md" },
+        "harness": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 0,
+          "description": "Paths to harness files, concatenated in order. The 'harness' layer of the agent — rules + persistent context, injected every turn."
+        },
+        "skills_dir": { "type": "string", "description": "Path to skills/ directory (Anthropic Skills-style markdown with YAML frontmatter)" }
+      },
+      "additionalProperties": false
+    },
+
+    "llm": {
+      "type": "object",
+      "required": ["provider", "model", "sampling"],
+      "properties": {
+        "provider": {
+          "type": ["string", "null"],
+          "description": "LLM provider id (e.g. 'anthropic', 'openai', 'minimax', 'custom')"
+        },
+        "model": {
+          "type": ["string", "null"],
+          "description": "Model identifier (e.g. 'claude-sonnet-4-5', 'gpt-5', 'MiniMax-M3')"
+        },
+        "sampling": {
+          "type": "object",
+          "properties": {
+            "temperature": { "type": ["number", "null"], "minimum": 0, "maximum": 2 },
+            "top_p": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+            "top_k": { "type": ["integer", "null"], "minimum": 0 },
+            "max_tokens": { "type": ["integer", "null"], "minimum": 1 },
+            "stop_sequences": { "type": "array", "items": { "type": "string" } },
+            "seed": { "type": ["integer", "null"], "description": "For reproducibility" },
+            "frequency_penalty": { "type": ["number", "null"] },
+            "presence_penalty": { "type": ["number", "null"] }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "tools": {
+      "type": "object",
+      "required": ["policy", "config"],
+      "properties": {
+        "policy": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["allow_all", "allowlist", "denylist"],
+              "description": "How to filter tool availability for this agent"
+            },
+            "allowlist": {
+              "type": ["array", "null"],
+              "items": { "type": "string" },
+              "description": "Tools the agent can use (only when type=allowlist)"
+            },
+            "denylist": {
+              "type": ["array", "null"],
+              "items": { "type": "string" },
+              "description": "Tools the agent cannot use (only when type=denylist)"
+            }
+          },
+          "additionalProperties": false
+        },
+        "config": {
+          "type": "object",
+          "description": "Per-tool configuration. Replaces the old `media` section. Each key is a tool name, each value is tool-specific config.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "mcp_servers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "transport": {
+            "type": "string",
+            "enum": ["stdio", "http", "sse"],
+            "default": "stdio"
+          },
+          "command": { "type": "string", "description": "stdio: command to run" },
+          "args": { "type": "array", "items": { "type": "string" } },
+          "url": { "type": "string", "description": "http/sse: endpoint URL" },
+          "auth": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["none", "bearer", "basic", "oauth"] },
+              "token_env": { "type": "string", "description": "Env var name with the token" }
+            }
+          },
+          "env": { "type": "object", "additionalProperties": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    },
+
+    "memory": {
+      "type": "object",
+      "description": "Memory tiers — short-term, long-term, episodic, semantic. Each tier specifies where the data lives.",
+      "properties": {
+        "short_term": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["in_memory", "file", "redis", "custom"] },
+            "max_messages": { "type": ["integer", "null"] },
+            "path": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        },
+        "long_term": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["in_memory", "file", "vector_db", "custom"] },
+            "path": { "type": ["string", "null"] },
+            "embedding_model": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        },
+        "episodic": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["in_memory", "file", "vector_db", "custom"] },
+            "path": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        },
+        "semantic": {
+          "type": "object",
+          "description": "Structured facts (id, type, content, active). The 'facts' tier — persistent knowledge.",
+          "properties": {
+            "type": { "type": "string", "enum": ["in_memory", "file", "database"] },
+            "path": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "guardrails": {
+      "type": "object",
+      "description": "Input/output validation rules. Each rule has a type and type-specific config.",
+      "properties": {
+        "input": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["max_length", "min_length", "regex_match", "regex_reject", "no_secrets", "blocklist", "custom"]
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "output": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["max_length", "no_secrets", "no_pii", "json_schema", "regex_match", "blocklist", "custom"]
+              },
+              "schema": { "description": "For json_schema: the JSON Schema the output must conform to" }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "output": {
+      "type": "object",
+      "description": "Structured output configuration. The agent returns text by default, or a JSON object conforming to `schema` if type=json_schema.",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["text", "json_schema"],
+          "default": "text"
+        },
+        "schema": {
+          "description": "JSON Schema (only when type=json_schema). The output will be validated against this schema.",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "streaming": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "chunk_size": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Tokens per chunk (null = provider default)"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "budget": {
+      "type": "object",
+      "description": "Cost and time limits. null = no limit (use with care).",
+      "properties": {
+        "max_tokens_per_run": { "type": ["integer", "null"], "minimum": 1 },
+        "max_runtime_secs": { "type": ["integer", "null"], "minimum": 1 },
+        "cost_limit_usd": { "type": ["number", "null"], "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+
+    "stop_conditions": {
+      "type": "object",
+      "description": "When to stop the agent loop. Prevents infinite loops.",
+      "properties": {
+        "max_iterations": { "type": "integer", "minimum": 1, "default": 10 },
+        "max_tool_calls": { "type": ["integer", "null"], "minimum": 1 },
+        "max_duration_secs": { "type": ["integer", "null"], "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+
+    "sub_agents": {
+      "type": "array",
+      "description": "Sub-agents this agent can delegate to. Each has its own role, tools, and instructions.",
+      "items": {
+        "type": "object",
+        "required": ["name", "instructions"],
+        "properties": {
+          "name": { "type": "string" },
+          "role": { "type": "string", "description": "Short role description (e.g. 'code-reviewer')" },
+          "instructions": { "type": "string", "description": "System prompt for the sub-agent" },
+          "tools": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Tool names the sub-agent can use (empty = inherit from parent)"
+          },
+          "model_override": { "type": "string", "description": "Override the parent's model for this sub-agent" },
+          "handoff_description": { "type": "string", "description": "When to delegate to this sub-agent" }
+        },
+        "additionalProperties": false
+      }
+    },
+
+    "permissions": {
+      "type": "object",
+      "required": ["sandbox"],
+      "properties": {
+        "sandbox": {
+          "type": "object",
+          "required": ["network_access", "process_spawn"],
+          "properties": {
+            "writable_paths": { "type": "array", "items": { "type": "string" } },
+            "readable_paths": { "type": "array", "items": { "type": "string" } },
+            "network_access": { "type": "boolean", "default": true },
+            "process_spawn": { "type": "boolean", "default": true },
+            "memory_limit_mb": { "type": ["integer", "null"], "minimum": 1 },
+            "cpu_limit_pct": { "type": ["integer", "null"], "minimum": 1, "maximum": 100 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "observability": {
+      "type": "object",
+      "description": "Logging, tracing, and metrics. All optional — defaults to minimal logging only.",
+      "properties": {
+        "log_level": {
+          "type": "string",
+          "enum": ["trace", "debug", "info", "warn", "error"],
+          "default": "info"
+        },
+        "trace": {
+          "type": "boolean",
+          "default": false,
+          "description": "Record full prompt/response traces (privacy: may contain user data)"
+        },
+        "metrics": {
+          "type": "boolean",
+          "default": false,
+          "description": "Emit token/cost/latency metrics per run"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

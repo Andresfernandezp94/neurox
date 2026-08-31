@@ -1,0 +1,73 @@
+{
+  "app.title": "admin",
+  "app.subtitle": "neurox",
+
+  "sidebar.status": "Status",
+  "sidebar.chat": "Chat",
+  "sidebar.agents": "Agentes",
+  "sidebar.sessions": "Sesiones",
+  "sidebar.approvals": "Aprobaciones",
+  "sidebar.events": "Eventos",
+  "sidebar.tools": "Tools",
+  "sidebar.config": "Config",
+  "sidebar.models": "Models",
+  "sidebar.default": "DefaultAgent",
+  "sidebar.sandbox": "Sandbox",
+  "sidebar.env": "Environment",
+  "sidebar.services": "Services",
+  "sidebar.workspace": "Workspace",
+
+  "theme.system": "Sistema",
+  "theme.light": "Claro",
+  "theme.dark": "Oscuro",
+  "theme.cycle": "Cambiar tema",
+
+  "actions.approve": "Aprobar",
+  "actions.reject": "Rechazar",
+  "actions.start": "Iniciar",
+  "actions.stop": "Detener",
+  "actions.cancel": "Cancelar",
+  "actions.copy": "Copiar",
+  "actions.refresh": "Refrescar",
+  "actions.run": "Ejecutar",
+
+  "error.boundary.title": "Algo salió mal",
+  "error.boundary.message": "Ocurrió un error inesperado. Recargá la página para continuar.",
+
+  "panels.status.title": "Status del daemon",
+  "panels.status.uptime": "Uptime",
+  "panels.status.version": "Versión",
+  "panels.status.healthy": "Saludable",
+
+  "panels.agents.title": "Agentes",
+  "panels.agents.empty": "No hay agentes registrados.",
+
+  "panels.sessions.title": "Sesiones",
+  "panels.sessions.empty": "No hay sesiones activas.",
+
+  "panels.approvals.title": "Aprobaciones pendientes",
+  "panels.approvals.empty": "No hay aprobaciones pendientes.",
+
+  "panels.events.title": "Eventos en vivo",
+  "panels.events.pause": "Pausar",
+  "panels.events.resume": "Reanudar",
+
+  "panels.tools.title": "Tools",
+  "panels.tools.empty": "No hay tools registradas.",
+
+  "panels.config.title": "Configuración",
+  "panels.config.readonly": "(solo lectura)",
+  "config.tab.general": "General",
+  "config.tab.mcp": "MCP",
+  "config.tab.environments": "Environments",
+  "config.tab.users": "Users",
+
+  "panels.chat.title": "Chat",
+  "panels.chat.description": "Conversación directa con el agente.",
+
+  "panels.plugins.title": "Plugins",
+  "panels.plugins.description": "Conexiones dinámicas con plugins registrados.",
+
+  "panels.providers.title": "LLM Providers",
+  "panels.providers.description": "Configuración multi-provider — Crear, editar y administrar providers."
+}

@@ -1,0 +1,46 @@
+/* ============================================================
+ * organisms.css — Organism-specific styles (EP-0016 F5.4)
+ * ============================================================
+ * CSS consumed by organism-level React components (panels).
+ * All selectors are BEM-scoped with a panel-specific prefix:
+ *   .chat__*, .session-list__*, .session-detail__*, .skills-panel__*,
+ *   .te__*, .logs-panel__*, .live-events__*, .mcp-tab, .plugin-card__*,
+ *   .provider-card__*, .approval-card__*, .agents-panel__*,
+ *   .config-viewer__*, .modal*, .model-list__*, .inline-provider-config__*
+ *
+ * Created by extracting the BEM-scoped sections from common.css
+ * during the EP-0016 CSS split. Originally located at lines 173-2615.
+ * ============================================================ */
+
+/* ============================================================
+ * Chat
+ * ============================================================ */
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  background: var(--bg);
+  /* EP-0026-UX: removemos border + radius para look full-bleed limpio.
+     El contenedor del chat ocupa el ancho del viewport sin marco. */
+  border: none;
+  border-radius: 0;
+}
+
+/* ─── Chat Layout ─── */
+
+.chat-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.chat-layout > .chat {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+

@@ -1,0 +1,39 @@
+/* ============================================================
+ * theme.css — port one-way desde agent-studio (global.css)
+ * Source: ~/Laboratory/Projects/repositories/agent-studio/src-ui/modules/shared/styles/global.css
+ * Snapshot: 2026-08-04 (EP-0002-01 Task 2)
+ * Ver: ../README.md para el mapeo completo.
+ *
+ * NOTA: agent-studio/src-ui/modules/shared/styles/global.css era
+ * una colección de @imports. En el admin solo importamos los CSS
+ * que necesitamos (los demás no aplican).
+ * ============================================================ */
+
+@import './tokens.css';
+@import './atoms.css';
+@import './molecules.css';
+@import './organisms.css';
+@import './sidebar.css';
+@import './status-bar.css';
+@import './error-boundary.css';
+@import './chat-tabs.css';
+@import './sandbox-panel.css';
+@import './login.css';
+
+/* Chat — split into 10 focused files for easier navigation.
+ * Order matters: chat-message.css references selectors defined in
+ * chat-timeline.css, chat-tools.css depends on chat-bar.css tokens, etc. */
+@import './chat/chat-history.css';
+@import './chat/chat-bar.css';
+@import './chat/chat-search.css';
+@import './chat/chat-transcript.css';
+@import './chat/chat-input.css';
+@import './chat/chat-message.css';
+@import './chat/chat-thinking.css';
+@import './chat/chat-tools.css';
+@import './chat/chat-timeline.css';
+@import './chat/chat-markdown.css';
+@import './chat/tool-renderer.css';
+
+/* Tabs (molecule) */
+@import '../components/molecules/Tabs.css';

@@ -1,0 +1,116 @@
+{
+  "$schema": "./agent.schema.json",
+  "version": "1.0.0",
+  "schema_version": 2,
+  "kind": "template",
+
+  "meta": {
+    "id": "",
+    "name": "",
+    "display_name": "",
+    "description": "",
+    "tags": [],
+    "author": "",
+    "created_at": "",
+    "updated_at": "",
+    "extends": null
+  },
+
+  "files": {
+    "prompt": "prompt.md",
+    "harness": [],
+    "skills_dir": "skills/"
+  },
+
+  "llm": {
+    "provider": null,
+    "model": null,
+    "sampling": {
+      "temperature": null,
+      "top_p": null,
+      "top_k": null,
+      "max_tokens": null,
+      "stop_sequences": [],
+      "seed": null,
+      "frequency_penalty": null,
+      "presence_penalty": null
+    }
+  },
+
+  "tools": {
+    "policy": {
+      "type": "allow_all",
+      "allowlist": null,
+      "denylist": null
+    },
+    "config": {}
+  },
+
+  "mcp_servers": [],
+
+  "memory": {
+    "short_term": {
+      "type": "in_memory",
+      "max_messages": 50,
+      "path": null
+    },
+    "long_term": {
+      "type": "file",
+      "path": null,
+      "embedding_model": null
+    },
+    "episodic": {
+      "type": "file",
+      "path": null
+    },
+    "semantic": {
+      "type": "file",
+      "path": null
+    }
+  },
+
+  "guardrails": {
+    "input": [],
+    "output": []
+  },
+
+  "output": {
+    "type": "text"
+  },
+
+  "streaming": {
+    "enabled": true,
+    "chunk_size": null
+  },
+
+  "budget": {
+    "max_tokens_per_run": null,
+    "max_runtime_secs": null,
+    "cost_limit_usd": null
+  },
+
+  "stop_conditions": {
+    "max_iterations": 10,
+    "max_tool_calls": null,
+    "max_duration_secs": null
+  },
+
+  "sub_agents": [],
+
+  "permissions": {
+    "sandbox": {
+      "writable_paths": [],
+      "readable_paths": [],
+      "network_access": true,
+      "process_spawn": true,
+      "memory_limit_mb": null,
+      "cpu_limit_pct": null
+    }
+  },
+
+  "observability": {
+    "log_level": "info",
+    "trace": false,
+    "metrics": false
+  }
+}

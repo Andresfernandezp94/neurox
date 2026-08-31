@@ -1,0 +1,250 @@
+// EP-0026-01 R3.2: tests del auto-create de session backend.
+//
+// El ChatPanel debe llamar a createSession con el agent_id de la
+// tab activa (default "default") cuando el sessionId es null, y
+// persistir el session_id retornado vía updateTab. El <textarea>
+// debe pasar de "Connecting…" (disabled) a "Type a message…"
+// (enabled) una vez que el sessionId se setea.
+
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+
+// Mock the API before importing the component.
+vi.mock("../api/sessions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/sessions")>();
+  return {
+    ...actual,
+    createSession: vi.fn(),
+    listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+    getSessionMessages: vi.fn().mockResolvedValue({ messages: [] }),
+    streamMessage: vi.fn(),
+    cancelSession: vi.fn(),
+    sendMessage: vi.fn(),
+    renameSession: vi.fn(),
+  };
+});
+
+// Mock the model/agent/tab subcomponents — we don't care about
+// their internals in this test, only that ChatPanel triggers
+// createSession and the <textarea> reacts to the response.
+vi.mock("./ModelSelector", () => ({
+  ModelSelector: () => null,
+}));
+vi.mock("./AgentSelector", () => ({
+  AgentSelector: () => null,
+}));
+vi.mock("./ChatTabs", () => ({
+  ChatTabs: () => null,
+}));
+vi.mock("./ChatHistory", () => ({
+  ChatHistory: () => null,
+}));
+
+// Mock the default status fetcher.
+vi.mock("../api/default", () => ({
+  getDefaultAgent: vi.fn().mockResolvedValue({}),
+}));
+
+import { ChatPanel } from "./ChatPanel";
+import { createSession } from "../api/sessions";
+import { StoreProvider } from "../store/StoreContext";
+
+const mockCreateSession = createSession as ReturnType<typeof vi.fn>;
+const TEST_AGENT_ID = "default";
+
+/**
+ * Wraps with StoreProvider that has the test agent in its
+ * in_process list (mirrors what `/v1/agents` returns from the
+ * running daemon). Patches fetch so StoreProvider doesn't hit
+ * the real daemon.
+ */
+function withStore({ children }: { children: ReactNode }) {
+  const originalFetch = global.fetch;
+  global.fetch = vi.fn((url: string | URL | Request, init?: RequestInit) => {
+    const u = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+    const method = (init?.method ?? "GET").toUpperCase();
+    if (u.includes("/v1/agents") && method === "GET") {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            in_process: [{ id: TEST_AGENT_ID, kind: "in_process", status: "ready" }],
+            persistent: [],
+            ephemeral_templates: [],
+            running: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }),
+      );
+    }
+    // GET /v1/sessions — return the empty list shape. Don't intercept
+    // POST /v1/sessions — that's the createSession call from ChatPanel,
+    // which is mocked via `vi.mock("../api/sessions", ...)` above.
+    if (u.includes("/v1/sessions") && method === "GET") {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ sessions: [], specs: [], details: [], running: [] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+    if (u.includes("/v1/approvals")) {
+      // Daemon returns `{pending: Approval[]}` (NOT `approvals`).
+      // StoreContext.tsx:303 reads `.pending` — match the real shape.
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ pending: [] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+    if (u.includes("/health")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            status: "ok",
+            service: "neurox",
+            uptime_seconds: 0,
+            version: "0.0.0-test",
+            auth_required: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+    return originalFetch(url as Request, init);
+  }) as typeof fetch;
+
+  return (
+    <StoreProvider eventsPath="/__test_no_ws__{Math.random()}">{children}</StoreProvider>
+  );
+}
+
+describe("ChatPanel — auto-create session (EP-0026-01 R2)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("calls createSession with the agent_id resolved from /v1/agents", async () => {
+    mockCreateSession.mockResolvedValue({
+      session_id: "test-123",
+      agent_id: TEST_AGENT_ID,
+    });
+
+    render(<ChatPanel />, { wrapper: withStore });
+
+    await waitFor(() => {
+      expect(mockCreateSession).toHaveBeenCalledWith(TEST_AGENT_ID);
+    });
+  });
+
+  it("enables the <textarea> after the session is created", async () => {
+    mockCreateSession.mockResolvedValue({
+      session_id: "test-123",
+      agent_id: TEST_AGENT_ID,
+    });
+
+    render(<ChatPanel />, { wrapper: withStore });
+
+    const textarea = await screen.findByTestId("chat-input");
+    // Before the response: disabled + placeholder "Connecting…".
+    // After the response: enabled + placeholder "Type a message…".
+    await waitFor(() => {
+      expect(textarea).not.toBeDisabled();
+    });
+    expect(textarea.getAttribute("placeholder")).toMatch(/Type a message/);
+  });
+
+  it("logs the error and keeps the textarea disabled when createSession fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockCreateSession.mockRejectedValue(new Error("backend boom"));
+
+    render(<ChatPanel />, { wrapper: withStore });
+
+    // createSession was attempted.
+    await waitFor(() => {
+      expect(mockCreateSession).toHaveBeenCalled();
+    });
+
+    // The textarea stays disabled (we don't wait for it to enable
+    // because the request failed). After a tick, the error is
+    // logged.
+    await waitFor(() => {
+      expect(consoleError).toHaveBeenCalledWith(
+        "createSession failed",
+        expect.any(Error),
+      );
+    });
+    const textarea = screen.getByTestId("chat-input");
+    expect(textarea).toBeDisabled();
+
+    consoleError.mockRestore();
+  });
+
+  // EP-hide-header-followup (2026-08-15): changed the keyboard
+  // convention so bare Enter inserts a newline (matching Slack /
+  // Discord / most modern chat UIs) instead of sending. Sending now
+  // requires Shift+Enter or Ctrl+Enter. Locked down with these
+  // regression tests so the change doesn't accidentally flip back.
+  describe("keyboard shortcuts", () => {
+    function setupReady() {
+      mockCreateSession.mockResolvedValue({
+        session_id: "test-123",
+        agent_id: TEST_AGENT_ID,
+      });
+      return render(<ChatPanel />, { wrapper: withStore });
+    }
+
+    // Wait until the textarea is enabled (placeholder switched
+    // from "Connecting…" → "Type a message…" once the session is up).
+    async function readyTextarea() {
+      const textarea = await screen.findByTestId("chat-input");
+      await waitFor(() => {
+        expect(textarea).not.toBeDisabled();
+      });
+      return textarea;
+    }
+
+    it("bare Enter does NOT send", async () => {
+      setupReady();
+      const textarea = await readyTextarea();
+      fireEvent.change(textarea, { target: { value: "hola" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      // No send happens: handleSend is not called. The textarea
+      // keeps its content because Enter was not intercepted by
+      // preventDefault — it would insert a newline in a real
+      // browser. (jsdom doesn't mutate the value for Enter, so we
+      // assert it stays equal to what we typed.)
+      await new Promise((r) => setTimeout(r, 50));
+      expect((textarea as HTMLTextAreaElement).value).toBe("hola");
+    });
+
+    it("Shift+Enter sends", async () => {
+      setupReady();
+      const textarea = await readyTextarea();
+      fireEvent.change(textarea, { target: { value: "hola" } });
+      fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+      // handleSend clears the input (setInput("")). It also sets
+      // busy=true during the stream; we don't need to assert on
+      // busy — just on the cleared value.
+      await waitFor(() => {
+        expect(textarea).toHaveValue("");
+      });
+    });
+
+    it("Ctrl+Enter sends", async () => {
+      setupReady();
+      const textarea = await readyTextarea();
+      fireEvent.change(textarea, { target: { value: "hola" } });
+      fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
+      await waitFor(() => {
+        expect(textarea).toHaveValue("");
+      });
+    });
+  });
+});

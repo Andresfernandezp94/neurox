@@ -1,0 +1,129 @@
+{
+  "$schema": "./agent.schema.json",
+  "version": "1.0.0",
+  "schema_version": 2,
+  "kind": "agent",
+
+  "meta": {
+    "id": "default",
+    "name": "Default",
+    "display_name": "Default",
+    "description": "Plantilla base sin identidad. Úsala como punto de partida para crear agentes nuevos.",
+    "tags": ["template", "base", "no-restrictions"],
+    "author": "andres_fernandez",
+    "created_at": "2026-08-19T14:50:00Z",
+    "updated_at": "2026-08-19T14:50:00Z",
+    "extends": null
+  },
+
+  "files": {
+    "prompt": "prompt.md",
+    "harness": [
+      "comportamiento.md"
+    ],
+    "skills_dir": "skills/"
+  },
+
+  "llm": {
+    "provider": null,
+    "model": null,
+    "sampling": {
+      "temperature": null,
+      "top_p": null,
+      "top_k": null,
+      "max_tokens": null,
+      "stop_sequences": [],
+      "seed": null,
+      "frequency_penalty": null,
+      "presence_penalty": null
+    }
+  },
+
+  "tools": {
+    "policy": {
+      "type": "allow_all",
+      "allowlist": null,
+      "denylist": null
+    },
+    "config": {
+      "generate_image": {
+        "default_prompt_suffix": null,
+        "default_filename_suffix": null
+      },
+      "generate_music": {
+        "default_duration_secs": null
+      },
+      "generate_video": {
+        "default_duration_secs": 6
+      }
+    }
+  },
+
+  "mcp_servers": [],
+
+  "memory": {
+    "short_term": {
+      "type": "in_memory",
+      "max_messages": 50,
+      "path": null
+    },
+    "long_term": {
+      "type": "file",
+      "path": "memory/long-term.jsonl",
+      "embedding_model": null
+    },
+    "episodic": {
+      "type": "file",
+      "path": "memory/episodes.jsonl"
+    },
+    "semantic": {
+      "type": "file",
+      "path": "facts.yaml"
+    }
+  },
+
+  "guardrails": {
+    "input": [],
+    "output": []
+  },
+
+  "output": {
+    "type": "text"
+  },
+
+  "streaming": {
+    "enabled": true,
+    "chunk_size": null
+  },
+
+  "budget": {
+    "max_tokens_per_run": null,
+    "max_runtime_secs": 600,
+    "cost_limit_usd": null
+  },
+
+  "stop_conditions": {
+    "max_iterations": 10,
+    "max_tool_calls": null,
+    "max_duration_secs": null
+  },
+
+  "sub_agents": [],
+
+  "permissions": {
+    "sandbox": {
+      "writable_paths": [],
+      "readable_paths": [],
+      "network_access": true,
+      "process_spawn": true,
+      "memory_limit_mb": null,
+      "cpu_limit_pct": null
+    }
+  },
+
+  "observability": {
+    "log_level": "info",
+    "trace": false,
+    "metrics": false
+  }
+}

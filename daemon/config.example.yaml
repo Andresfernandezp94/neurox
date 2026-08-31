@@ -1,0 +1,53 @@
+# neurox daemon — configuración de ejemplo.
+#
+# Copiá este archivo a ~/.config/neurox/config.yaml y ajustá las rutas.
+# Las API keys NO van aquí: viven en ~/.config/neurox/env (permisos 0600),
+# cargadas por el EnvironmentFile del servicio systemd y por el env watcher.
+#
+# Sustitución de variables:
+#   ${env:VAR}  — reemplazado por std::env::var("VAR") al cargar.
+
+bind_addr: "127.0.0.1:7878"
+log_level: "info"
+
+# ─── Session agents (un subproceso por sesión de chat) ─────────────────────
+# `default` es un SESSION agent: cada sesión (pestaña web, sidebar, clientes
+# concurrentes) spawnea su PROPIO subproceso `agent`. Esto da paralelismo real
+# y aislamiento — una sesión ocupada o caída nunca bloquea a otra.
+#
+# El subproceso hereda el env del daemon (poblado desde ~/.config/neurox/env
+# por el env watcher), así que las API keys están disponibles sin listarlas aquí.
+#
+# Usá ruta ABSOLUTA en `command`: bajo systemd el PATH es mínimo y no incluye
+# ~/.local/bin, por lo que un `command: "agent"` fallaría.
+session_agents:
+  agents:
+    default:
+      command: "/home/USER/.local/bin/agent"
+      args: []
+      env: {}
+      idle_timeout_secs: 1800   # mata el subproceso tras 30 min inactivo
+      requires_approval: []
+
+agents:
+  # Sin agentes persistentes compartidos: `default` es un session agent.
+  persistent: []
+
+  ephemeral_templates:
+    - id: researcher
+      kind: subprocess
+      command: "neurox-agent-researcher"
+      args: []
+      env: {}
+      protocol: json-rpc
+      transport: stdio
+      requires_approval: []
+
+    - id: summarizer
+      kind: subprocess
+      command: "neurox-agent-summarizer"
+      args: []
+      env: {}
+      protocol: json-rpc
+      transport: stdio
+      requires_approval: []

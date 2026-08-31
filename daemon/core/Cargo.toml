@@ -1,0 +1,93 @@
+[package]
+name = "neurox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Headless daemon for orchestrating AI agents — Linux-first (builds on any platform, but Linux is the primary target)"
+
+[lib]
+name = "neurox"
+path = "src/lib.rs"
+
+[[bin]]
+name = "neurox"
+path = "src/main.rs"
+
+[dependencies]
+# EP-2026-08-19: tools-engine workspace member (replaces
+# core::tools + core::llmd_client + most of core::llm_providers).
+tools-engine = { path = "../tools-engine" }
+
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+axum = { workspace = true }
+prometheus = { workspace = true }
+axum-server = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true } # EP-0014 C-001: legacy
+serde_yml = "0.0.12"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+uuid = { workspace = true }
+async-stream = "0.3"
+chrono = { workspace = true }
+sqlx = { workspace = true }
+thiserror = "1"
+dirs = { workspace = true }
+percent-encoding = { workspace = true }
+parking_lot = { workspace = true }
+rayon = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+regex = { workspace = true }
+glob = "0.3"
+subtle = "2"
+sha2 = "0.11"
+flate2 = "1.0"
+tar = "0.4"
+libc = { workspace = true }
+# EP-system-monitor: process / CPU / memory / disk / network telemetry.
+sysinfo = { workspace = true }
+# EP-0007: auth
+argon2 = { workspace = true }
+jsonwebtoken = { workspace = true }
+zeroize = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+which = "6.0"
+tempfile = "3"
+tokio-tungstenite = "0.24"
+futures = { workspace = true }
+wiremock = "0.6"
+proptest = "1"
+
+[package.metadata.deb]
+name = "neurox"
+maintainer = "Andres Fernandez <andresfernandezp94@gmail.com>"
+copyright = "2026, Andres Fernandez"
+license-file = ["../LICENSE", "4"]
+extended-description = """\
+neurox is a headless daemon for orchestrating AI agents. It runs as a
+systemd user service on Linux and exposes HTTP REST + WebSocket APIs for
+thin clients."""
+depends = ["$auto"]
+section = "utils"
+priority = "optional"
+assets = [
+    ["../README.md", "usr/share/doc/neurox/README.md", "644"],
+    ["../examples/agents.yaml", "usr/share/doc/neurox/examples/agents.yaml", "644"],
+    ["../systemd/neurox.service", "usr/lib/systemd/user/neurox.service", "644"],
+]

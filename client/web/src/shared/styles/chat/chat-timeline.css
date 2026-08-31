@@ -1,0 +1,650 @@
+/* ─── Timeline Node (Thinking) ─── */
+
+.chat__timeline-node {
+  display: flex;
+  /* EP-0024-UX: align the gutter glyph to the BASELINE of the
+     first row in the body (the tool name) instead of the top
+     edge of the row, so the + / − / ⚡ / ✓ glyph sits next to
+     the first character of the label, not floating above it. */
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.chat__timeline-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  /* EP-0024-UX: lock the glyph to a fixed height that matches
+     the header line-height so the + / − / ⚡ / ✓ glyph lines
+     up with the tool-name baseline instead of floating above
+     it. */
+  width: 0.875rem;
+  height: 1.5rem;
+  line-height: 1.5rem;
+  font-size: 0.875rem;
+}
+
+.chat__timeline-body {
+  flex: 1;
+  min-width: 0;
+  /* EP-0024-UX: force each part of the tool row (name, args
+     toggle, result toggle / body) onto its own line so a short
+     output doesn't compress them all into a single
+     horizontal strip. flex-direction: column + gap keeps the
+     spacing consistent. */
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.chat__timeline-header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  /* EP-0026-rev: removido padding-left para alinear al inicio del
+     .chat__timeline-body junto con los toggles y bodies de los tools. */
+  padding: 0;
+  font-size: 0.75rem;
+  line-height: 1.5rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  border-radius: 0.25rem;
+}
+
+.chat__timeline-header:hover {
+  color: var(--text-primary);
+}
+
+.chat__timeline-label {
+  white-space: nowrap;
+}
+
+/* EP-0024-UX: the result preview IS the expand toggle.
+   Rendered as a button (a11y + keyboard + hover affordance)
+   styled as an inline block of muted italic text — same
+   visual as the old span, but clickable. Clicking expands /
+   collapses the full args + result panel below. */
+/* EP-0026-rev-fix: el body del thinking vive dentro del toggle.
+   Wrapper con borde-izquierdo + indent para que se vea visualmente
+   anidado bajo el toggle, no como una línea suelta debajo. */
+.chat__thinking-body {
+  border-left: 5px solid var(--accent);
+  margin-left: 0.09rem;
+  padding-left: 0.75rem;
+}
+.chat__thinking-body-inner {
+  color: var(--text-secondary);
+}
+
+/* EP-0024-UX: the result preview IS the expand toggle.
+   Rendered as a button (a11y + keyboard + hover affordance)
+   styled as an inline block of muted italic text — same
+   visual as the old span, but clickable. Clicking expands /
+   collapses the full args + result panel below. */
+.chat__timeline-result-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0.125rem 0 0;
+  padding-left: 0;
+  background: transparent;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  flex-shrink: 1;
+  cursor: pointer;
+  text-align: left;
+  transition: color 120ms;
+}
+.chat__timeline-result-preview:hover {
+  color: var(--text-primary);
+}
+.chat__timeline-result-preview:focus-visible {
+  outline: none;
+  color: var(--accent);
+}
+.chat__timeline-result-preview--open {
+  color: var(--accent);
+}
+/* EP-0026-UX: muted "running…" placeholder shown while the tool
+   is still pending. Matches the toggle visually but no hover
+   state and slightly muted color so the user knows there's
+   nothing to reveal yet. */
+.chat__timeline-result-preview--pending {
+  color: var(--text-muted);
+  font-style: italic;
+  cursor: default;
+  opacity: 0.7;
+}
+.chat__timeline-result-preview--pending:hover {
+  color: var(--text-muted);
+}
+
+/* EP-2026-08-19: tools sin output al final del stream (algunos tools
+ * como `symbols` o `write` no devuelven tool_result explícito). En
+ * lugar del loader animado, mostramos un indicador muted. */
+.chat__timeline-result-preview--empty {
+  color: var(--text-muted);
+  opacity: 0.5;
+  font-style: italic;
+  cursor: default;
+  pointer-events: none;
+}
+.chat__timeline-result-preview-glyph {
+  display: inline-flex;
+  font-size: 0.6875rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* ApprovalNode actions: a single line of Approve / Deny buttons
+   that lives at the same indent level as the tool result
+   toggle (level 1), reusing the result-preview chip styling so
+   the timeline visually groups the action surface with the
+   other level-1 rows. */
+.chat__timeline-content {
+  margin-top: 0.25rem;
+  /* EP-0024-UX: Collapsibles sit one level deeper than the
+     toggle (1rem) so the hierarchy reads as: icon+name (outer)
+     > toggle (1rem indent) > collapsibles (1.5rem indent).
+     Each child bumps another half step in. */
+  margin-left: 1.5rem;
+  font-family: var(--font-mono);
+  /* EP-0026-UX: unificamos font-size con .chat__timeline-header
+     y con el resto del chat (0.75rem). */
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: transparent;
+  border-left: none;
+  padding: 0;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+
+.chat__timeline-icon--tool {
+  background: transparent;
+  color: var(--status-ok, #4ade80);
+  font-size: 0.75rem;
+}
+
+/* When the tool has already returned a result, the icon flips to
+   a check and the colour shifts to accent so the operator can
+   scan a long timeline and see which tools are still in flight
+   at a glance — no background fill on either state. */
+.chat__timeline-icon--done {
+  background: transparent;
+  color: var(--accent);
+}
+
+/* ApprovalNode glyphs: ⚠ when awaiting, ✓ / ✗ when resolved. */
+.chat__timeline-icon--approval {
+  background: transparent;
+  font-size: 0.875rem;
+  line-height: 1;
+  color: #fbbf24;
+}
+.chat__timeline-icon--approve { color: var(--status-active, #4caf50); }
+.chat__timeline-icon--deny    { color: #f87171; }
+
+.chat__timeline-label--tool {
+  /* EP-0026-UX: color accent para matchear el resto del tool UI. */
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* First-line preview of the tool result lives higher in the
+   cascade as a button (.chat__timeline-result-preview). */
+
+.chat__timeline-detail {
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+/* Semantic colour modifiers on the detail line so the approval
+   row reads as warn / ok / bad without needing a separate
+   label. */
+.chat__timeline-detail--warn { color: #fbbf24; }
+.chat__timeline-detail--ok   { color: var(--status-active, #4caf50); }
+.chat__timeline-detail--bad  { color: #f87171; }
+
+.chat__timeline-spinner {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border: 1.5px solid var(--text-muted);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Loader de 3 dots (mismo patrón que el Thinking loader) — se muestra
+ * junto al nombre de la tool mientras el resultado está pendiente.
+ * Visualmente consistente con `Thinking` + dots. */
+.chat__timeline-tool-loading {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 0.12rem;
+  width: 0.7rem;
+  height: 1em;
+  padding-bottom: 0.1rem;
+}
+
+.chat__timeline-tool-loading-dot {
+  width: 0.15rem;
+  height: 0.15rem;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.3;
+  animation: thinking-bounce 1.2s ease-in-out infinite;
+}
+
+.chat__timeline-tool-loading-dot:nth-child(2) { animation-delay: 0.15s; }
+.chat__timeline-tool-loading-dot:nth-child(3) { animation-delay: 0.3s;  }
+
+/* EP-2026-08-19: wrapper toggle de la tool — el nombre de la tool es
+ * el toggle exterior. Click expande args + result (toggles internos).
+ * Estilo minimal — solo padding y cursor, sin border ni background
+ * (los hijos son los que llevan el left-border accent). */
+.chat__timeline-tool-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: transparent;
+  border: none;
+  padding: 0.125rem 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+/* Glyph identificador (per-tool: >_ shell, F read_file, etc).
+ * Estilo monospace + color accent, sin metallic (eso es solo en hover). */
+.chat__timeline-tool-wrapper-glyph {
+  display: inline-block;
+  min-width: 1.5ch;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.8125rem;
+  color: var(--accent);
+  text-align: center;
+}
+
+/* EP-2026-08-19: hover con efecto metallic-shine. El gradiente se
+ * aplica al texto del glyph + label — al pasar el mouse se "iluminan"
+ * con un sweep blanco que recorre el texto. */
+.chat__timeline-tool-wrapper:hover .chat__timeline-tool-wrapper-glyph,
+.chat__timeline-tool-wrapper:hover .chat__timeline-label--tool {
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0%,
+    var(--accent) 35%,
+    #ffffff 50%,
+    var(--accent) 65%,
+    var(--accent) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: chat-metallic-shine 2.5s linear infinite;
+}
+
+@keyframes chat-metallic-shine {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.chat__timeline-tool-children {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.375rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-top: 0.25rem;
+  margin-left: 0.09rem;
+  padding-left: 0.75rem;
+  border-left: 5px solid var(--accent);
+}
+
+/* EP-2026-08-19: los toggles internos (args, result, running) van en
+ * color muted (no accent) — el accent se reserva para el wrapper
+ * exterior y el left-border. */
+.chat__timeline-tool-children .chat__timeline-result-preview {
+  color: var(--text-muted);
+}
+
+.chat__timeline-tool-children .chat__timeline-result-preview--open {
+  color: var(--text-primary);
+}
+
+.chat__timeline-tool-children .chat__timeline-result-preview--pending {
+  color: var(--text-muted);
+}
+
+.chat__timeline-tool-children .chat__timeline-result-preview:hover {
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    var(--text-muted) 0%,
+    var(--text-muted) 35%,
+    var(--text-primary) 50%,
+    var(--text-muted) 65%,
+    var(--text-muted) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  animation: chat-metallic-shine 2.5s linear infinite;
+}
+
+/* EP-2026-08-19: las tool nodes necesitan flujo VERTICAL dentro del
+ * nodo (wrapper arriba, args/result abajo). El default del nodo es
+ * flex-row para alinear el glyph gutter con el label del thinking.
+ * Override solo aquí. */
+.chat__timeline-node--tool {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.chat__tools {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+/* EP-0026-UX: scope solo al chat — el title del tool usa el color
+   accent (no text-primary), matcheando el toggle y la sección. */
+.chat__tools .collapsible__title {
+  color: var(--accent);
+}
+/* ─── Approval Nodes ─── */
+
+.chat__approvals {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.chat__tool-args,
+.chat__tool-result {
+  margin-top: 0.25rem;
+}
+
+.chat__tool-section {
+  display: block;
+  /* EP-0026-UX: match font-size con .markdown / .chat__tool-block (0.75rem). */
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  margin-bottom: 0.125rem;
+}
+
+/* Pre-formatted block inside an expanded tool body. No
+   background / border — the collapsible wrapper provides the
+   visual grouping, the pre is just text. */
+.chat__tool-block {
+  margin: 0.25rem 0 0;
+  /* EP-0026-rev: removido padding-left — el body se alinea al inicio
+     del .chat__timeline-body junto con el toggle. */
+  padding-left: 0;
+  background: transparent;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 20rem;
+  overflow-y: auto;
+}
+
+/* EP-0024-UX: full tool result rendered outside the toggle so
+   the user can read it without expanding anything. No wrapper
+   background / border — same flat-text treatment as the args
+   block. Slightly smaller font so a long result doesn't blow
+   up the timeline height. */
+.chat__tool-result-inline {
+  margin: 0.25rem 0 0;
+  /* EP-0026-rev: removido padding-left — el body se alinea al inicio
+     del .chat__timeline-body junto con el toggle. */
+  padding-left: 0;
+  background: transparent;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+/* SmartResult — JSON variant. Same flat-text base as plain
+   inline but tinted accent so the user knows the renderer
+   detected a parseable JSON value. */
+.chat__tool-result-inline--json {
+  color: var(--text-secondary);
+}
+
+/* SmartResult — rich text variant (default fallback). The
+   tokeniser recognised URLs, paths, timestamps, log levels,
+   numbers, IPs and hex hashes and wraps each match in a
+   span with its own colour so plain tool output stays
+   scannable. Background stays transparent so the row
+   inherits the panel colour. */
+.chat__tool-result-inline--rich { color: var(--text-secondary); }
+.rich-token { font: inherit; color: inherit; }
+.rich-token--url { color: #93c5fd; text-decoration: underline; text-decoration-color: rgba(147,197,253,0.4); }
+.rich-token--path { color: #fcd34d; }
+.rich-token--ts-iso,
+.rich-token--ts-date,
+.rich-token--ts-time { color: #c4b5fd; }
+.rich-token--level { font-weight: 600; }
+.rich-token--number { color: #f0abfc; }
+.rich-token--hex { color: #6ee7a0; }
+.rich-token--ip { color: #fda4af; }
+
+/* Colour the level tokens by their semantic class so they
+   pop without the user needing to read the word. */
+.rich-token--level:is(.rich-token--level) { color: var(--text-secondary); }
+/* ERROR / FATAL / CRITICAL */
+.rich-token--level:where(:matches("ERROR", "FATAL", "CRITICAL"))
+{ color: #f87171; }
+/* Pseudo-class match for substrings is unreliable, so do an
+   explicit check on the rendered text via a wrapper. We use a
+   data attribute set by the tokeniser instead. */
+.rich-token[data-level="error"]    { color: #f87171; }
+.rich-token[data-level="warning"]  { color: #fbbf24; }
+.rich-token[data-level="info"]     { color: #93c5fd; }
+.rich-token[data-level="debug"]    { color: var(--text-muted); }
+.rich-token[data-level="trace"]    { color: var(--text-muted); }
+
+/* SmartResult — diff variant. Each line is wrapped in a span
+   with a kind class so we can colour additions / deletions /
+   context without breaking the pre-wrap layout. */
+.chat__tool-result-inline--diff {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  max-height: 18rem;
+  overflow-y: auto;
+  margin: 0.25rem 0 0;
+}
+.chat__diff-line { display: block; }
+.chat__diff-line--add { color: #6ee7a0; }
+.chat__diff-line--del { color: #f87171; }
+.chat__diff-line--meta { color: var(--text-muted); }
+.chat__diff-line--hunk { color: #93c5fd; }
+.chat__diff-line--ctx { color: var(--text-secondary); }
+
+/* EP-0024-UX: GitHub-style diff viewer with line numbers and
+   prism syntax highlighting. Two gutter columns (old / new
+   line numbers) and a content column. Backgrounds shade add /
+   del; context rows stay on the panel colour. */
+.chat__diff-viewer {
+  margin: 0.25rem 0 0;
+  background: transparent;
+  border: none;
+  border-radius: 0.375rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  max-height: 20rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.chat__diff-row {
+  display: grid;
+  grid-template-columns: 2.25rem 2.25rem 1fr;
+  align-items: baseline;
+  padding: 0 0.25rem;
+  white-space: pre;
+}
+.chat__diff-row--add { background: rgba(110, 231, 160, 0.08); }
+.chat__diff-row--del { background: rgba(248, 113, 113, 0.08); }
+.chat__diff-row--hunk { background: rgba(147, 197, 253, 0.06); }
+.chat__diff-row--meta { color: var(--text-muted); }
+.chat__diff-row--ctx { color: var(--text-secondary); }
+.chat__diff-num {
+  display: inline-block;
+  text-align: right;
+  padding: 0 0.375rem;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.chat__diff-num:empty { visibility: hidden; }
+.chat__diff-content {
+  padding: 0 0.5rem;
+  overflow-x: auto;
+}
+.chat__diff-raw {
+  color: inherit;
+}
+.chat__diff-line-content {
+  display: inline;
+}
+
+/* SmartResult — media variant. Image: small thumbnail with a
+   hint to open the file locally (browser security blocks
+   file:// img loads). Audio: native <audio controls>. */
+.chat__tool-result-inline--media {
+  font-family: inherit;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: normal;
+  max-height: none;
+}
+.chat__media-label {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+}
+.chat__media-path {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.chat__media-thumb {
+  margin-top: 0.375rem;
+  padding: 0.625rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.375rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  background: transparent;
+  max-width: 24rem;
+}
+
+.chat__media-thumb--missing {
+  font-style: italic;
+}
+.chat__media-thumb-glyph {
+  font-size: 1rem;
+}
+.chat__media-thumb-hint {
+  font-size: 0.6875rem;
+}
+
+/* EP-2026-08-19: actual media render. The legacy `.chat__media-thumb`
+ * class is also the default image render — it's the dashed-border placeholder
+ * when the source can't load, but with a real src it's a normal img. */
+.chat__tool-result-inline--media img,
+.chat__media-thumb img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 0.25rem;
+}
+
+.chat__media-video {
+  margin-top: 0.375rem;
+  width: 100%;
+  max-width: 24rem;
+  max-height: 16rem;
+  background: #000;
+  border-radius: 0.375rem;
+}
+
+.chat__media-audio {
+  margin-top: 0.375rem;
+  width: 100%;
+  max-width: 24rem;
+}
+
+.chat__media-download {
+  margin-left: 0.5rem;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 0.6875rem;
+}
+
+.chat__media-download:hover {
+  background: var(--bg-elevated);
+}

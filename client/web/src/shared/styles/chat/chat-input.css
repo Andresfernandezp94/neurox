@@ -1,0 +1,145 @@
+.chat__footer {
+  /* EP-2026-08-15: ya no es sticky. Antes bottom: 0 hacía que el
+     input quedara siempre pegado al borde inferior de la pantalla,
+     lo cual no permitía que el chat_layout "subiera" con el chat al
+     scrollear. Ahora fluye dentro de .chat-layout y se va de la
+     vista cuando el usuario sube para leer mensajes viejos. */
+  position: static;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  /* EP-2026-08-15: padding vertical reducido para compactar la barra
+   * del input contra el borde inferior.
+   * EP-2026-08-15 (aire): padding vertical 0.75rem para dar respiro
+   * al footer y al bloque de herramientas/contexto/scope. Padding
+   * horizontal en 0.25rem (compacto) — el textarea ya tiene su
+   * propio padding horizontal interno 0.75rem. */
+  padding: 0.75rem 0.5rem;
+  padding-top: 0;
+  padding-bottom: 1rem;
+  background: transparent;
+  border: none;
+  /* EP-0026-UX: línea 2px arriba del footer para delimitar inicio. */
+  border-top: 2px solid var(--accent);
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+}
+
+/* EP: wrapper interno que lleva las 4 filas (tools, context,
+ * workspace, footer-input). Hereda el flex layout + gap del
+ * .chat__footer para mantener el aire entre filas y que los
+ * border-bottom de cada una no queden adyacentes. */
+.chat__footer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+/* EP-2026-08-15: si el chat está fullscreen, ocupa el área visible
+   real (descuenta teclado virtual en mobile). Usamos --app-h
+   (sincronizado por el hook useVisualViewportHeight) con fallback
+   100dvh. Sin esto, en mobile con teclado el shell se queda "atrapado"
+   en el layout viewport en lugar de subir con el visual viewport. */
+.chat-layout:fullscreen,
+.chat-layout:-webkit-full-screen {
+  width: 100vw;
+  height: var(--app-h, 100dvh);
+  background: var(--bg);
+}
+
+.chat__footer-input {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.chat__textarea {
+  flex: 1;
+  resize: none;
+  /* height is set imperatively via scrollHeight in ChatPanel so the
+     box stays at one line and grows only when the user enters
+     newlines (Enter / Shift+Enter). max-height caps the growth.
+     EP-0026-UX: min-height igual al lado del botón send (cuadrado
+     2.1875rem de .chat__action:has(> svg:only-child)) para que la
+     base del textarea quede alineada con la base del botón cuando
+     el textarea está en una sola línea. */
+  min-height: 2.1875rem;
+  max-height: 10rem;
+  overflow-y: auto;
+  line-height: 1.5;
+  /* EP-2026-08-15 (aire): padding horizontal 0.75rem para que el texto
+   * no quede pegado al borde del input.
+   * EP-2026-08-15 (centro v): padding vertical 0.4375rem arriba y
+   * abajo (simetrico) para centrar el texto verticalmente dentro
+   * del min-height 2.1875rem. Calculo: (2.1875rem - 0.8125rem*1.5)/2
+   * = 0.46875rem; ajustado a 0.4375rem para compensar el padding
+   * interno residual del user-agent del <textarea>. */
+  padding: 0.4375rem 0.75rem;
+  margin: 0;
+  /* EP-2026-08-15 (fondo): en lugar de borde, fondo surface-translucent
+   * para dar peso visual al textarea sin linea dura. Quitamos el
+   * border 1px para que el delimitador sea solo el contraste de fondo. */
+  background: var(--surface-translucent);
+  border: none;
+  /* EP-2026-08-15 (estilo): border-radius 20 (interpretado como
+   * 20px por el browser). Redondeado suave — no es pildota perfecta
+   * pero tampoco cuadrado. Se mantiene consistente al crecer el
+   * alto del textarea porque el valor es absoluto, no porcentual. */
+  border-radius: 20px;
+  color: var(--text-primary);
+  font-family: var(--font-chat);
+  font-size: 0.8125rem;
+}
+
+.chat__textarea::placeholder {
+  color: var(--text-muted);
+  font-family: var(--font-chat);
+  font-size: 0.8125rem;
+}
+
+.chat__textarea:focus {
+  outline: none;
+  /* EP-2026-08-15: ya no hay border-color porque el delimitador
+   * ahora es el fondo. Sin outline ni border, el focus visual viene
+   * solo del caret nativo del browser. Si querés un ring de focus,
+   * conviene usar box-shadow en lugar de border. */
+}
+
+.chat__footer-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 0.375rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Metrics */
+
+.chat__metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-family: var(--font-chat);
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.chat__metrics--totals {
+  font-variant-numeric: tabular-nums;
+}
+
+.chat__metrics-sep {
+  opacity: 0.5;
+}
+
+/* Chat font */
+
+.chat__textarea,
+.chat__bar,
+.chat__bar-label,
+.chat__empty {
+  font-family: var(--font-chat);
+}

@@ -1,0 +1,32 @@
+[package]
+name = "agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Neurox agent — the unified identity-driven LLM loop (memory, skills, tools, mode) (identity, memory, skills, tools, mode)"
+
+[[bin]]
+name = "agent"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+regex = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+dirs = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-util = { workspace = true }
+uuid = { workspace = true }
+# EP-0010: removed `neurox = { path = "../../core" }` — declared but
+# never imported. Verify with `rg "neurox::" agents/agent/src/` returns 0.
+tools-engine = { path = "../../tools-engine" }
+# EP-0004 wave 5b: reusable agent code (identity, llm, memory, mode,
+# skills, tools_filter).
+agent-lib = { path = "../../crates/agent-lib" }

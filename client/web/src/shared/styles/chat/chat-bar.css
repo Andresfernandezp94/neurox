@@ -1,0 +1,216 @@
+.chat__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-family: var(--font-chat);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.chat__bar--tools {
+  background: transparent;
+  border: none;
+  /* EP-2026-08-15: separador sutil abajo. Hereda padding del .chat__bar
+   * (0.375rem 0.5rem); el gap 0.5rem del .chat__footer-body ya aporta
+   * el aire entre filas, no hace falta padding-bottom extra. */
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* EP-0024-UX: on narrow viewports (mobile) the AgentSelector
+   and ModelSelector wrappers need to share the row 50/50
+   (otherwise the AgentSelector's intrinsic width hogs the bar
+   and the ModelSelector's trigger gets clipped to 0). We use
+   width: 0 + flex: 1 1 0 + min-width: 0 on the wrappers so
+   each one gets exactly its share of the row.
+
+   The wrappers must stay overflow: visible — both pickers
+   position their open dropdown via position: absolute
+   relative to the wrapper, and `overflow: hidden` on the
+   wrapper would clip the dropdown off-screen. The trigger
+   itself handles the clipping (text-overflow + overflow on the
+   trigger's label area below). */
+@media (max-width: 500px) {
+  /* EP-0026-UX: en mobile (≤500px) los 3 elementos del toolbar
+     (modelo + agente + history) se acomodan en una sola línea.
+     Comparten el ancho con flex: 1 1 0 para evitar clipping. */
+  .chat__bar--tools {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+  }
+  .chat__bar--tools > .model-selector {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+  }
+  /* EP-0026-UX: el block .chat__bar-actions ya viene empujado con
+     margin-left: auto; en mobile NO queremos que se estire a llenar
+     la fila — debe mantener su tamaño compacto (íconos juntos). */
+  .chat__bar--tools > .chat__bar-actions {
+    flex: 0 0 auto;
+  }
+  .chat__bar--tools > .model-selector > .model-selector__trigger {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    box-sizing: border-box;
+    /* override the default 14rem cap so the trigger stretches with the
+       wrapper on narrow viewports. */
+    max-width: none;
+    /* EP-0026-UX: contenido (icono + label + caret) pegado a la
+       izquierda dentro del trigger, no centrado. */
+    justify-content: flex-start;
+  }
+  .chat__bar--tools > .model-selector > .model-selector__trigger {
+    /* ModelSelector sí tiene label; necesita ocupar todo el wrapper
+       en mobile (flex: 1 1 0 se aplica en .chat__bar--tools > .model-selector). */
+    width: 100%;
+  }
+  /* EP-0025: el label interno del trigger se clipaba a 0 width en
+     algunos layouts mobile. Forzamos flex: 1 1 0 + ellipsis para
+     que el nombre del modelo activo sea visible. */
+  .model-selector__trigger-label {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+  }
+}
+
+/* EP-0026-UX: bloque de acciones a la derecha de la tools bar
+   (AgentSelector + history + voice). margin-left: auto lo empuja
+   al extremo derecho del flex row; el ModelSelector (que está
+   fuera de este wrapper) se queda a la izquierda. */
+.chat__bar--tools > .chat__bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+  /* EP-2026-08-15: contenedor "card" translucido con sombra hacia afuera
+   * en negro. Misma estructura (halo + offset) pero sin color accent.
+   * Queda como una "tarjeta" elevada sobre el footer.
+   *
+   * EP-2026-08-15 (altura): padding interno en 0. Los botones ya
+   * traen su propio padding (0.25rem en .chat__bar-actions__btn);
+   * sumar padding del wrapper + padding del boton inflaba la fila
+   * y la dejaba ~14px mas alta que las demas. */
+  padding: 0;
+  background: var(--bg);
+  backdrop-filter: var(--chrome-blur, blur(20px) saturate(140%));
+  -webkit-backdrop-filter: var(--chrome-blur, blur(20px) saturate(140%));
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  border-radius: 0.625rem;
+  box-shadow:
+    0 0 12px rgba(0, 0, 0, 0.28),
+    0 2px 14px rgba(0, 0, 0, 0.35);
+}
+
+/* EP-0026-UX: en mobile (≤1024px) el footer debe ir edge-to-edge
+   (sin padding lateral ni margin-left del textarea). El .app-main
+   ya ocupa 100vw en este breakpoint.
+   También pedimos un piso de altura mayor para que el textarea
+   tenga espacio cómodo al tacto en pantallas chicas (sin que el
+   footer se vea "apretado" contra el borde inferior). */
+@media (max-width: 1024px) {
+  .chat__footer {
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+    min-height: 4.5rem;
+  }
+  .chat__footer-input {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+  .chat__textarea {
+    margin-left: 0;
+  }
+}
+
+/* EP-0026-UX: botón genérico del bloque actions (paso 1: el botón
+   sidebar; si en el futuro se estandariza más, este estilo cubre
+   todo el bloque). Mismo visual que .chat__history-toggle pero con
+   scope al wrapper nuevo. */
+.chat__bar-actions__btn {
+  /* EP-2026-08-15: base muted (gris), hover blanco, active accent. */
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+}
+.chat__bar-actions__btn:hover {
+  color: #fff;
+}
+.chat__bar-actions__btn svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+.chat__bar-actions__btn--active,
+.chat__bar-actions__btn--active:hover {
+  color: var(--accent);
+}
+
+/* EP-2026-08-15: el override del AgentSelector trigger se removió.
+ * El trigger ahora tiene unicamente .chat__bar-actions__btn (no
+ * .agent-selector__trigger), asi que hereda los colores del bloque. */
+
+.provider-selector {
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 1;
+}
+
+.provider-selector select {
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 1;
+}
+
+.chat__bar-model {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--accent);
+  padding: 0.125rem 0.375rem;
+  background: var(--accent-soft, rgba(99, 102, 241, 0.08));
+  border-radius: 0.25rem;
+}
+
+.chat__bar-agent {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.chat__bar--context {
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit; /* sans-serif, matches repo body */
+  font-size: 0.75rem;
+  border: none;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+
+/* Workspace / SCOPE bar — same transparent treatment as --context.
+   Without this override it falls back to .chat__bar's default
+   background + border, which looks like a wrapped box. */
+.chat__bar--workspace {
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.75rem;
+  border: none;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}

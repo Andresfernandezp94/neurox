@@ -1,0 +1,17 @@
+[Unit]
+Description=neurox web UI static server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/neurox-web --dir %h/.local/share/neurox/web/dist --port 8787
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info,tower_http=info
+EnvironmentFile=%h/.config/neurox/env
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

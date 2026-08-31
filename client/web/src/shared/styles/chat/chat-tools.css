@@ -1,0 +1,318 @@
+/* ============================================================
+ * Tool blocks (args + result)
+ * ============================================================ */
+
+.chat__row-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.chat__row-tool {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.chat__row-tool-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  align-self: flex-start;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 400;
+  padding: 0;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 120ms steps(2, end);
+}
+
+.chat__row-tool-toggle:hover {
+  color: var(--text-primary);
+}
+
+.chat__row-tool-result-badge {
+  opacity: 0.6;
+  font-weight: 400;
+  font-size: 0.7rem;
+}
+
+.chat__row-tool-body {
+  border-left: 5px solid var(--accent);
+  margin-left: 0.09rem;
+  padding-left: 0.75rem;
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.chat__row-tool-body pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat__row-tool-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.chat__row-tool-section-label {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.chat__row-tool-expand {
+  align-self: flex-start;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: color 120ms steps(2, end);
+}
+
+.chat__row-tool-expand:hover {
+  color: var(--accent);
+}
+
+/* ============================================================
+ * ListDir view — resultado de tool=list_dir renderizado como tabla
+ * ============================================================ */
+
+.chat__row-listdir {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.chat__row-listdir-path {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.chat__row-listdir-table {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  overflow: hidden;
+}
+
+.chat__row-listdir-header,
+.chat__row-listdir-row {
+  display: grid;
+  grid-template-columns: 1fr 6rem 4rem;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background: var(--bg);
+  align-items: center;
+}
+
+.chat__row-listdir-header {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+}
+
+.chat__row-listdir-name {
+  font-weight: 500;
+  color: var(--text-primary);
+  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat__row-listdir-size {
+  color: var(--text-muted);
+  text-align: right;
+  font-size: 0.7rem;
+}
+
+.chat__row-listdir-type {
+  color: var(--accent);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chat__row-listdir-more {
+  padding: 0.25rem 0.5rem;
+  background: var(--bg);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-style: italic;
+}
+
+/* ============================================================
+ * Approval blocks
+ * ============================================================ */
+
+.chat__row-approvals {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.chat__row-approval {
+  border-left: 2px solid var(--status-warn);
+  padding: 0.375rem 0 0.375rem 0.75rem;
+  margin-left: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  background: var(--status-warn-bg);
+}
+
+.chat__row-approval-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chat__row-approval-icon {
+  color: var(--status-warn);
+}
+
+.chat__row-approval-tool {
+  font-weight: 700;
+}
+
+.chat__row-approval-decision {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.1rem 0.375rem;
+  font-weight: 600;
+}
+
+.chat__row-approval-decision--approve {
+  color: var(--status-active);
+  border: 1px solid var(--status-active);
+}
+
+.chat__row-approval-decision--deny {
+  color: var(--status-danger);
+  border: 1px solid var(--status-danger);
+}
+
+.chat__row-approval-reason {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.chat__row-approval-pending {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.1rem 0.375rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  border: 1px solid var(--text-muted);
+}
+
+.chat__row-approval-actions {
+  display: flex;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+
+.chat__row-approval-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.25rem 0.625rem;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  transition: background-color 120ms steps(2, end),
+              color 120ms steps(2, end),
+              border-color 120ms steps(2, end);
+}
+
+.chat__row-approval-btn--allow:hover {
+  color: var(--status-active);
+  border-color: var(--status-active);
+}
+
+.chat__row-approval-btn--allow-all:hover {
+  color: var(--status-active);
+  border-color: var(--status-active);
+  background: var(--status-active-bg);
+}
+
+.chat__row-approval-btn--deny:hover {
+  color: var(--status-danger);
+  border-color: var(--status-danger);
+  background: var(--status-danger-bg);
+}
+
+.chat__timeline-approval-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0.125rem 0 0;
+}
+.chat__timeline-approval-btn {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0.125rem 0.25rem;
+  font-size: 0.6875rem;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color 120ms;
+}
+.chat__timeline-approval-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+.chat__timeline-approval-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.chat__timeline-approval-btn--approve:hover:not(:disabled) {
+  color: var(--status-active, #4caf50);
+}
+.chat__timeline-approval-btn--deny:hover:not(:disabled) {
+  color: #f87171;
+}

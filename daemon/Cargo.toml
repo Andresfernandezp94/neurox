@@ -1,0 +1,73 @@
+[workspace]
+resolver = "2"
+members = [
+    "core",
+    "agents/agent",
+    "agents/_template",
+    "crates/agent-lib",
+    "tools-engine",
+]
+
+[workspace.package]
+version = "0.4.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+authors = ["Andres Fernandez <andresfernandezp94@gmail.com>"]
+
+[workspace.dependencies]
+tokio = { version = "1.40", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+regex = "1"
+axum = { version = "0.7", features = ["ws", "macros"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9" # EP-0014 C-001: legacy — kept for migration. Migrate to serde_yml.
+serde_yml = "0.0.12"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+async-trait = "0.1"
+futures = "0.3"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+# EP-0003 Tier 2/3: Prometheus metrics. Lightweight, no async runtime,
+# text exposition built-in via `TextEncoder`.
+prometheus = { version = "0.13", default-features = false }
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "sqlite", "macros", "chrono", "uuid", "json"] }
+dirs = "5.0"
+# EP-2026-08-19: percent-encoding for /v1/files/<path> route (axum
+# Path<T> doesn't auto-decode the captured segment).
+percent-encoding = "2"
+parking_lot = "0.12"
+rayon = "1.10"
+libc = "0.2"
+# EP-system-monitor: process / CPU / memory / disk / network telemetry.
+sysinfo = { version = "0.32", default-features = false, features = ["system", "disk", "network"] }
+# EP-0007: auth
+argon2 = "0.5"
+jsonwebtoken = "9"
+zeroize = { version = "1.8", features = ["zeroize_derive"] }
+base64 = "0.22"
+rand = "0.8"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+# EP-0012 P-007: opt-level 3 (speed, not size) — daemon binary <50MB is
+# acceptable. Improves hot-path performance by ~10%.
+opt-level = 3
+lto = "fat"
+strip = true
+
+# EP-0012 P-007: release-debug profile for production profiling.
+[profile.release-debug]
+inherits = "release"
+debug = true
+
+# Web client lives in clients/web/ — see README for build instructions
+# Not part of the Rust workspace (uses Node.js + Vite)

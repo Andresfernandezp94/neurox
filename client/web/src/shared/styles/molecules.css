@@ -1,0 +1,205 @@
+/* ============================================================
+ * molecules.css — Molecule compound styles (EP-0016 F5.3)
+ * ============================================================
+ * CSS consumed by molecular React components (Panel, Card,
+ * SearchBar, StatPair, etc.). These styles wrap or augment
+ * atomic utility classes.
+ *
+ * Consumed by:
+ * - <Panel>   — .panel, .panel__header, .panel__title, .panel__body
+ * - <Card>    — .card__title, .card__body, .card__actions
+ * - <SearchBar> — .search-bar, .search-bar__icon, etc.
+ * - <StatPair> — .stat-pair, .stat-pair__label, .stat-pair__value
+ * - <EmptyState> — .empty__icon, .empty__title, .empty__hint
+ * ============================================================ */
+
+/* Panel (consumed by <Panel>) */
+.panel { display: flex; flex-direction: column; gap: 0.75rem; padding: 1.25rem; }
+.panel__header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.panel__title { font-weight: 600; }
+.panel__actions { display: flex; align-items: center; gap: 0.5rem; }
+.panel__body { display: flex; flex-direction: column; gap: 0.75rem; }
+
+/* Card compound parts (consumed by <Card>) */
+.card__title { font-size: 0.875rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem; }
+.card__body { padding: 1rem; border-radius: 0.5rem; background: var(--surface-deep); }
+.card__actions { display: flex; align-items: center; gap: 0.5rem; }
+
+/* SearchBar (consumed by <SearchBar>) */
+.search-bar { display: flex; align-items: center; gap: 0.5rem; padding: 0.625rem 0.75rem; border-bottom: 1px solid var(--border); color: var(--text-muted); }
+.search-bar__icon { display: inline-flex; align-items: center; }
+.search-bar__icon svg { width: 0.8125rem; height: 0.8125rem; flex-shrink: 0; }
+.search-bar__input { flex: 1; background: transparent; border: none; outline: none; color: var(--text-primary); font-size: 0.75rem; font-family: inherit; padding: 0; min-width: 0; }
+.search-bar__input::placeholder { color: var(--text-muted); opacity: 0.6; }
+.search-bar__clear { background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 0; font-size: 0.875rem; line-height: 1; }
+.search-bar__clear:hover { color: var(--text-primary); }
+
+/* StatPair (consumed by <StatPair>) */
+.stat-pair { display: inline-flex; gap: 0.375rem; align-items: baseline; font-size: 0.6875rem; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.stat-pair__label { color: var(--text-muted); }
+.stat-pair__value { color: var(--text-primary); }
+.stat-pair--total .stat-pair__value { color: var(--text-muted); }
+.stat-pair--active .stat-pair__value { color: var(--status-active, #10b981); }
+.stat-pair--closed .stat-pair__value { color: var(--text-muted); }
+
+/* EmptyState (consumed by <EmptyState>) */
+.empty__icon { font-size: 2rem; opacity: 0.6; margin-bottom: 0.25rem; }
+.empty__title { font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.25rem; font-weight: 500; }
+.empty__hint { font-size: 0.75rem; color: var(--text-muted); }
+
+/* List reset utility (used by Panels with <ul>) */
+.list-reset { list-style: none; padding: 0; margin: 0; }
+
+/* Card body compound (consumed by <Card.Body>) */
+.card__body { margin-top: 0.75rem; padding: 1rem; border-radius: 0.5rem; background: var(--surface-deep); }
+
+/* ============================================================
+ * CollapsibleSection (consumed by <CollapsibleSection>)
+ * ============================================================
+ * <details>/<summary>-based collapsible region. Uses native
+ * <details> so the open state survives navigation without React
+ * state and stays accessible by default.
+ * ============================================================ */
+.collapsible { padding: 0.25rem 0; border: none; background: transparent; }
+.collapsible:first-child { padding-top: 0; }
+.collapsible__summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  padding: 0.25rem 0;
+}
+.collapsible__summary::-webkit-details-marker { display: none; }
+.collapsible__summary:hover .collapsible__title { color: var(--accent); }
+.collapsible__chevron {
+  display: inline-flex;
+  width: 1rem;
+  height: 1rem;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.625rem;
+  transition: transform 120ms ease-out;
+}
+.collapsible[open] > .collapsible__summary > .collapsible__chevron {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+.collapsible__title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  transition: color 120ms;
+}
+.collapsible__badge {
+  display: inline-flex;
+  align-items: center;
+  height: 1.125rem;
+  padding: 0 0.4375rem;
+  border-radius: 0.5625rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.collapsible__badge--accent {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+.collapsible__hint {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.collapsible__body {
+  padding: 0.75rem 0 0 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+/* ============================================================
+ * PathChipsEditor (consumed by <PathChipsEditor>)
+ * ============================================================
+ * One chip per path entry. Inline input below the chip list to
+ * add new ones; chip × button removes an entry. Resolved path
+ * (after ${workspace} expansion) is rendered inline when
+ * workspaceRoot is provided.
+ * ============================================================ */
+.path-chips { display: flex; flex-direction: column; gap: 0.5rem; }
+.path-chips__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+.path-chips__empty {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.path-chips__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.1875rem 0.375rem 0.1875rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4375rem;
+  background: var(--surface);
+  font-size: 0.75rem;
+  line-height: 1.25;
+}
+.path-chips__item:hover { border-color: var(--border-hover); }
+.path-chips__source {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+}
+.path-chips__arrow {
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+}
+.path-chips__resolved {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  padding-left: 0.25rem;
+  border-left: 1px solid var(--border);
+  margin-left: 0.125rem;
+}
+.path-chips__remove {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.875rem;
+  line-height: 1;
+  padding: 0 0.125rem;
+  margin-left: 0.125rem;
+  border-radius: 0.25rem;
+}
+.path-chips__remove:hover {
+  color: var(--status-warn, #ff9800);
+  background: rgba(255, 152, 0, 0.1);
+}
+.path-chips__input-row {
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
+}
+.path-chips__input {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.path-chips__add {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  padding: 0.375rem 0.75rem;
+}

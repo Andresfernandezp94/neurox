@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Hexagon frame - represents structure/orchestration -->
+  <path d="M256 32L456 144v224L256 480 56 368V144L256 32z" stroke="#efb05e" stroke-width="24" stroke-linejoin="round" fill="none"/>
+  <!-- Neural node center - represents AI agent -->
+  <circle cx="256" cy="256" r="48" fill="#efb05e"/>
+  <!-- Connection lines - represents tool execution/delegation -->
+  <line x1="256" y1="208" x2="256" y2="108" stroke="#efb05e" stroke-width="16" stroke-linecap="round"/>
+  <line x1="297" y1="280" x2="380" y2="330" stroke="#efb05e" stroke-width="16" stroke-linecap="round"/>
+  <line x1="215" y1="280" x2="132" y2="330" stroke="#efb05e" stroke-width="16" stroke-linecap="round"/>
+  <!-- Outer nodes - represents connected tools/workspaces -->
+  <circle cx="256" cy="96" r="20" fill="#efb05e"/>
+  <circle cx="392" cy="344" r="20" fill="#efb05e"/>
+  <circle cx="120" cy="344" r="20" fill="#efb05e"/>
+</svg>

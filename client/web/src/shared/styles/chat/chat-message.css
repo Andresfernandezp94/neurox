@@ -1,0 +1,80 @@
+/* ─── Message Rows (agent-studio inspired) ─── */
+
+.chat__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.375rem 0.25rem;
+  width: 100%;
+}
+
+.chat__row--user {
+  align-items: flex-end;
+}
+
+.chat__row--assistant {
+}
+
+.chat__row-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+.chat__row-role {
+  font-weight: 600;
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.chat__row-copy {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.chat__row-copy:hover {
+  color: var(--text-primary);
+}
+
+.chat__row-content {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 300;
+  line-height: 1.55;
+  word-wrap: break-word;
+  color: var(--text-primary);
+}
+
+.chat__row-content-simple {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 300;
+  line-height: 1.55;
+  word-wrap: break-word;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.chat__user-text {
+  white-space: pre-wrap;
+}
+.chat__row-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.6875rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  padding-top: 0.375rem;
+  border-top: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}

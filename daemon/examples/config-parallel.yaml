@@ -1,0 +1,38 @@
+# neurox agent registry (multi-session = paralelismo real)
+#
+# Cada chat session tiene su PROPIO subprocess `agent` cuando se crea
+# con agent_id que matchea uno de session_agents. N sesiones concurrentes
+# = N subprocesses = N LLM calls en paralelo.
+#
+# El sessionId distingue cada subprocess (cada sesion vive en su
+# propia memoria + prompt + tools).
+#
+# Las sesiones se matan al cancelar/borrar/timeout idle.
+
+bind_addr: "127.0.0.1:7878"
+log_level: "info"
+
+session_agents:
+  agents:
+    admin:
+      # Cada session con agent_id=admin arranca su propio `agent --id admin`
+      command: "/home/andres_fernandez/projects/neurox/daemon/target/debug/agent"
+      args:
+        - "--id"
+        - "admin"
+        - "--identity-dir"
+        - "/home/andres_fernandez/.local/share/neurox/identity/"
+      env: {}
+      idle_timeout_secs: 1800
+      max_sessions: null
+
+    user:
+      command: "/home/andres_fernandez/projects/neurox/daemon/target/debug/agent"
+      args:
+        - "--id"
+        - "user"
+        - "--identity-dir"
+        - "/home/andres_fernandez/.local/share/neurox-legacy/"
+      env: {}
+      idle_timeout_secs: 1800
+      max_sessions: null

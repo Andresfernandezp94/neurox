@@ -1,0 +1,59 @@
+# neurox agent registry — example with auth + TLS
+#
+# Generate a self-signed cert for testing:
+#   openssl req -x509 -newkey rsa:4096 -nodes \
+#     -keyout /tmp/neurox-key.pem \
+#     -out /tmp/neurox-cert.pem \
+#     -days 365 \
+#     -subj "/CN=localhost"
+#
+# Then start the daemon:
+#   neurox serve
+#
+# Connect clients with HTTPS:
+#   curl --cacert /tmp/neurox-cert.pem https://127.0.0.1:7878/v1/agents
+#   neurox-client-tui wss://127.0.0.1:7878/v1/events default
+#
+# All /v1/* endpoints require the Bearer token. /health is public.
+
+bind_addr: "127.0.0.1:7878"
+log_level: "info"
+
+api_token: "change-me-to-something-random-and-secret"
+
+tls:
+  cert: "/tmp/neurox-cert.pem"
+  key: "/tmp/neurox-key.pem"
+
+agents:
+  persistent:
+    - id: default
+      kind: subprocess
+      command: "agent"
+      args: []
+      env:
+        MINIMAX_API_KEY: "${env:MINIMAX_API_KEY}"
+      protocol: json-rpc
+      transport: stdio
+      restart_policy: on-failure
+      requires_approval: []
+      approval_timeout_secs: 60
+
+  ephemeral_templates:
+    - id: researcher
+      kind: subprocess
+      command: "neurox-agent-researcher"
+      args: []
+      env: {}
+      protocol: json-rpc
+      transport: stdio
+      requires_approval: []
+
+    - id: summarizer
+      kind: subprocess
+      command: "neurox-agent-summarizer"
+      args: []
+      env: {}
+      protocol: json-rpc
+      transport: stdio
+      requires_approval: []

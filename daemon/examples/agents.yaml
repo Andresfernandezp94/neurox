@@ -1,0 +1,54 @@
+# neurox agent registry
+#
+# Add `requires_approval` to a persistent agent to gate its dangerous
+# tools behind user prompts (delivered via /v1/approvals or WS command).
+#
+# Environment variables for the default:
+#   MINIMAX_API_KEY  — required (set in your shell or systemd unit)
+#   MINIMAX_BASE_URL — default https://api.minimaxi.chat/v1
+#   MINIMAX_MODEL    — default MiniMax-M3
+#
+# Config substitution:
+#   ${env:VAR}   — replaced with std::env::var("VAR") at load time
+#   ${VAR}       — same, no prefix
+#   $VAR         — bare reference (no braces)
+# Unknown vars expand to empty string + warning.
+
+bind_addr: "127.0.0.1:7878"
+log_level: "info"
+
+agents:
+  persistent:
+    - id: default
+      kind: subprocess
+      command: "agent"
+      args: []
+      env:
+        # Reads $MINIMAX_API_KEY from the process env at startup.
+        # Make sure it's exported in your shell, systemd unit, or .env file.
+        MINIMAX_API_KEY: "${env:MINIMAX_API_KEY}"
+      protocol: json-rpc
+      transport: stdio
+      restart_policy: on-failure
+      # DefaultAgent has no dangerous tools yet — leave empty
+      requires_approval: []
+      approval_timeout_secs: 60
+
+  ephemeral_templates:
+    - id: researcher
+      kind: subprocess
+      command: "neurox-agent-researcher"
+      args: []
+      env: {}
+      protocol: json-rpc
+      transport: stdio
+      requires_approval: []
+
+    - id: summarizer
+      kind: subprocess
+      command: "neurox-agent-summarizer"
+      args: []
+      env: {}
+      protocol: json-rpc
+      transport: stdio
+      requires_approval: []

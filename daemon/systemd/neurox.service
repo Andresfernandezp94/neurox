@@ -1,0 +1,17 @@
+[Unit]
+Description=neurox headless AI agent orchestrator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/neurox serve
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+EnvironmentFile=%h/.config/neurox/env
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

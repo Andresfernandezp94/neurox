@@ -1,0 +1,203 @@
+/* ============================================================
+ * sandbox-panel.css — Layout for the sandbox configuration tab.
+ * EP-0024-UX. Reduces text density and groups settings into
+ * collapsibles. Lives next to molecules.css but is panel-specific.
+ * ============================================================ */
+
+/* Top header */
+.sandbox-panel__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.sandbox-panel__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+.sandbox-panel__subtitle {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0.125rem 0 0;
+}
+
+/* The card that holds the collapsibles. We strip most of Card's
+ * default padding so the collapsibles can take their own room. */
+.sandbox-panel__card { padding: 0.5rem 1rem 1rem; }
+
+/* General settings — enabled switch + max_recursion_depth slider
+ * side-by-side so the operator sees both at a glance. */
+.sandbox-panel__general {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  padding: 0.75rem 0;
+}
+@media (max-width: 720px) {
+  .sandbox-panel__general { grid-template-columns: 1fr; }
+}
+.sandbox-panel__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.sandbox-panel__field-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.sandbox-panel__field-hint {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+/* Switch toggle (custom, large, accessible). */
+.sandbox-panel__switch {
+  position: relative;
+  display: inline-block;
+  width: 2.5rem;
+  height: 1.375rem;
+  flex-shrink: 0;
+}
+.sandbox-panel__switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+.sandbox-panel__switch-track {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--surface-deep);
+  border: 1px solid var(--border);
+  border-radius: 0.6875rem;
+  transition: background 120ms, border-color 120ms;
+}
+.sandbox-panel__switch-track::before {
+  content: "";
+  position: absolute;
+  height: 0.9375rem;
+  width: 0.9375rem;
+  left: 0.125rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: transform 140ms, background 140ms;
+}
+.sandbox-panel__switch input:checked + .sandbox-panel__switch-track {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+.sandbox-panel__switch input:checked + .sandbox-panel__switch-track::before {
+  transform: translate(1.125rem, -50%);
+  background: var(--accent);
+}
+
+/* Number stepper for max_recursion_depth. */
+.sandbox-panel__stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 0.4375rem;
+  background: var(--surface-deep);
+  overflow: hidden;
+  height: 1.875rem;
+}
+.sandbox-panel__stepper-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.875rem;
+  width: 1.625rem;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sandbox-panel__stepper-btn:hover {
+  background: var(--surface);
+  color: var(--text-primary);
+}
+.sandbox-panel__stepper-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  width: 3rem;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.sandbox-panel__stepper-input::-webkit-outer-spin-button,
+.sandbox-panel__stepper-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Footer with Apply button */
+.sandbox-panel__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 0 0;
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--border);
+}
+.sandbox-panel__dirty {
+  font-size: 0.6875rem;
+  color: var(--status-warn, #ff9800);
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.sandbox-panel__saved {
+  font-size: 0.6875rem;
+  color: var(--status-active, #4caf50);
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* Effective scope card — quieter visual treatment than the form. */
+.sandbox-panel__effective {
+  padding: 0.75rem 1rem;
+  font-size: 0.75rem;
+  background: var(--bg-tertiary);
+}
+.sandbox-panel__effective .collapsible__title {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.sandbox-panel__kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.375rem 1rem;
+  align-items: baseline;
+}
+.sandbox-panel__kv dt {
+  color: var(--text-muted);
+  font-weight: 500;
+  text-transform: lowercase;
+  font-size: 0.6875rem;
+}
+.sandbox-panel__kv dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  word-break: break-all;
+}

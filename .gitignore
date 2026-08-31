@@ -1,0 +1,71 @@
+# ─────────────────────────────────────────────────────────────────────────
+# neurox — root .gitignore (monorepo: daemon + client/web + agents)
+# Excludes heavy build artifacts and anything that could carry secrets.
+# ─────────────────────────────────────────────────────────────────────────
+
+# ── Rust build artifacts (daemon/target ~53GB, client/web/target ~1.2GB) ──
+# Match `target/` at any depth (both the daemon and the web have one).
+target/
+**/target/
+*.rlib
+*.rmeta
+
+# ── Node / frontend ───────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.vite/
+*.tsbuildinfo
+coverage/
+.nyc_output/
+
+# ── Secrets & credentials (NEVER commit) ──────────────────────────────────
+# Runtime env lives OUTSIDE the repo (~/.config/neurox/env), but guard anyway.
+.env
+.env.*
+*.env
+!*.env.example
+env
+secrets/
+*.secret
+*.pem
+*.key
+!**/*.pub
+id_rsa*
+*credentials*
+*.p12
+*.pfx
+*token*.txt
+apikeys*
+api-keys*
+
+# ── Local state / databases / logs ────────────────────────────────────────
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+logs/
+
+# ── Backups produced during ops (agent.bak-*, neurox.bak-*, states.json.bak) ─
+*.bak
+*.bak-*
+*.orig
+*.old
+
+# ── OS / editor cruft ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
+
+# ── Temp / scratch ────────────────────────────────────────────────────────
+/tmp/
+tmp/
+*.tmp
+.cache/

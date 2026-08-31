@@ -1,0 +1,315 @@
+/* ============================================================
+ * Tool renderers (EP-2026-08-19)
+ *
+ * Estilos para ArgsBlock (parámetros etiquetados) y ResultBlock
+ * (status badge + body por tool). Se monta dentro del toggle de
+ * ToolNode.
+ * ============================================================ */
+
+.tool-renderer__args {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.tool-renderer__args-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+  padding: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.tool-renderer__args-row {
+  display: contents;
+}
+
+.tool-renderer__args-label {
+  color: var(--text-muted, #888);
+  font-weight: 500;
+  white-space: nowrap;
+  align-self: start;
+}
+
+.tool-renderer__args-value {
+  color: var(--text-primary, #ddd);
+  margin: 0;
+  word-break: break-word;
+  font-family: var(--font-sans);
+}
+
+.tool-renderer__args-row--path .tool-renderer__args-value,
+.tool-renderer__args-row--code .tool-renderer__args-value,
+.tool-renderer__args-row--multiline-code .tool-renderer__args-value {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.tool-renderer__args-row--number .tool-renderer__args-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-renderer__args-multiline {
+  width: 100%;
+}
+
+.tool-renderer__args-multiline summary {
+  cursor: pointer;
+  color: var(--text-muted, #999);
+  font-style: italic;
+  user-select: none;
+  list-style: none;
+}
+
+.tool-renderer__args-multiline summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-renderer__args-multiline summary::before {
+  content: "▶ ";
+  font-size: 0.7em;
+  display: inline-block;
+  transition: transform 0.1s;
+}
+
+.tool-renderer__args-multiline[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.tool-renderer__args-multiline-body {
+  margin-top: 0.25rem;
+  border-left: 2px solid var(--accent);
+  padding-left: 0.5rem;
+}
+
+.tool-renderer__args-extras {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.tool-renderer__args-extras-summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.tool-renderer__args-json {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.tool-renderer__args-extras-body {
+  margin-top: 0.25rem;
+}
+
+/* ─── ResultBlock ───────────────────────────────────────────── */
+
+.tool-renderer__result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.tool-renderer__status {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: lowercase;
+  letter-spacing: 0.03em;
+  align-self: flex-start;
+  background: transparent;
+  border: none;
+}
+
+.tool-renderer__status--ok {
+  color: #6fbf73;
+}
+
+.tool-renderer__status--fail {
+  color: #ff7b72;
+}
+
+.tool-renderer__status--empty {
+  color: #8b949e;
+}
+
+.tool-renderer__status--interrupted {
+  color: #d29922;
+}
+
+.tool-renderer__status-code {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.tool-renderer__status-message {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.8;
+  max-width: 30em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-renderer__result-body {
+  font-size: 0.8rem;
+}
+
+/* ─── shell output ─────────────────────────────────────────── */
+
+.tool-renderer__shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.tool-renderer__shell-stderr {
+  border-left: 2px solid #ff7b72;
+}
+
+.tool-renderer__shell-meta {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ─── grep / search_memory list ────────────────────────────── */
+
+.tool-renderer__matches,
+.tool-renderer__paths,
+.tool-renderer__search-results,
+.tool-renderer__memories {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.tool-renderer__match,
+.tool-renderer__path,
+.tool-renderer__search-result,
+.tool-renderer__memory {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  padding: 0.25rem 0.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 3px;
+  border-left: 2px solid var(--text-muted);
+}
+
+.tool-renderer__match {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.tool-renderer__match-loc {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.tool-renderer__match-text {
+  color: var(--text-primary);
+}
+
+.tool-renderer__path {
+  word-break: break-all;
+}
+
+.tool-renderer__path-more {
+  color: var(--text-muted);
+  font-style: italic;
+  background: transparent;
+  border-left: none;
+}
+
+.tool-renderer__search-result {
+  font-family: var(--font-sans);
+  border-left-color: var(--accent);
+}
+
+.tool-renderer__search-title {
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 0.15rem;
+}
+
+.tool-renderer__search-url {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--accent);
+  text-decoration: none;
+  display: block;
+  margin-bottom: 0.25rem;
+  word-break: break-all;
+}
+
+.tool-renderer__search-url:hover {
+  text-decoration: underline;
+}
+
+.tool-renderer__search-snippet {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary, #ccc);
+  line-height: 1.4;
+}
+
+.tool-renderer__memory {
+  font-family: var(--font-sans);
+}
+
+.tool-renderer__memory-content {
+  color: var(--text-primary);
+  margin-bottom: 0.15rem;
+}
+
+.tool-renderer__memory-score {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+/* ─── file content ─────────────────────────────────────────── */
+
+.tool-renderer__file-content {
+  border-left: 2px solid var(--accent);
+}
+
+/* ─── wrapper caption (e.g. "shell · exit 0") ──────────────── */
+
+.chat__timeline-tool-wrapper-caption {
+  margin-left: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+/* ─── preview kind label ("args" / "result") ───────────────── */
+
+.chat__timeline-result-preview-kind {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-right: 0.4rem;
+}
+
+.chat__timeline-result-preview-text {
+  color: var(--text-secondary, #ccc);
+}

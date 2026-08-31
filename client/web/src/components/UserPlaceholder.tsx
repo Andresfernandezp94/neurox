@@ -1,0 +1,62 @@
+// UserPlaceholder — avatar + nombre + rol. El botón de power/logout
+// vive en el sidebar footer (pasado como prop `footer`).
+
+import type { ReactNode } from "react";
+import { useAuth } from "../hooks/useAuth";
+
+function initialsFrom(name: string | undefined | null): string {
+  if (!name) return "U";
+  const trimmed = name.trim();
+  const parts = trimmed.split(/[\s._-]+/).filter(Boolean);
+  if (parts.length === 0) return trimmed.slice(0, 2).toUpperCase();
+  if (parts.length === 1) {
+    const p0 = parts[0] || "U";
+    return p0.slice(0, 2).toUpperCase();
+  }
+  const p0: string = parts[0] || "";
+  const p1: string = parts[1] || "";
+  if (p0.length === 0 || p1.length === 0) {
+    const fallback = parts[0] || "U";
+    return fallback.slice(0, 2).toUpperCase();
+  }
+  return (p0.charAt(0) + p1.charAt(0)).toUpperCase();
+}
+
+export interface UserPlaceholderProps {
+  /** Clase extra aplicada al avatar button (ej: `conn-avatar conn-avatar--ok`). */
+  avatarClassName?: string;
+  /** Contenido extra que se renderiza dentro del user-card (ej: botón logout). */
+  footer?: ReactNode;
+}
+
+export function UserPlaceholder({ avatarClassName, footer }: UserPlaceholderProps = {}) {
+  const { user } = useAuth();
+
+  const initials = initialsFrom(user?.username);
+
+  return (
+    <div className="user-menu">
+      <div className={`user-card ${avatarClassName ?? ""}`.trim()}>
+        <div
+          className="user-card__trigger"
+          title={user ? `${user.username} (${user.role})` : "Cuenta"}
+          data-testid="user-avatar"
+        >
+          <span className="user-avatar">
+            <span className="user-avatar__initials" aria-hidden="true">
+              {initials}
+            </span>
+          </span>
+
+          {user && (
+            <span className="user-info" data-testid="user-info">
+              <span className="user-info__name">{user.username}</span>
+              <span className="user-info__role">{user.role}</span>
+            </span>
+          )}
+        </div>
+        {footer && <div className="user-card__footer">{footer}</div>}
+      </div>
+    </div>
+  );
+}

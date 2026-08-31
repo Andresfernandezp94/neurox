@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <!-- EP-2026-08-15: interactive-widget=resizes-content instruye a
+         Chrome Android a redimensionar el layout viewport cuando se
+         abre el teclado virtual. Sin esto, el shell no "sube" con
+         el teclado y queda una banda gris / el input queda tapado. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
+    <title>neurox</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

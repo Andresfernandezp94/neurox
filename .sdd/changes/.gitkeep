@@ -1,0 +1,4 @@
+# EPs activas se crean con bin/start-epic.sh.
+# Este .gitkeep existe (R-011) para que el dir no se pierda al
+# vaciarse. Después de EP-0007 cierre, EP-0008 será la próxima
+# activa y el dir no quedará vacío.
