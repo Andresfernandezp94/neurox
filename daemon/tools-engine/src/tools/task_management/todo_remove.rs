@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use crate::tools::task_management::todo_store::{read_todos, write_todos};
+use crate::tools::task_management::todo_store::mutate_todos;
 use crate::tools::{Tool, ToolSpec};
 use crate::tools::{ToolCategory, Mode};
 
@@ -40,23 +40,25 @@ impl Tool for TodoRemoveTool {
             .get("id")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| "missing 'id'".to_string())?;
+            .ok_or_else(|| "missing 'id'".to_string())?
+            .to_string();
 
-        let mut todos = read_todos().await;
-        let full_id = todos
-            .iter()
-            .filter(|t| t.id == needle || t.id.starts_with(needle))
-            .max_by_key(|t| t.id.len())
-            .map(|t| t.id.clone());
+        mutate_todos(move |todos| {
+            let full_id = todos
+                .iter()
+                .filter(|t| t.id == needle || t.id.starts_with(&needle))
+                .max_by_key(|t| t.id.len())
+                .map(|t| t.id.clone());
 
-        let Some(full_id) = full_id else {
-            return Err(format!("no todo found with id '{needle}'"));
-        };
+            let Some(full_id) = full_id else {
+                return Err(format!("no todo found with id '{needle}'"));
+            };
 
-        let before = todos.len();
-        todos.retain(|t| t.id != full_id);
-        let removed = before - todos.len();
-        write_todos(&todos).await?;
-        Ok(format!("removed {removed} todo(s) ({full_id}). {} remaining.", todos.len()))
+            let before = todos.len();
+            todos.retain(|t| t.id != full_id);
+            let removed = before - todos.len();
+            Ok(format!("removed {removed} todo(s) ({full_id}). {} remaining.", todos.len()))
+        })
+        .await
     }
 }

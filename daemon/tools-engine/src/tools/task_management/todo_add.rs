@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use chrono::Utc;
 
-use crate::tools::task_management::todo_store::{read_todos, write_todos, Todo, format};
+use crate::tools::task_management::todo_store::{mutate_todos, Todo, format};
 use crate::tools::{Tool, ToolSpec};
 use crate::tools::{ToolCategory, Mode};
 
@@ -51,7 +51,6 @@ impl Tool for TodoAddTool {
             .unwrap_or("normal")
             .to_string();
 
-        let mut todos = read_todos().await;
         let id = format!("t{}", uuid::Uuid::new_v4().simple().to_string()[..8].to_string());
         let todo = Todo {
             id: id.clone(),
@@ -62,8 +61,14 @@ impl Tool for TodoAddTool {
             done_at: None,
         };
         let formatted = format(&todo);
-        todos.push(todo);
-        write_todos(&todos).await?;
+        let captured = todo;
+        // mutate_todos holds the exclusive flock for the whole
+        // read-modify-write so concurrent adds can't lose updates.
+        mutate_todos(move |todos| {
+            todos.push(captured.clone());
+            Ok(())
+        })
+        .await?;
         Ok(format!("added todo: {}", formatted))
     }
 }

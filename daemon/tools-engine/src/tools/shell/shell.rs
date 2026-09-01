@@ -77,6 +77,168 @@ mod tests {
         assert!(result.is_err(), "shell outside sandbox should fail");
         let _ = std::fs::remove_file("/etc/neurox-test-should-fail");
     }
+
+    // EP-2026-09-01 fixes S2 (bash both-redirects) + S3 (absolute-pathed binaries).
+    // These four commands would have bypassed the sandbox before the fix and
+    // written to /etc; they must now error out without touching the filesystem.
+    async fn assert_write_blocked(tool: &ShellTool, cmd: &str) {
+        let result = tool
+            .execute(
+                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                serde_json::json!({"command": cmd}),
+            )
+            .await;
+        let msg = result.as_ref().err().cloned().unwrap_or_default();
+        assert!(result.is_err(), "expected Err for `{cmd}`, got: {msg}");
+        assert!(
+            msg.contains("writable_paths"),
+            "expected sandbox error for `{cmd}`, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn shell_blocks_bash_both_redirect() {
+        // S2 fix: `&>` is bash shorthand for `> FILE 2>&1`. Without the fix
+        // the destination token is not flagged as a write target so it slips
+        // through the readable_paths check.
+        let sandbox = make_sandbox(vec![]);
+        let tool = ShellTool {
+            workspace_root: std::path::PathBuf::from("/tmp"),
+            sandbox,
+            timeout_secs: 5,
+        };
+        assert_write_blocked(&tool, "echo hi &> /etc/neurox-bypass-amp").await;
+        assert_write_blocked(&tool, "echo hi &>> /etc/neurox-bypass-amp2").await;
+        assert_write_blocked(&tool, "echo hi <> /etc/neurox-bypass-rw").await;
+        let _ = std::fs::remove_file("/etc/neurox-bypass-amp");
+        let _ = std::fs::remove_file("/etc/neurox-bypass-amp2");
+        let _ = std::fs::remove_file("/etc/neurox-bypass-rw");
+    }
+
+    #[tokio::test]
+    async fn shell_blocks_absolute_pathed_binaries() {
+        // S3 fix: the write-command heuristic matches literal names like
+        // `touch`. `/usr/bin/touch` was treated as a read path under /usr
+        // and slipped past the writable check.
+        //
+        // The test sandbox mirrors the daemon's defaults: `/usr` is
+        // readable (so the absolute path to the binary passes the read
+        // check) but `/etc` is not writable (so the destination must be
+        // blocked by the writable check).
+        struct SandboxWithRead {
+            writable: Vec<String>,
+            readable: Vec<String>,
+        }
+        impl SandboxConfig for SandboxWithRead {
+            fn enabled(&self) -> bool { true }
+            fn is_writable(&self, path: &std::path::Path) -> bool {
+                self.writable.iter().any(|w| path.starts_with(std::path::PathBuf::from(w)))
+            }
+            fn is_readable(&self, path: &std::path::Path) -> bool {
+                self.readable.iter().any(|w| path.starts_with(std::path::PathBuf::from(w)))
+                    || self.is_writable(path)
+            }
+            // ShellTool consults *paths_resolved* (not is_readable/is_writable
+            // directly), so we must override these too. The default trait impl
+            // returns empty Vec → everything gets blocked.
+            fn writable_paths_resolved(&self, _ws: &std::path::Path) -> Vec<std::path::PathBuf> {
+                self.writable.iter().map(std::path::PathBuf::from).collect()
+            }
+            fn readable_paths_resolved(&self, _ws: &std::path::Path) -> Vec<std::path::PathBuf> {
+                self.readable.iter().map(std::path::PathBuf::from).collect()
+            }
+        }
+        let sandbox = Arc::new(tokio::sync::RwLock::new(Box::new(SandboxWithRead {
+            writable: vec!["/tmp".into()],
+            readable: vec!["/usr".into(), "/etc".into(), "/tmp".into()],
+        }) as Box<dyn SandboxConfig>));
+        let tool = ShellTool {
+            workspace_root: std::path::PathBuf::from("/tmp"),
+            sandbox,
+            timeout_secs: 5,
+        };
+        // `/usr/bin/touch /etc/neurox-bypass-abs`:
+        //   - `/usr/bin/touch` is a read under /usr → OK
+        //   - `/etc/neurox-bypass-abs` is a write target (basename=touch)
+        //     and /etc is NOT in writable_paths → blocked.
+        assert_write_blocked(&tool, "/usr/bin/touch /etc/neurox-bypass-abs").await;
+        let _ = std::fs::remove_file("/etc/neurox-bypass-abs");
+    }
+
+    // S6 fix: empty / whitespace-only commands must error, not silently
+    // succeed with an empty body. Without this the LLM can't tell whether
+    // a no-op ran or whether the call was malformed.
+    #[tokio::test]
+    async fn shell_rejects_empty_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let sandbox = make_sandbox(vec![dir.path().to_string_lossy().to_string()]);
+        let tool = ShellTool {
+            workspace_root: dir.path().to_path_buf(),
+            sandbox,
+            timeout_secs: 5,
+        };
+        for empty in ["", " ", "\t", "  \n  "] {
+            let r = tool
+                .execute(
+                    &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                    serde_json::json!({"command": empty}),
+                )
+                .await;
+            let msg = r.as_ref().err().cloned().unwrap_or_default();
+            assert!(r.is_err(), "expected Err for empty input {empty:?}, got: {msg}");
+            assert!(msg.contains("empty"), "expected 'empty' in error, got: {msg}");
+        }
+    }
+
+    // S5 fix: tilde expansion. `~/projects/foo` must resolve to
+    // $HOME/projects/foo before the sandbox check fires, instead of
+    // being joined with workspace_root as a literal `~/...` path.
+    #[tokio::test]
+    async fn shell_expands_tilde_in_paths() {
+        // Sandbox allows $HOME as both readable and writable, mimicking
+        // the daemon's `readable_paths: [$HOME]` default.
+        let home = std::env::var("HOME").expect("HOME unset");
+        struct HomeSandbox { writable: Vec<String>, readable: Vec<String> }
+        impl SandboxConfig for HomeSandbox {
+            fn enabled(&self) -> bool { true }
+            fn is_writable(&self, path: &std::path::Path) -> bool {
+                self.writable.iter().any(|w| path.starts_with(std::path::PathBuf::from(w)))
+            }
+            fn is_readable(&self, path: &std::path::Path) -> bool {
+                self.readable.iter().any(|w| path.starts_with(std::path::PathBuf::from(w)))
+                    || self.is_writable(path)
+            }
+            fn writable_paths_resolved(&self, _ws: &std::path::Path) -> Vec<std::path::PathBuf> {
+                self.writable.iter().map(std::path::PathBuf::from).collect()
+            }
+            fn readable_paths_resolved(&self, _ws: &std::path::Path) -> Vec<std::path::PathBuf> {
+                self.readable.iter().map(std::path::PathBuf::from).collect()
+            }
+        }
+        let sandbox = Arc::new(tokio::sync::RwLock::new(Box::new(HomeSandbox {
+            writable: vec![home.clone()],
+            readable: vec![home.clone()],
+        }) as Box<dyn SandboxConfig>));
+        let tool = ShellTool {
+            workspace_root: std::path::PathBuf::from("/tmp"),
+            sandbox,
+            timeout_secs: 5,
+        };
+        // Write to ~/neurox-tilde-test.txt — must NOT be joined with
+        // workspace_root as a literal "~/..." path.
+        let target = format!("{home}/neurox-tilde-test.txt");
+        let cmd = format!("echo hi > {target}");
+        let r = tool
+            .execute(
+                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                serde_json::json!({"command": cmd}),
+            )
+            .await;
+        assert!(r.is_ok(), "tilde write should succeed: {:?}", r);
+        let body = std::fs::read_to_string(&target).unwrap_or_default();
+        assert_eq!(body.trim(), "hi", "file contents wrong: {body:?}");
+        let _ = std::fs::remove_file(&target);
+    }
 }
 
 #[async_trait]
@@ -91,7 +253,7 @@ impl Tool for ShellTool {
                 "type": "object",
                 "properties": {
                     "command": {"type": "string", "description": "Shell command to execute"},
-                    "timeout_secs": {"type": "integer", "default": 30, "maximum": 600}
+                    "timeout_secs": {"type": "integer", "default": 30, "minimum": 1, "maximum": 30, "description": "Hard-capped to 30s (the daemon's shell tool timeout)."}
                 },
                 "required": ["command"]
             }),
@@ -114,11 +276,18 @@ impl Tool for ShellTool {
             .get("command")
             .and_then(|v| v.as_str())
             .ok_or_else(|| "missing 'command'".to_string())?;
+        // S6 fix: refuse empty / whitespace-only commands explicitly.
+        // Without this they reach /bin/sh -c "" which silently succeeds
+        // and returns ok:true with an empty body — ambiguous for the LLM
+        // (did the command produce no output or was it not executed?).
+        if command.trim().is_empty() {
+            return Err("shell: empty command".into());
+        }
         let timeout = args
             .get("timeout_secs")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(self.timeout_secs)
-            .min(self.timeout_secs);
+            .clamp(1, self.timeout_secs);
 
         // EP-0011 shell sandbox enforcement: extract absolute paths from the
         // command and verify each is allowed under the configured paths.
@@ -148,26 +317,73 @@ impl Tool for ShellTool {
                 // Path came from inside quotes that we stripped; treat
                 // it as a write target (the safe default — better to ask
                 // for confirmation than to allow a write).
-                let p = std::path::Path::new(path_str);
-                let resolved = if p.is_absolute() {
-                    p.to_path_buf()
-                } else {
-                    self.workspace_root.join(p)
-                };
-                let normalized = normalize_path(&resolved);
-                if !writable.iter().any(|root| normalized.starts_with(root)) {
-                    return Err(format!(
-                        "shell: path '{}' (quoted) is outside sandbox writable_paths",
-                        normalized.display()
-                    ));
-                }
-                continue;
-            };
             let p = std::path::Path::new(path_str);
-            let resolved = if p.is_absolute() {
-                p.to_path_buf()
+            // S5 fix: expand `~` BEFORE the workspace_root join so that
+            // `~/foo` resolves to `$HOME/foo` and not to a literal
+            // `/workspace_root/~/foo` path. See the equivalent block above.
+            let p = if let Some(rest) = p.to_str() {
+                if let Some(stripped) = rest.strip_prefix("~/") {
+                    if let Some(home) = std::env::var_os("HOME") {
+                        std::path::PathBuf::from(home).join(stripped)
+                    } else {
+                        p.to_path_buf()
+                    }
+                } else if rest == "~" {
+                    if let Some(home) = std::env::var_os("HOME") {
+                        std::path::PathBuf::from(home)
+                    } else {
+                        p.to_path_buf()
+                    }
+                } else {
+                    p.to_path_buf()
+                }
             } else {
-                self.workspace_root.join(p)
+                p.to_path_buf()
+            };
+            let resolved = if p.is_absolute() {
+                p.clone()
+            } else {
+                self.workspace_root.join(&p)
+            };
+            let normalized = normalize_path(&resolved);
+            if !writable.iter().any(|root| normalized.starts_with(root)) {
+                return Err(format!(
+                    "shell: path '{}' (quoted) is outside sandbox writable_paths",
+                    normalized.display()
+                ));
+            }
+            continue;
+        };
+            let p = std::path::Path::new(path_str);
+            // S5 fix: expand a leading `~` BEFORE the absolute-or-relative
+            // join, otherwise `~/projects/foo` gets joined with
+            // workspace_root as `/home/<user>/~/projects/foo` which is a
+            // literal non-existent path. We rely on normalize_path to also
+            // handle the case where the path is already expanded (it's a
+            // no-op then).
+            let p = if let Some(rest) = p.to_str() {
+                if let Some(stripped) = rest.strip_prefix("~/") {
+                    if let Some(home) = std::env::var_os("HOME") {
+                        std::path::PathBuf::from(home).join(stripped)
+                    } else {
+                        p.to_path_buf()
+                    }
+                } else if rest == "~" {
+                    if let Some(home) = std::env::var_os("HOME") {
+                        std::path::PathBuf::from(home)
+                    } else {
+                        p.to_path_buf()
+                    }
+                } else {
+                    p.to_path_buf()
+                }
+            } else {
+                p.to_path_buf()
+            };
+            let resolved = if p.is_absolute() {
+                p.clone()
+            } else {
+                self.workspace_root.join(&p)
             };
             let normalized = normalize_path(&resolved);
             let is_write_target = write_tokens.contains(&idx);
@@ -263,12 +479,36 @@ fn extract_absolute_paths(command: &str) -> Vec<String> {
         .collect()
 }
 
-/// EP-0011 shell sandbox helper: normalize a path by collapsing `.`
-/// and `..` segments. Doesn't touch the filesystem (so symlinks aren't
-/// resolved — that's the caller's job if needed).
+/// EP-0011 shell sandbox helper: normalize a path by expanding a
+/// leading `~` (using $HOME) and collapsing `.` / `..` segments.
+/// Doesn't touch the filesystem (so symlinks aren't resolved — that's
+/// the caller's job if needed).
 fn normalize_path(p: &std::path::Path) -> std::path::PathBuf {
+    // S5 fix: tilde expansion. Without this, `~/projects/foo` is
+    // joined with workspace_root as `/home/<user>/~/projects/foo`
+    // and rejected with a confusing "outside sandbox" error.
+    let expanded = if let Some(rest) = p.to_str() {
+        if let Some(stripped) = rest.strip_prefix("~/") {
+            if let Some(home) = std::env::var_os("HOME") {
+                std::path::PathBuf::from(home).join(stripped)
+            } else {
+                p.to_path_buf()
+            }
+        } else if rest == "~" {
+            if let Some(home) = std::env::var_os("HOME") {
+                std::path::PathBuf::from(home)
+            } else {
+                p.to_path_buf()
+            }
+        } else {
+            p.to_path_buf()
+        }
+    } else {
+        p.to_path_buf()
+    };
+
     let mut out = std::path::PathBuf::new();
-    for comp in p.components() {
+    for comp in expanded.components() {
         match comp {
             std::path::Component::ParentDir => {
                 out.pop();
@@ -318,9 +558,21 @@ fn write_token_positions(command: &str) -> std::collections::HashSet<usize> {
 
     // First pass: `>` and `>>` redirections. The following token is
     // the destination. `>>` may have a leading fd number (e.g. `2>>`).
+    // `&>`, `&>>` (bash both-streams redirect) and `<>` (read-write
+    // redirect) also write to the following token.
     for (i, t) in tokens.iter().enumerate() {
         let stripped = t.trim_start_matches(|c: char| c.is_ascii_digit());
         if stripped == ">" || stripped == ">>" {
+            if let Some(next_idx) = i.checked_add(1) {
+                if next_idx < tokens.len() {
+                    out.insert(next_idx);
+                }
+            }
+        } else if t == "&>" || t == "&>>" || stripped == "<>" {
+            // Bash `&>` / `&>>` redirect both stdout and stderr; the
+            // following token is the destination. `<>` opens the file
+            // for read-write (truncating), so the following token is
+            // also a write target.
             if let Some(next_idx) = i.checked_add(1) {
                 if next_idx < tokens.len() {
                     out.insert(next_idx);
@@ -334,8 +586,16 @@ fn write_token_positions(command: &str) -> std::collections::HashSet<usize> {
     // compound forms like '-rf', '--recursive') and skip it. The
     // exception is bare '-' (stdin marker) which is rare enough to
     // ignore in our path-extraction approximation.
+    //
+    // We resolve each token to its `basename` before matching, so that
+    // absolute-pathed binaries (`/usr/bin/touch`, `./touch`) are
+    // recognized the same as the bare command name.
     for (i, t) in tokens.iter().enumerate() {
-        match t.as_str() {
+        let cmd_name = std::path::Path::new(t)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(t);
+        match cmd_name {
             // Simple "create or touch a file" commands
             "touch" | "mkdir" | "mkdir -p" => {
                 for j in (i+1)..tokens.len() {

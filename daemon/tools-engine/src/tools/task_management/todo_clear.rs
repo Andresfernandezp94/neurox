@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use crate::tools::task_management::todo_store::{read_todos, write_todos};
+use crate::tools::task_management::todo_store::mutate_todos;
 use crate::tools::{Tool, ToolSpec};
 use crate::tools::{ToolCategory, Mode};
 
@@ -40,19 +40,20 @@ impl Tool for TodoClearTool {
             .get("completed_only")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let mut todos = read_todos().await;
-        let before = todos.len();
-        if completed_only {
-            todos.retain(|t| t.status != "done");
-        } else {
-            todos.clear();
-        }
-        let removed = before - todos.len();
-        write_todos(&todos).await?;
-        if completed_only {
-            Ok(format!("cleared {} completed todo(s). {} remaining.", removed, todos.len()))
-        } else {
-            Ok(format!("cleared all {} todo(s).", removed))
-        }
+        mutate_todos(move |todos| {
+            let before = todos.len();
+            if completed_only {
+                todos.retain(|t| t.status != "done");
+            } else {
+                todos.clear();
+            }
+            let removed = before - todos.len();
+            if completed_only {
+                Ok(format!("cleared {} completed todo(s). {} remaining.", removed, todos.len()))
+            } else {
+                Ok(format!("cleared all {} todo(s).", removed))
+            }
+        })
+        .await
     }
 }

@@ -9,4 +9,4 @@ pub mod todo_remove;
 
 pub mod todo_store;
 
-pub use todo_store::{read_todos, write_todos, Todo, todo_path};
+pub use todo_store::{read_todos, mutate_todos, Todo, todo_path};

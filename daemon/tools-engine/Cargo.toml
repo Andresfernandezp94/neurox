@@ -48,6 +48,12 @@ chrono = { workspace = true }
 # Paths
 dirs = { workspace = true }
 
+# F-W2: advisory file locks for write_file race conditions (flock(2))
+fs2 = "0.4"
+
+# URL parsing for web_fetch SSRF protection
+url = "2"
+
 # Tools (file scanning)
 glob = "0.3"
 regex = { workspace = true }

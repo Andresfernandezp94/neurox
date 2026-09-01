@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::{json, Value};
 
-use crate::tools::task_management::todo_store::{read_todos, write_todos, format};
+use crate::tools::task_management::todo_store::{mutate_todos, format};
 use crate::tools::{Tool, ToolSpec};
 use crate::tools::{ToolCategory, Mode};
 
@@ -42,35 +42,41 @@ impl Tool for TodoDoneTool {
             .get("id")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| "missing 'id'".to_string())?;
+            .ok_or_else(|| "missing 'id'".to_string())?
+            .to_string();
 
-        let mut todos = read_todos().await;
-        // Prefix match: longest id that starts with `needle` wins.
-        let full_id = todos
-            .iter()
-            .filter(|t| t.id == needle || t.id.starts_with(needle))
-            .max_by_key(|t| t.id.len())
-            .map(|t| t.id.clone());
-
-        let Some(full_id) = full_id else {
-            return Err(format!("no todo found with id '{needle}'"));
-        };
-
+        // mutate_todos holds the exclusive flock so concurrent done
+        // calls on the same id serialize. Idempotent: if the todo is
+        // already done, the closure no-ops and returns the existing
+        // record so the caller still gets a success message.
         let now = Utc::now().timestamp_millis();
-        let mut updated = None;
-        for t in todos.iter_mut() {
-            if t.id == full_id {
-                t.status = "done".to_string();
-                t.done_at = Some(now);
-                updated = Some(t.clone());
+        mutate_todos(move |todos| {
+            // Prefix match: longest id that starts with `needle` wins.
+            let full_id = todos
+                .iter()
+                .filter(|t| t.id == needle || t.id.starts_with(&needle))
+                .max_by_key(|t| t.id.len())
+                .map(|t| t.id.clone());
+            let Some(full_id) = full_id else {
+                return Err(format!("no todo found with id '{needle}'"));
+            };
+            for t in todos.iter_mut() {
+                if t.id == full_id {
+                    if t.status != "done" {
+                        t.status = "done".to_string();
+                        t.done_at = Some(now);
+                    }
+                }
             }
-        }
-        if let Some(t) = &updated {
-            let msg = format!("marked done: {}", format(t));
-            write_todos(&todos).await?;
-            Ok(msg)
-        } else {
-            Err(format!("todo '{full_id}' vanished during update"))
-        }
+            // Surface the updated todo back so the caller can format
+            // a friendly success message without re-reading.
+            let updated = todos
+                .iter()
+                .find(|t| t.id == full_id)
+                .map(crate::tools::task_management::todo_store::format)
+                .unwrap_or_else(|| full_id.clone());
+            Ok(format!("marked done: {updated}"))
+        })
+        .await
     }
 }

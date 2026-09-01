@@ -55,6 +55,22 @@ impl Tool for GrepTool {
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(100) as usize;
 
+        // G1 fix: validate the path against the sandbox BEFORE handing
+        // it to rg. Without this check, grep would happily read any
+        // absolute path the user has filesystem access to — e.g.
+        // /home/andres_fernandez/.ssh (readable by the daemon's
+        // process but not in the configured readable_paths). The
+        // `writable: false` argument tells `resolve_under_workspace`
+        // to accept any path under readable_paths OR under the
+        // workspace root itself.
+        let resolved = resolve_under_workspace(
+            &self.workspace_root,
+            path,
+            &self.sandbox.read().await.readable_paths_resolved(&self.workspace_root),
+            false,
+        )
+        .map_err(|e| format!("path: {e}"))?;
+
         // Try rg first
         if let Ok(output) = Command::new("rg")
             .arg("--no-heading")
@@ -62,8 +78,7 @@ impl Tool for GrepTool {
             .arg("--max-count")
             .arg(max.to_string())
             .arg(pattern)
-            .arg(path)
-            .current_dir(&self.workspace_root)
+            .arg(&resolved)
             .output()
             .await
         {
@@ -78,9 +93,8 @@ impl Tool for GrepTool {
 
         // Fallback: pure Rust regex + recursive walk
         let re = regex::Regex::new(pattern).map_err(|e| format!("invalid regex: {e}"))?;
-        let search_root = self.workspace_root.join(path);
         let mut results = Vec::new();
-        grep_walk_dir(&search_root, &re, max, &mut results)?;
+        grep_walk_dir(&resolved, &re, max, &mut results)?;
         if results.is_empty() {
             Ok("no matches".to_string())
         } else {
@@ -148,6 +162,40 @@ mod tests {
                 serde_json::json!({"pattern": "x", "path": "/etc"}),
             )
             .await;
-        assert!(result.is_err());
+        // G1 fix: the path is now checked against readable_paths
+        // BEFORE rg runs. Empty sandbox → /etc is rejected with a
+        // clear "outside sandbox readable_paths" error.
+        assert!(result.is_err(), "expected error for /etc in empty sandbox");
+    }
+
+    // G1 fix: a path that the user can read on the filesystem but
+    // that is NOT in the daemon's readable_paths must be rejected.
+    // Without the sandbox check, grep would happily read any
+    // absolute path the process has access to (e.g. ~/.ssh).
+    #[tokio::test]
+    async fn grep_rejects_path_outside_readable_paths() {
+        // Sandbox allows only /home/.../projects, not /home/.../...
+        let sandbox = make_sandbox(vec![
+            "/home/andres_fernandez/projects".to_string(),
+        ]);
+        let tool = GrepTool {
+            workspace_root: std::path::PathBuf::from("/home/andres_fernandez/projects"),
+            sandbox,
+            max_depth: 8,
+        };
+        // ~/.ssh is readable by the process but NOT in readable_paths
+        let result = tool
+            .execute(
+                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                serde_json::json!({
+                    "pattern": "BEGIN",
+                    "path": "/home/andres_fernandez/.ssh",
+                }),
+            )
+            .await;
+        assert!(result.is_err(), "expected Err for .ssh outside readable_paths");
+        let msg = result.err().unwrap();
+        assert!(msg.contains("readable") || msg.contains("outside"),
+                "expected sandbox error, got: {msg}");
     }
 }
