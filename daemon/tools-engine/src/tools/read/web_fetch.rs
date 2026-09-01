@@ -1,64 +1,12 @@
 use std::time::Duration;
 use serde_json::Value;
 use async_trait::async_trait;
+use crate::tools::url_safety::is_safe_target;
 use crate::tools::{Tool, ToolSpec};
 use crate::tools::helpers::*;
 use crate::tools::{ToolCategory, Mode};
 // WebFetchTool extracted from core/src/tools/mod.rs (tools/read/web_fetch.rs)
 pub struct WebFetchTool;
-
-/// W-fix: block SSRF to loopback / private networks. Resolves the
-/// URL's host and rejects any IP that is in a private, loopback, or
-/// link-local range. Without this, the LLM could probe internal
-/// services (daemon health, cloud metadata, etc.) through web_fetch.
-fn is_safe_target(url: &str) -> Result<(), String> {
-    let parsed = url::Url::parse(url).map_err(|e| format!("invalid url: {e}"))?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err(format!("scheme not allowed: {}", parsed.scheme()));
-    }
-    let host = parsed.host_str().ok_or("no host")?;
-    // Resolve the host to one or more IPs. If any IP is unsafe, deny.
-    // (We use std::net::ToSocketAddrs via tokio's spawn_blocking to
-    // keep the async runtime responsive.)
-    let host_owned = host.to_string();
-    let port = parsed.port_or_known_default().unwrap_or(80);
-    let addrs: Vec<std::net::SocketAddr> = std::net::ToSocketAddrs::to_socket_addrs(
-        &format!("{host_owned}:{port}"),
-    ).map_err(|e| format!("dns: {e}"))?.collect();
-    if addrs.is_empty() {
-        return Err("no addresses resolved".into());
-    }
-    for addr in &addrs {
-        let ip = addr.ip();
-        if is_unsafe_ip(&ip) {
-            return Err(format!(
-                "refusing to fetch private/loopback address: {ip} (resolved from {host})"
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn is_unsafe_ip(ip: &std::net::IpAddr) -> bool {
-    use std::net::IpAddr::*;
-    match ip {
-        V4(v4) => {
-            v4.is_loopback()           // 127.0.0.0/8
-            || v4.is_private()        // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
-            || v4.is_link_local()      // 169.254.0.0/16 (cloud metadata!)
-            || v4.is_unspecified()     // 0.0.0.0
-            || v4.is_broadcast()       // 255.255.255.255
-        }
-        V6(v6) => {
-            v6.is_loopback()           // ::1
-            || v6.is_unspecified()    // ::
-            // Unique local addresses fc00::/7
-            || (v6.segments()[0] & 0xfe00) == 0xfc00
-            // Link-local fe80::/10
-            || (v6.segments()[0] & 0xffc0) == 0xfe80
-        }
-    }
-}
 
 #[async_trait]
 impl Tool for WebFetchTool {
@@ -260,55 +208,7 @@ impl Tool for WebFetchTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // W1: is_safe_target blocks loopback, link-local, private, etc.
-    #[test]
-    fn safe_target_blocks_loopback() {
-        assert!(is_safe_target("http://127.0.0.1/").is_err());
-        assert!(is_safe_target("http://127.0.0.1:7878/health").is_err());
-        assert!(is_safe_target("http://localhost/foo").is_err()); // resolves to 127.0.0.1
-    }
-
-    #[test]
-    fn safe_target_blocks_private() {
-        assert!(is_safe_target("http://10.0.0.1/").is_err());
-        assert!(is_safe_target("http://192.168.1.1/").is_err());
-        assert!(is_safe_target("http://172.16.0.1/").is_err());
-        assert!(is_safe_target("http://169.254.169.254/latest/").is_err()); // cloud metadata
-    }
-
-    #[test]
-    fn safe_target_blocks_non_http() {
-        assert!(is_safe_target("file:///etc/passwd").is_err());
-        assert!(is_safe_target("javascript:alert(1)").is_err());
-        assert!(is_safe_target("gopher://example.com").is_err());
-    }
-
-    #[test]
-    fn safe_target_allows_public() {
-        assert!(is_safe_target("https://example.com").is_ok());
-        assert!(is_safe_target("https://httpbin.org/get").is_ok());
-    }
-
-    #[test]
-    fn safe_target_rejects_invalid_url() {
-        assert!(is_safe_target("not-a-url").is_err());
-    }
-
-    // is_unsafe_ip — covers IPv4 and IPv6 ranges.
-    #[test]
-    fn unsafe_ip_categorization() {
-        use std::net::IpAddr;
-        // Loopback
-        assert!(is_unsafe_ip(&"127.0.0.1".parse::<IpAddr>().unwrap()));
-        assert!(is_unsafe_ip(&"::1".parse::<IpAddr>().unwrap()));
-        // Private
-        assert!(is_unsafe_ip(&"10.1.2.3".parse::<IpAddr>().unwrap()));
-        assert!(is_unsafe_ip(&"192.168.1.1".parse::<IpAddr>().unwrap()));
-        // Link-local (cloud metadata)
-        assert!(is_unsafe_ip(&"169.254.169.254".parse::<IpAddr>().unwrap()));
-        // Public
-        assert!(!is_unsafe_ip(&"8.8.8.8".parse::<IpAddr>().unwrap()));
-        assert!(!is_unsafe_ip(&"1.1.1.1".parse::<IpAddr>().unwrap()));
-    }
+    // Note: tests for is_safe_target / is_unsafe_ip live in
+    // `tools/url_safety.rs` (the shared module). web_fetch only
+    // needs a smoke test that the redirect policy still works.
 }

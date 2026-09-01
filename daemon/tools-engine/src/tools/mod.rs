@@ -21,6 +21,7 @@ pub mod memory;
 pub mod read;
 pub mod shell;
 pub mod task_management;
+pub mod url_safety;
 pub mod write;
 pub mod helpers;
 

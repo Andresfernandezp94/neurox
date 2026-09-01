@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use serde_json::Value;
 use async_trait::async_trait;
 use crate::tools::media::sanitize_filename;
+use crate::tools::url_safety::{is_safe_target, MAX_DOWNLOAD_BYTES};
 use crate::tools::{Tool, ToolSpec};
 use crate::tools::{ToolCategory, Mode};
 // GenerateImageTool extracted from core/src/tools/mod.rs (tools/media/generate_image.rs)
@@ -130,15 +131,34 @@ impl Tool for GenerateImageTool {
             })?
             .to_string();
 
-        // Download the image
-        let bytes = client
+        // M-SSRF: the image URL comes from the upstream API. If the
+        // API (or a man-in-the-middle on a non-TLS hop) returns a
+        // loopback / private / link-local URL, the daemon would
+        // fetch from it. Reject those here.
+        is_safe_target(&image_url)?;
+
+        // Download the image. Use a streaming download + size cap
+        // so a malicious server cannot OOM the daemon.
+        let mut resp = client
             .get(&image_url)
             .send()
             .await
-            .map_err(|e| format!("download: {e}"))?
-            .bytes()
-            .await
-            .map_err(|e| format!("download bytes: {e}"))?;
+            .map_err(|e| format!("download: {e}"))?;
+        let content_length = resp.content_length().unwrap_or(0);
+        if content_length > MAX_DOWNLOAD_BYTES as u64 {
+            return Err(format!(
+                "image too large: content-length {content_length} > {MAX_DOWNLOAD_BYTES}"
+            ));
+        }
+        let mut bytes = Vec::with_capacity(content_length as usize);
+        while let Some(chunk) = resp.chunk().await.map_err(|e| format!("download chunk: {e}"))? {
+            if bytes.len() + chunk.len() > MAX_DOWNLOAD_BYTES {
+                return Err(format!(
+                    "image exceeded {MAX_DOWNLOAD_BYTES} bytes during download"
+                ));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
 
         tokio::fs::write(&output_path, &bytes)
             .await

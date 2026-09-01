@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use serde_json::Value;
 use async_trait::async_trait;
+use crate::tools::url_safety::{is_safe_target, MAX_DOWNLOAD_BYTES};
 use crate::tools::{Tool, ToolSpec};
 use crate::tools::{ToolCategory, Mode};
 // GenerateMusicTool extracted from core/src/tools/mod.rs (tools/media/generate_music.rs)
@@ -161,14 +162,30 @@ impl Tool for GenerateMusicTool {
 
         // If output_format=url, audio is a URL — download it
         if audio.starts_with("http") {
-            let bytes = client
+            // M-SSRF: same as generate_image — the audio URL comes from
+            // the upstream API and could be a loopback probe.
+            is_safe_target(&audio)?;
+
+            let mut resp = client
                 .get(&audio)
                 .send()
                 .await
-                .map_err(|e| format!("download: {e}"))?
-                .bytes()
-                .await
-                .map_err(|e| format!("download bytes: {e}"))?;
+                .map_err(|e| format!("download: {e}"))?;
+            let content_length = resp.content_length().unwrap_or(0);
+            if content_length > MAX_DOWNLOAD_BYTES as u64 {
+                return Err(format!(
+                    "audio too large: content-length {content_length} > {MAX_DOWNLOAD_BYTES}"
+                ));
+            }
+            let mut bytes = Vec::with_capacity(content_length as usize);
+            while let Some(chunk) = resp.chunk().await.map_err(|e| format!("download chunk: {e}"))? {
+                if bytes.len() + chunk.len() > MAX_DOWNLOAD_BYTES {
+                    return Err(format!(
+                        "audio exceeded {MAX_DOWNLOAD_BYTES} bytes during download"
+                    ));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
             tokio::fs::write(&output_path, &bytes)
                 .await
                 .map_err(|e| format!("write file: {e}"))?;
