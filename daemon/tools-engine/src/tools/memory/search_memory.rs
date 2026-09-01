@@ -33,14 +33,17 @@ impl Tool for SearchMemoryTool {
 
 
     async fn execute(&self, _ctx: &crate::ExecuteContext, args: Value) -> Result<String, String> {
-        // `query` is optional — empty/missing returns ALL facts. The
-        // schema in `spec.parameters` already marks it optional (no
-        // `required` entry, no `enum`), so the previous error here was
-        // a bug that contradicted the spec.
-        let query = args
-            .get("query")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        // `query` is optional per the spec — empty/missing returns
+        // ALL facts. SM2 fix: a non-string `query` (e.g. a number)
+        // used to be silently coerced to "" via `unwrap_or("")`, which
+        // would also return ALL facts. That surprised the LLM. Now we
+        // accept only string-or-missing; anything else is an error so
+        // the caller can see something went wrong.
+        let query = match args.get("query") {
+            None | Some(serde_json::Value::Null) => "",
+            Some(serde_json::Value::String(s)) => s.as_str(),
+            Some(_) => return Err("'query' must be a string".into()),
+        };
 
         // Resolve facts path. Default: `$XDG_DATA_HOME/neurox/identity/`.
         // Override: $NEUROX_IDENTITY_DIR.
@@ -55,9 +58,15 @@ impl Tool for SearchMemoryTool {
             });
         let facts_path = identity_dir.join("facts.yaml");
 
-        let content = tokio::fs::read_to_string(&facts_path)
-            .await
-            .map_err(|e| format!("read facts: {e}"))?;
+        // SM1 fix: missing or empty facts.yaml is not an error — it
+        // just means there are no facts to search. The spec says
+        // `query` is optional and an empty/missing query returns
+        // "all facts", which by extension means "the empty list of
+        // facts" when the store is empty.
+        let content = match tokio::fs::read_to_string(&facts_path).await {
+            Ok(s) if !s.trim().is_empty() => s,
+            _ => return Ok(format!("no facts matching '{}'", query)),
+        };
 
         let doc: serde_yml::Value =
             serde_yml::from_str(&content).map_err(|e| format!("parse: {e}"))?;
@@ -125,5 +134,45 @@ mod tests {
         // We no longer assert Err — the fix made query optional.
         // Just check we get _some_ response (Ok or Err).
         let _ = result;
+    }
+
+    // SM1 fix: missing facts.yaml is not an error — it's an empty
+    // store. Same for a file that exists but is empty.
+    #[tokio::test]
+    async fn search_memory_missing_file_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("NEUROX_IDENTITY_DIR", dir.path());
+        let tool = SearchMemoryTool;
+        let r = tool
+            .execute(
+                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                serde_json::json!({"query": "anything"}),
+            )
+            .await
+            .expect("execute should succeed");
+        assert!(r.contains("no facts"), "got: {r}");
+        std::env::remove_var("NEUROX_IDENTITY_DIR");
+    }
+
+    // SM2 fix: a non-string `query` is an error, not "silently return
+    // all facts". Pre-fix a number `42` would `unwrap_or("")` and
+    // return all 30 facts; that surprised the LLM and could leak
+    // unintended context.
+    #[tokio::test]
+    async fn search_memory_rejects_non_string_query() {
+        let dir = tempfile::tempdir().unwrap();
+        let facts = dir.path().join("facts.yaml");
+        std::fs::write(&facts, "facts:\n  - id: 1\n    content: hello\n").unwrap();
+        std::env::set_var("NEUROX_IDENTITY_DIR", dir.path());
+        let tool = SearchMemoryTool;
+        let r = tool
+            .execute(
+                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                serde_json::json!({"query": 42}),
+            )
+            .await;
+        let msg = r.err().unwrap_or_default();
+        assert!(msg.contains("must be a string"), "got: {msg:?}");
+        std::env::remove_var("NEUROX_IDENTITY_DIR");
     }
 }
