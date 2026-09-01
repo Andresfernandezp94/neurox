@@ -19,6 +19,7 @@ pub mod media;
 pub mod memory;
 pub mod read;
 pub mod shell;
+pub mod task_management;
 pub mod write;
 pub mod helpers;
 
@@ -36,7 +37,7 @@ use crate::sandbox::SandboxConfig;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCategory {
-    Filesystem, Web, Shell, Media, Memory, Desktop, Knowledge,
+    Filesystem, Web, Shell, Media, Memory, Desktop, Knowledge, TaskManagement,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -319,6 +320,12 @@ pub fn register_defaults(
     use crate::tools::read::web_search::WebSearchTool;
     // write/
     use crate::tools::write::write_file::WriteFileTool;
+    // task_management/ — todo_* tools
+    use crate::tools::task_management::todo_add::TodoAddTool;
+    use crate::tools::task_management::todo_clear::TodoClearTool;
+    use crate::tools::task_management::todo_done::TodoDoneTool;
+    use crate::tools::task_management::todo_list::TodoListTool;
+    use crate::tools::task_management::todo_remove::TodoRemoveTool;
     // shell/
     use crate::tools::shell::shell::ShellTool;
     // memory/
@@ -377,5 +384,11 @@ pub fn register_defaults(
     registry.register(Arc::new(ClipboardReadTool));
     registry.register(Arc::new(ClipboardWriteTool));
     registry.register(Arc::new(ScreenshotTool));
+    // taskManagement/ — todo_* tools (stateless, file-backed)
+    registry.register(Arc::new(TodoAddTool));
+    registry.register(Arc::new(TodoClearTool));
+    registry.register(Arc::new(TodoDoneTool));
+    registry.register(Arc::new(TodoListTool));
+    registry.register(Arc::new(TodoRemoveTool));
 }
 
