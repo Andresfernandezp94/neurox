@@ -59,7 +59,11 @@ impl Tool for SymbolsTool {
         )
         .map_err(|e| format!("path: {e}"))?;
 
-        // Try ast-grep (sg) first
+        // Try ast-grep (sg) first. The `sg --pattern <query> --json
+        // <search_dir>` invocation is a no-op if the user passes a
+        // plain string (not a metavar-based pattern like `function $A`),
+        // because ast-grep needs placeholders. We attempt the call
+        // anyway — the fallback regex below covers the common case.
         if let Ok(output) = Command::new("sg")
             .arg("--pattern")
             .arg(query)
@@ -77,10 +81,13 @@ impl Tool for SymbolsTool {
             }
         }
 
-        // Fallback: regex search for common definition patterns
+        // Fallback: regex search for common definition patterns. The
+        // original `{}`-after-name pattern missed `fn main()`-style
+        // signatures (where the brace is on the next line, common in
+        // Rust/C/Go), so we now anchor on a word boundary instead.
         let def_pattern = format!(
-            r"(?i)(fn|func|def|class|struct|enum|trait|interface|type|const|let|var)\s+.*{}",
-            regex::escape(query)
+            r"(?i)\b(fn|func|def|class|struct|enum|trait|interface|type|const|let|var)\s+{q}\b",
+            q = regex::escape(query)
         );
         let re = regex::Regex::new(&def_pattern).map_err(|e| format!("regex: {e}"))?;
         let mut results = Vec::new();

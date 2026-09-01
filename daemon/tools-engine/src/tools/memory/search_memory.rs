@@ -33,10 +33,14 @@ impl Tool for SearchMemoryTool {
 
 
     async fn execute(&self, _ctx: &crate::ExecuteContext, args: Value) -> Result<String, String> {
+        // `query` is optional — empty/missing returns ALL facts. The
+        // schema in `spec.parameters` already marks it optional (no
+        // `required` entry, no `enum`), so the previous error here was
+        // a bug that contradicted the spec.
         let query = args
             .get("query")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| "missing 'query'".to_string())?;
+            .unwrap_or("");
 
         // Resolve facts path. Default: `$XDG_DATA_HOME/neurox/identity/`.
         // Override: $NEUROX_IDENTITY_DIR.
