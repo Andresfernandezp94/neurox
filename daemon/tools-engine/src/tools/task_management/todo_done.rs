@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::{json, Value};
 
-use crate::tools::task_management::todo_store::{mutate_todos, format};
+use crate::tools::task_management::todo_store::{mutate_todos, format as format_todo};
 use crate::tools::{Tool, ToolSpec};
 use crate::tools::{ToolCategory, Mode};
 
@@ -73,7 +73,7 @@ impl Tool for TodoDoneTool {
             let updated = todos
                 .iter()
                 .find(|t| t.id == full_id)
-                .map(crate::tools::task_management::todo_store::format)
+                .map(format_todo)
                 .unwrap_or_else(|| full_id.clone());
             Ok(format!("marked done: {updated}"))
         })

@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+pub mod atomic_store;
 pub mod desktop;
 pub mod media;
 pub mod memory;

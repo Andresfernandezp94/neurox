@@ -1,5 +1,6 @@
 use serde_json::Value;
 use async_trait::async_trait;
+use crate::tools::atomic_store::mutate_store;
 use crate::tools::{Tool, ToolSpec};
 use crate::tools::{ToolCategory, Mode};
 // SaveFactTool extracted from core/src/tools/mod.rs (tools/memory/save_fact.rs)
@@ -37,11 +38,14 @@ impl Tool for SaveFactTool {
         let content = args
             .get("content")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| "missing 'content'".to_string())?;
+            .filter(|s| !s.trim().is_empty())
+            .ok_or_else(|| "missing 'content' (or empty)".to_string())?
+            .to_string();
         let fact_type = args
             .get("type")
             .and_then(|v| v.as_str())
-            .unwrap_or("learned");
+            .unwrap_or("learned")
+            .to_string();
 
         // Resolve facts path. Default: `$XDG_DATA_HOME/neurox/identity/`.
         // Override: $NEUROX_IDENTITY_DIR.
@@ -56,52 +60,49 @@ impl Tool for SaveFactTool {
             });
         let facts_path = identity_dir.join("facts.yaml");
 
-        // Ensure directory exists
-        if let Some(parent) = facts_path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| format!("mkdir: {e}"))?;
-        }
-
-        // Read existing facts
-        let existing = tokio::fs::read_to_string(&facts_path)
-            .await
-            .unwrap_or_default();
-        let mut doc: serde_yml::Value = if existing.is_empty() {
-            serde_yml::from_str("facts: []").unwrap()
-        } else {
-            serde_yml::from_str(&existing).map_err(|e| format!("parse yaml: {e}"))?
-        };
-
-        // Generate ID
+        // Generate ID + timestamp up front (deterministic per call).
         let id = uuid::Uuid::new_v4().to_string()[..8].to_string();
         let now = chrono::Utc::now().to_rfc3339();
+        let content_for_closure = content.clone();
+        let id_for_closure = id.clone();
 
-        // Build new fact
-        let new_fact = serde_yml::to_value(serde_json::json!({
-            "id": id,
-            "type": fact_type,
-            "content": content,
-            "source": "agent",
-            "created": now,
-            "last_confirmed": now,
-            "confidence": 0.9,
-            "active": true
-        }))
-        .map_err(|e| format!("serialize: {e}"))?;
+        // SR-fix: use the shared `mutate_store` helper which holds an
+        // in-process Mutex for the read-modify-write AND writes
+        // atomically (tmpfile + rename). Without this, concurrent
+        // save_fact calls would race, produce partial YAML, and the
+        // second parser would fail with "could not find expected :".
+        mutate_store(facts_path.clone(), move |existing| {
+            let mut doc: serde_yml::Value = if existing.is_empty() {
+                serde_yml::from_str("facts: []")
+                    .map_err(|e| format!("init yaml: {e}"))?
+            } else {
+                serde_yml::from_str(&existing)
+                    .map_err(|e| format!("parse yaml: {e}"))?
+            };
 
-        // Append to facts array
-        if let Some(facts) = doc.get_mut("facts").and_then(|v| v.as_sequence_mut()) {
-            facts.push(new_fact);
-        } else {
-            return Err("facts.yaml has invalid structure (missing 'facts' array)".to_string());
-        }
+            let new_fact = serde_yml::to_value(serde_json::json!({
+                "id": id_for_closure,
+                "type": fact_type,
+                "content": content_for_closure,
+                "source": "agent",
+                "created": now,
+                "last_confirmed": now,
+                "confidence": 0.9,
+                "active": true
+            }))
+            .map_err(|e| format!("serialize: {e}"))?;
 
-        // Write back
-        let yaml_str = serde_yml::to_string(&doc).map_err(|e| format!("serialize: {e}"))?;
-        tokio::fs::write(&facts_path, &yaml_str)
-            .await
-            .map_err(|e| format!("write: {e}"))?;
+            if let Some(facts) = doc.get_mut("facts").and_then(|v| v.as_sequence_mut()) {
+                facts.push(new_fact);
+            } else {
+                return Err("facts.yaml has invalid structure (missing 'facts' array)".to_string());
+            }
+
+            let yaml_str = serde_yml::to_string(&doc)
+                .map_err(|e| format!("serialize yaml: {e}"))?;
+            Ok(((), yaml_str))
+        })
+        .await?;
 
         Ok(format!("saved fact '{}' (id: {})", content, id))
     }
@@ -138,5 +139,35 @@ mod tests {
             )
             .await;
         assert!(result.is_err(), "expected error for missing content");
+    }
+
+    // SR-fix: concurrent save_fact calls must all succeed (no YAML
+    // corruption, no lost updates).
+    #[tokio::test]
+    async fn save_fact_concurrent_does_not_corrupt_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("NEUROX_IDENTITY_DIR", dir.path());
+
+        let mut handles = Vec::new();
+        for i in 0..10 {
+            handles.push(tokio::spawn(async move {
+                let tool = SaveFactTool;
+                tool.execute(
+                    &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                    serde_json::json!({"content": format!("concurrent fact {i}")}),
+                )
+                .await
+            }));
+        }
+        for h in handles {
+            assert!(h.await.unwrap().is_ok(), "all 10 saves should succeed");
+        }
+        std::env::remove_var("NEUROX_IDENTITY_DIR");
+
+        // Verify the YAML is well-formed and has 10 facts.
+        let yaml = std::fs::read_to_string(dir.path().join("facts.yaml")).unwrap();
+        let doc: serde_yml::Value = serde_yml::from_str(&yaml).unwrap();
+        let count = doc.get("facts").and_then(|v| v.as_sequence()).unwrap().len();
+        assert_eq!(count, 10, "expected 10 facts, got {count}");
     }
 }
