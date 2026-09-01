@@ -40,6 +40,20 @@ impl Tool for ClipboardWriteTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| "missing 'text'".to_string())?;
 
+        // CW-fix: cap the clipboard payload. The LLM can ship a
+        // multi-MB string here and (a) fill the wl-copy pipe buffer
+        // and break the connection or (b) overwrite the user's actual
+        // clipboard with junk. 1 MiB is plenty for a real clipboard
+        // payload (the OS clipboard typically holds 1-100 KB).
+        const MAX_CLIPBOARD_BYTES: usize = 1024 * 1024;
+        if text.len() > MAX_CLIPBOARD_BYTES {
+            return Err(format!(
+                "clipboard_write: text too long ({} bytes, max {})",
+                text.len(),
+                MAX_CLIPBOARD_BYTES
+            ));
+        }
+
         let mut child = Command::new("wl-copy")
             .stdin(std::process::Stdio::piped())
             .spawn()

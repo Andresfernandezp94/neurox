@@ -85,7 +85,15 @@ pub fn grep_walk_dir(
     if results.len() >= max {
         return Ok(());
     }
-    let entries = std::fs::read_dir(dir).map_err(|e| format!("readdir {}: {e}", dir.display()))?;
+    // GREP-fix: silently skip subdirs we can't read (permission
+    // denied, broken symlink, etc.) so a search across a large
+    // tree with one unreadable subdir still returns the matches
+    // we can see. Matches the behavior of `glob_walk_dir` and of
+    // ripgrep itself.
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(()),
+    };
     for entry in entries.flatten() {
         if results.len() >= max {
             break;
@@ -103,7 +111,8 @@ pub fn grep_walk_dir(
                 {
                     continue;
                 }
-                grep_walk_dir(&path, re, max, results)?;
+                // Same forgiveness for the recursive call.
+                let _ = grep_walk_dir(&path, re, max, results);
             } else if m.is_file() && m.len() < 1_000_000 {
                 // Only search files < 1MB
                 if let Ok(content) = std::fs::read_to_string(&path) {
