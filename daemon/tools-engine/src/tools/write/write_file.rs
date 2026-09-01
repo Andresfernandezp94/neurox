@@ -91,7 +91,7 @@ impl Tool for WriteFileTool {
                 // I/O errors (e.g. ENOENT during a sibling delete) with
                 // a small backoff.
                 const MAX_ATTEMPTS: usize = 8;
-                let mut last_err: Option<String> = None;
+                let last_err: Option<String> = None;
                 for _attempt in 0..MAX_ATTEMPTS {
                     match str_replace_once(&resolved, old_str, new_str).await {
                         Ok(()) => return Ok(format!("replaced in {}", path)),
