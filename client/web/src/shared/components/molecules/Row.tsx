@@ -49,6 +49,7 @@ export function Row({
   gap = "md",
   wrap = false,
   className = "",
+  ...rest
 }: RowProps) {
   const classes = [
     "row",
@@ -61,5 +62,9 @@ export function Row({
     .filter(Boolean)
     .join(" ");
 
-  return <div className={classes}>{children}</div>;
+  return (
+    <div className={classes} {...rest}>
+      {children}
+    </div>
+  );
 }

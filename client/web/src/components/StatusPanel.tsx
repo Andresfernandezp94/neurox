@@ -7,6 +7,10 @@
 // "General" de ConfigViewer se eliminó.
 // cleanup-2026-08: los tabs "Host" (SystemMonitor), "Capabilities" y
 // "Logs" se eliminaron junto con sus endpoints HTTP; solo queda Overview.
+// 2026-09-01: el header "Runtime status" ahora renderiza un
+// <StatusBar showDot /> con un dot pulsante que refleja la conexión
+// con el daemon (ok=degraded=error=connecting). El usuario pidió un
+// indicador tipo "luz" para ver de un vistazo si el daemon está vivo.
 
 import { useCallback, useEffect, useState } from "react";
 import { SectionHeader } from "../shared/components/SectionHeader";
@@ -16,6 +20,8 @@ import { Row } from "../shared/components/molecules/Row";
 import { Stack } from "../shared/components/molecules/Stack";
 import { StatPair } from "../shared/components/molecules/StatPair";
 import { Button } from "../shared/components/atoms/Button";
+import { StatusBar } from "../shared/components/StatusBar";
+import { useConnectionState } from "../store/StoreContext";
 import { listServices, type ServiceInfo, type ClientInfo } from "../api/services";
 import { getHealth } from "../api/health";
 import { getPlugins, type PluginInfo } from "../api/mcps";
@@ -105,6 +111,19 @@ function OverviewContent({
 }: OverviewContentProps) {
   const hasData = health !== null || services.length > 0 || plugins.length > 0;
 
+  // DOT-fix: deriva el status de la status bar del estado de la
+  // conexión WS. Si el daemon no responde, el último fetch dejó
+  // `error` con un mensaje y marcamos "error" para encender el dot rojo.
+  // Si todo OK, "ok". Si health llegó pero el WS está degradado,
+  // "degraded". Si aún no sabemos nada, "connecting".
+  const conn = useConnectionState();
+  let barStatus: "ok" | "degraded" | "error" | "connecting";
+  if (error) barStatus = "error";
+  else if (conn.ws === "closed") barStatus = "error";
+  else if (health === null) barStatus = "connecting";
+  else if (conn.isZombie) barStatus = "degraded";
+  else barStatus = "ok";
+
   return (
     <Stack gap="md" className="overview-content" data-testid="overview-content">
       {error && <ErrorBanner>{error}</ErrorBanner>}
@@ -140,6 +159,16 @@ function OverviewContent({
       </Row>
       <Card className="overview-content__card">
         <Stack gap="sm">
+          {/* DOT-fix: status bar con dot pulsante que muestra de un
+              vistazo si el daemon está conectado. El color del dot
+              sigue la variant del Badge (verde=ok, amarillo=degraded,
+              rojo=error, azul=connecting). */}
+          <StatusBar
+            version={health?.version ?? "—"}
+            status={barStatus}
+            uptimeSeconds={health?.uptime_seconds}
+            showDot
+          />
           <StatPair label="Version" value={health?.version ?? "—"} />
           <StatPair label="Status" value={health?.status ?? "—"} />
           <StatPair label="Uptime" value={formatUptime(health?.uptime_seconds)} />

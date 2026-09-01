@@ -47,4 +47,34 @@ describe("StatusBar", () => {
     const { container } = render(<StatusBar version="1.0" status="ok" />);
     expect(container.textContent).not.toContain("↑");
   });
+
+  // DOT-fix: el badge debe incluir un .badge__dot cuando showDot=true
+  // para que el usuario vea de un vistazo si el daemon está conectado,
+  // degradado, o caído. CSS ya existía (atoms.css .badge__dot +
+  // .badge--success/.warn/.info .badge__dot { animation: badge-pulse }).
+  it("does not render dot by default", () => {
+    const { container } = render(<StatusBar version="1.0" status="ok" />);
+    expect(container.querySelector(".badge__dot")).not.toBeInTheDocument();
+  });
+
+  it("renders dot when showDot=true", () => {
+    const { container } = render(
+      <StatusBar version="1.0" status="ok" showDot />
+    );
+    const dot = container.querySelector(".badge__dot");
+    expect(dot).toBeInTheDocument();
+    expect(dot).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("renders dot for all four statuses when showDot=true", () => {
+    for (const status of ["ok", "degraded", "error", "connecting"] as const) {
+      const { container } = render(
+        <StatusBar version="1.0" status={status} showDot />
+      );
+      const dot = container.querySelector(".badge__dot");
+      const badge = container.querySelector(".badge");
+      expect(dot, `dot missing for status=${status}`).toBeInTheDocument();
+      expect(badge, `badge missing for status=${status}`).toBeInTheDocument();
+    }
+  });
 });

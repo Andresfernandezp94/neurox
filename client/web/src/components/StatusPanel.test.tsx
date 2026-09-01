@@ -107,6 +107,16 @@ describe('StatusPanel', () => {
     expect(screen.getByText(/MCP \(0\)/)).toBeInTheDocument();
     expect(screen.getByText('Daemon')).toBeInTheDocument();
     expect(screen.getByText('Memory')).toBeInTheDocument();
+
+    // DOT-fix: el status bar del Runtime status debe incluir un
+    // .badge__dot porque showDot=true por default. El color del
+    // dot sigue la variant del badge — aquí "ok" → verde.
+    const statusBar = screen.getByTestId("status-bar");
+    expect(statusBar).toHaveAttribute("data-status", "ok");
+    const dot = statusBar.querySelector(".badge__dot");
+    expect(dot).toBeInTheDocument();
+    const badge = statusBar.querySelector(".badge");
+    expect(badge).toHaveClass("badge--success");
   });
 
   it('overview: shows empty state when no services reported', async () => {
