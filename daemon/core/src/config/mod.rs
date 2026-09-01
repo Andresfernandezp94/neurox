@@ -449,7 +449,16 @@ impl SandboxConfig {
     }
 
     fn resolve_paths(&self, paths: &[String], workspace_root: &std::path::Path) -> Vec<std::path::PathBuf> {
-        paths.iter().map(|p| self.resolve_one(p, workspace_root)).collect()
+        // EP-2026-09-01 security fix: drop empty paths before returning.
+        // If `${workspace}` resolves to an empty workspace_root the
+        // result is an empty PathBuf which would match every input
+        // (`path.starts_with("") == true`) — effectively a global
+        // "everything is allowed" bypass.
+        paths
+            .iter()
+            .map(|p| self.resolve_one(p, workspace_root))
+            .filter(|p| !p.as_os_str().is_empty())
+            .collect()
     }
 }
 
