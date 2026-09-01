@@ -11,9 +11,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { Sidebar, type NavId } from "./Sidebar";
 import { StoreProvider } from "../../store/StoreContext";
+import { AuthProvider } from "../../hooks/useAuth";
 
 function renderWithProviders(ui: React.ReactElement) {
-  return render(<StoreProvider eventsPath="/__test_no_ws__{Math.random()}">{ui}</StoreProvider>);
+  return render(
+    <AuthProvider>
+      <StoreProvider eventsPath="/__test_no_ws__{Math.random()}">{ui}</StoreProvider>
+    </AuthProvider>
+  );
 }
 
 describe("Sidebar", () => {
@@ -93,5 +98,18 @@ describe("Sidebar", () => {
       expect(btn.className).toContain("active");
       unmount();
     }
+  });
+
+  // DOT-fix: el Sidebar incluye una StatusBar con dot pulsante en
+  // su footer para que el indicador de conexión sea visible
+  // SIEMPRE, independientemente del tab activo (status, chat, etc.).
+  it("renders status bar with dot in footer (always visible)", () => {
+    renderWithProviders(<Sidebar view="status" onTabChange={onTabChange} />);
+    // The status bar should be present with its test-id
+    const statusBar = screen.getByTestId("status-bar");
+    expect(statusBar).toBeInTheDocument();
+    // And the dot should be rendered (we always show it)
+    const dot = statusBar.querySelector(".badge__dot");
+    expect(dot).toBeInTheDocument();
   });
 });

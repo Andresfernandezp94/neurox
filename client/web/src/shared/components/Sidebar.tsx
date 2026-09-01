@@ -28,6 +28,7 @@ import {
   IconPower,
 } from "./Icons";
 import { AppLogo } from "./AppLogo";
+import { StatusBar } from "./StatusBar";
 import { UserPlaceholder } from "../../components/UserPlaceholder";
 import { useI18n } from "../hooks/useI18n";
 import { useConnectionState } from "../../store/StoreContext";
@@ -207,6 +208,11 @@ export function Sidebar({ view, onTabChange, hidden = false, forceCollapsed = fa
         <div className="sidebar-panel__spacer" />
 
         <div className="sidebar-panel__footer">
+          {/* DOT-fix: status bar con dot pulsante para que el usuario
+              vea de un vistazo si el daemon responde. La barra va
+              ARRIBA del avatar para que sea lo primero que mire al
+              scrollear al final del sidebar. */}
+          <SidebarStatusBar />
           <UserPlaceholder
             avatarClassName={connAvatarClass}
             footer={
@@ -256,3 +262,27 @@ function computeCombinedForIndicator(conn: ReturnType<typeof useConnectionState>
 }
 
 type Combined = 'offline' | 'degraded' | 'ok';
+
+/** DOT-fix: status bar con dot pulsante renderizada en el footer
+ *  del sidebar (siempre visible). El color del dot sigue el
+ *  estado de la conexión WS del daemon:
+ *    ok         → verde pulsante
+ *    degraded   → amarillo pulsante
+ *    error      → rojo fijo
+ *    connecting → azul pulsante
+ *  La versión y uptime se leen del último /health que el store
+ *  cacheó — están en `conn.health`. */
+function SidebarStatusBar() {
+  const conn = useConnectionState();
+  const combined = computeCombinedForIndicator(conn);
+  const version = conn.health?.version;
+  const uptime = conn.health?.uptime_seconds;
+  return (
+    <StatusBar
+      version={version ?? "—"}
+      status={combined === "offline" ? "error" : combined}
+      uptimeSeconds={uptime}
+      showDot
+    />
+  );
+}
