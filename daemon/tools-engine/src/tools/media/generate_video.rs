@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use serde_json::Value;
 use async_trait::async_trait;
+use crate::tools::media::sanitize_filename;
 use crate::tools::{Tool, ToolSpec};
 use crate::tools::{ToolCategory, Mode};
 // GenerateVideoTool extracted from core/src/tools/mod.rs (tools/media/generate_video.rs)
@@ -48,7 +49,7 @@ impl Tool for GenerateVideoTool {
         let filename = args
             .get("filename")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
+            .map(|s| sanitize_filename(&s, "mp4"))
             .unwrap_or_else(|| {
                 let slug: String = prompt
                     .chars()
