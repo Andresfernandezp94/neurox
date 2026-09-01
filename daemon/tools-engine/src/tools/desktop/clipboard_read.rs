@@ -16,7 +16,12 @@ impl Tool for ClipboardReadTool {
                 "type": "object",
                 "properties": {}
             }),
-            requires_approval: false,
+            // CR-fix: the clipboard can hold passwords, tokens,
+            // private messages. Marking requires_approval=true
+            // so the LLM can't silently exfiltrate whatever the user
+            // copied last. Pairs with clipboard_write which is
+            // already approval-gated.
+            requires_approval: true,
         ..Default::default()
         }
     }
