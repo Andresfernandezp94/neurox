@@ -886,6 +886,12 @@ pub struct SessionCreated {
     /// PID of the per-session subprocess when `executor == "session_process"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pid: Option<u32>,
+    /// Stable client identifier (e.g. "web", "sidebar-<instance>").
+    /// Sessions from different clients are partitioned in the
+    /// session list so web and sidebar don't accidentally share
+    /// session IDs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_id: Option<String>,
 }
 
 pub async fn create_session(
@@ -897,6 +903,23 @@ pub async fn create_session(
         .and_then(|v| v.as_str())
         .ok_or((StatusCode::BAD_REQUEST, "missing agent_id".to_string()))?
         .to_string();
+    // SIDEBAR-FIX: the sidebar's useDefaultAgentId() can return null
+    // if /v1/agents hasn't loaded yet, and ChatBubble falls back to
+    // "" instead of waiting. An empty string here used to fall
+    // through to is_known_agent("", ...) and return
+    // "agent not found: " which the sidebar mis-rendered as
+    // "Could not create neurox session (is the daemon running?)".
+    // Reject empty up front so the error names the actual problem.
+    if agent_id.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "agent_id is required (empty string sent — caller likely hadn't loaded /v1/agents yet)".to_string(),
+        ));
+    }
+    let client_id = body
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
 
     if !state.is_known_agent(&agent_id).await {
         return Err((
@@ -946,6 +969,13 @@ pub async fn create_session(
     if let Err(e) = state.lifecycle.session.start_session(session_id, &agent_id).await {
         tracing::warn!(session_id = %session_id, error = %e, "session persist failed");
     }
+    // Tag the session with the client_id (web / sidebar-*) so each
+    // client only sees its own sessions when listing.
+    if let Some(ref cid) = client_id {
+        if let Err(e) = state.lifecycle.session.set_client_id(session_id, Some(cid)).await {
+            tracing::warn!(session_id = %session_id, error = %e, "client_id set failed");
+        }
+    }
 
     // Auto-populate the session's LLM provider/model from the daemon's
     // active defaults so `/health` shows what the agent is actually
@@ -970,6 +1000,7 @@ pub async fn create_session(
         agent_id,
         executor,
         pid,
+        client_id,
     }))
 }
 
@@ -977,6 +1008,11 @@ pub async fn create_session(
 pub struct MessageReq {
     pub agent_id: String,
     pub text: String,
+    /// Optional stable client id (e.g. "web", "sidebar-<instance>").
+    /// Used to tag the dispatch with a `request_id` so concurrent
+    /// streams on the same session don't cross-wire events.
+    #[serde(default)]
+    pub client_id: Option<String>,
 }
 
 #[tracing::instrument(skip_all, fields(session_id = %session_id, agent_id = tracing::field::Empty))]
@@ -1237,16 +1273,27 @@ pub async fn post_message_stream(
     let _ = state.lifecycle.session.update_summary(session_id, &preview).await;
 
     let session_for_task = session_id;
+    // D3 fix: tag this dispatch with a unique request_id so concurrent
+    // SSE streams on the same session can filter to their own events.
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let client_id = body.client_id.clone();
 
     // Subscribe to the GLOBAL event bus (default::process_message emits here).
     let mut event_rx = state.events.event_tx.subscribe();
     let tx_for_forward = tx.clone();
+    let request_id_for_forward = request_id.clone();
+    let client_id_for_forward = client_id.clone();
     tokio::spawn(async move {
         loop {
             match event_rx.recv().await {
                 Ok(Event::Content { session_id, text }) if session_id == session_for_task => {
                     if tx_for_forward
-                        .send(serde_json::json!({"type": "content", "text": text}))
+                        .send(serde_json::json!({
+                            "type": "content",
+                            "text": text,
+                            "request_id": request_id_for_forward,
+                            "client_id": client_id_for_forward,
+                        }))
                         .await
                         .is_err()
                     {
@@ -1255,7 +1302,12 @@ pub async fn post_message_stream(
                 }
                 Ok(Event::Thinking { session_id, text }) if session_id == session_for_task => {
                     if tx_for_forward
-                        .send(serde_json::json!({"type": "thinking", "text": text}))
+                        .send(serde_json::json!({
+                            "type": "thinking",
+                            "text": text,
+                            "request_id": request_id_for_forward,
+                            "client_id": client_id_for_forward,
+                        }))
                         .await
                         .is_err()
                     {
@@ -1274,6 +1326,8 @@ pub async fn post_message_stream(
                             "tool": tool,
                             "args": args,
                             "iteration": iteration,
+                            "request_id": request_id_for_forward,
+                            "client_id": client_id_for_forward,
                         }))
                         .await
                         .is_err()
@@ -1293,6 +1347,8 @@ pub async fn post_message_stream(
                             "tool": tool,
                             "result": result,
                             "iteration": iteration,
+                            "request_id": request_id_for_forward,
+                            "client_id": client_id_for_forward,
                         }))
                         .await
                         .is_err()
@@ -1310,6 +1366,8 @@ pub async fn post_message_stream(
                             "tool": request.tool,
                             "args": request.args,
                             "reason": request.reason,
+                            "request_id": request_id_for_forward,
+                            "client_id": client_id_for_forward,
                         }))
                         .await
                         .is_err()
@@ -1329,6 +1387,8 @@ pub async fn post_message_stream(
                             "id": approval_id,
                             "tool": tool,
                             "decision": decision,
+                            "request_id": request_id_for_forward,
+                            "client_id": client_id_for_forward,
                         }))
                         .await
                         .is_err()
@@ -1340,19 +1400,35 @@ pub async fn post_message_stream(
                     session_id,
                     text: _,
                 }) if session_id == session_for_task => {
+                    let _ = tx_for_forward.send(serde_json::json!({
+                        "request_id": request_id_for_forward,
+                        "client_id": client_id_for_forward,
+                        "type": "done",
+                    }));
                     let _ = tx_for_forward.send(serde_json::json!("[DONE]"));
                     break;
                 }
+                // D2 fix: Event::Error is just an event — keep the stream
+                // open until the dispatcher's Event::Done closes the turn.
+                // The previous behavior broke here, silently dropping the
+                // Event::ToolResult that the dispatcher emits immediately
+                // after the error.
                 Ok(Event::Error {
                     session_id: Some(sid),
                     message,
                 }) if sid == session_for_task => {
-                    let _ = tx_for_forward.send(serde_json::json!({
-                        "type": "error",
-                        "message": message,
-                    }));
-                    let _ = tx_for_forward.send(serde_json::json!("[DONE]"));
-                    break;
+                    if tx_for_forward
+                        .send(serde_json::json!({
+                            "type": "error",
+                            "message": message,
+                            "request_id": request_id_for_forward,
+                            "client_id": client_id_for_forward,
+                        }))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(broadcast::error::RecvError::Closed) => break,
@@ -1582,6 +1658,16 @@ pub async fn get_session_agent(
         .get(session_id)
         .await
         .ok_or_else(|| (StatusCode::NOT_FOUND, "session agent not found".to_string()))?;
+    // EP-2026-08-31: report dead subprocesses as 404 so the sidebar's
+    // bash validator (and any other client) sees the session as gone
+    // and recreates. Without this, the cached `pid` looks alive to
+    // the validator and the next /send hangs on the dead pipe.
+    if !crate::session_agents::SessionAgentPool::is_subprocess_alive(&agent) {
+        return Err((
+            StatusCode::NOT_FOUND,
+            "session agent subprocess is dead".to_string(),
+        ));
+    }
     Ok(Json(serde_json::json!({
         "session_id": agent.session_id,
         "agent_id": agent.agent_id,
