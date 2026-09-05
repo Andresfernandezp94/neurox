@@ -4,8 +4,8 @@
 // Why this exists:
 //   The daemon's `GET /v1/agents` returns the in-process default agent
 //   with the id it actually accepts for session-create / message-send.
-//   Previously the frontend hardcoded `"default"` in five places
-//   (useChatTabs, ChatBubble, ChatPanel ×2, AgentSelector). If the
+//   Previously the frontend hardcoded `"default"` in four places
+//   (useChatTabs, ChatPanel ×2, AgentSelector). If the
 //   daemon ever renames the in-process agent, refactors the default,
 //   or runs in a multi-agent setup where the user wants a different
 //   fallback, all five would silently send a stale id and the daemon

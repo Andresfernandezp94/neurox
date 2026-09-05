@@ -220,13 +220,21 @@ impl AgentProtocol for JsonRpcStdio {
                     .and_then(|v| v.as_str())
                 {
                     let event = match method {
+                        // EP-2026-09-05 (stream seq): `seq` is a
+                        // placeholder here (0). The real per-session
+                        // sequence is stamped in the router's forwarder
+                        // task right before the event is broadcast on
+                        // the bus, so all four stream event types share
+                        // one strictly-increasing sequence per session.
                         "content_delta" => Event::Content {
                             session_id: req.session_id,
                             text: text.to_string(),
+                            seq: 0,
                         },
                         "thinking_delta" => Event::Thinking {
                             session_id: req.session_id,
                             text: text.to_string(),
+                            seq: 0,
                         },
                         _ => continue, // unknown notification type — ignore
                     };

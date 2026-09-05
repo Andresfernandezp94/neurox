@@ -207,7 +207,6 @@ impl Tool for WebFetchTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     // Note: tests for is_safe_target / is_unsafe_ip live in
     // `tools/url_safety.rs` (the shared module). web_fetch only
     // needs a smoke test that the redirect policy still works.

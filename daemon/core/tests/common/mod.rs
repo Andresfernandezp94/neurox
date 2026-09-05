@@ -28,16 +28,18 @@ use neurox::skills::SkillsRegistry;
 use neurox::spawner::Spawner;
 use neurox::supervisor::Supervisor;
 use neurox::tasks::TaskManager;
-use parking_lot::RwLock;
 
 /// Build a complete `AppState` for integration tests. Mirrors the
 /// production wiring but with empty defaults. `db_path` is the path
 /// where the session store will live; pass a tempfile-generated path.
+///
+/// Auth is JWT-only since EP-2026-08-19 (the legacy `api_token` was
+/// removed). Tests that need auth-enabled state should use
+/// `AuthLayer::with_auth(...)` after construction.
 pub async fn build_app_state(
     db_path: PathBuf,
     tools: Arc<tools_engine::tools::ToolRegistry>,
     workspace_root: PathBuf,
-    api_token: Option<String>,
 ) -> AppState {
     let registry = Arc::new(Registry::new(workspace_root.clone()));
     let session = Arc::new(
@@ -65,7 +67,7 @@ pub async fn build_app_state(
         Arc::new(SkillsRegistry::new()),
         Arc::new(PluginToolRegistry::new(tools)),
     ));
-    let auth = AuthLayer::new(api_token);
+    let auth = AuthLayer::new();
     let workspace = Arc::new(WorkspaceLayer::new(
         workspace_root,
         Arc::new(tokio::sync::RwLock::new(Box::new(neurox::config::SandboxConfig::default()) as Box<dyn tools_engine::SandboxConfig>)),
@@ -87,7 +89,6 @@ pub async fn build_app_state(
 pub async fn build_app_state_auto(
     tools: Arc<tools_engine::tools::ToolRegistry>,
     workspace_root: PathBuf,
-    api_token: Option<String>,
 ) -> AppState {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let db_path = tmp
@@ -95,5 +96,5 @@ pub async fn build_app_state_auto(
         .join(format!("neurox-test-{}.db", uuid::Uuid::new_v4()));
     // tmp is dropped here but the SQLite handle keeps the file alive
     // for the duration of the process.
-    build_app_state(db_path, tools, workspace_root, api_token).await
+    build_app_state(db_path, tools, workspace_root).await
 }

@@ -42,7 +42,8 @@ export interface StreamState {
    * used to be silently dropped (`return state` in the reducer),
    * which made the agent look hung when a tool failed. We now
    * surface the latest error message here so the consumer (ChatPanel)
-   * can mirror it to its own error banner via `onState`.
+   * can mirror it to its own error banner via the `applyStreamChunk`
+   * return value.
    *
    * `null` = no error chunk has arrived since the stream started.
    * `setError(null)` is the consumer's job on the next `send`.

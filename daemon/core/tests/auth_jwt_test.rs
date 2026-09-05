@@ -20,19 +20,9 @@ use std::time::Duration;
 
 mod common;
 
-use neurox::approval::ApprovalManager;
 use neurox::auth::{AuthConfig, AuthState, JwtSecret, ReauthTokens, Role, UserStore};
-use neurox::config::{AuthConfigSection, CoreConfig, SandboxConfig};
-use neurox::registry::Registry;
-use neurox::router::AppState;
-use neurox::session::SessionStore;
-use neurox::session_agents::SessionAgentPool;
-use neurox::spawner::Spawner;
-use neurox::supervisor::Supervisor;
-use neurox::tasks::TaskManager;
-use tools_engine::tools::ToolRegistry;
+use neurox::config::{AuthConfigSection, CoreConfig};
 use serde_json::json;
-use uuid::Uuid;
 
 async fn free_port() -> u16 {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -43,8 +33,11 @@ async fn free_port() -> u16 {
 
 struct TestEnv {
     port: u16,
-    user_store: Arc<UserStore>,
-    secret: Arc<JwtSecret>,
+    /// Kept for diagnostics in test failure messages; no assertion
+    /// currently reads it. Prefix with `_` to silence the dead-code
+    /// warning while leaving it accessible to future assertions.
+    _user_store: Arc<UserStore>,
+    _secret: Arc<JwtSecret>,
     _tmp: tempfile::TempDir,
 }
 
@@ -86,28 +79,11 @@ async fn build_app_with_auth(admin_password: &str) -> TestEnv {
         jwt_expiry_hours: 1,
     };
 
-    let registry = Arc::new(Registry::new(tmp.path().to_path_buf()));
-    let supervisor = Arc::new(Supervisor::new());
-    let spawner = Arc::new(Spawner::new(2));
-    let session = Arc::new(
-        SessionStore::open(
-            &tmp.path().join(format!("test-{}.db", Uuid::new_v4())),
-        )
-        .await
-        .unwrap(),
-    );
     let tools = Arc::new(tools_engine::tools::ToolRegistry::new());
-    let engine = tools_engine::Engine::for_testing(
-        tools.clone(),
-        PathBuf::from("/tmp"),
-        Arc::new(tokio::sync::RwLock::new(Box::new(tools_engine::DefaultSandbox) as Box<dyn tools_engine::SandboxConfig>)),
-    ).await
-        .unwrap();
     let mut state = common::build_app_state(
         std::env::temp_dir().join(format!("neurox-test-{}.db", uuid::Uuid::new_v4())),
         tools.clone(),
         PathBuf::from("/tmp"),
-        None,
     )
     .await;
     state.auth = state.auth.with_auth(auth_state);
@@ -124,8 +100,8 @@ async fn build_app_with_auth(admin_password: &str) -> TestEnv {
 
     TestEnv {
         port,
-        user_store: store,
-        secret,
+        _user_store: store,
+        _secret: secret,
         _tmp: tmp,
     }
 }

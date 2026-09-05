@@ -64,7 +64,7 @@ impl Tool for NoopTool {
         }
     }
 
-    async fn execute(&self, ctx: &ExecuteContext, args: Value) -> Result<String, String> {
+    async fn execute(&self, _ctx: &ExecuteContext, args: Value) -> Result<String, String> {
         Ok(format!("noop-ok:{}", args))
     }
 }
@@ -118,7 +118,6 @@ impl TestRig {
             db_path,
             log_level: "warn".into(),
             agents: AgentsConfig::default(),
-            api_token: None,
             tls: None,
             spawner_concurrency: 8,
             in_process: vec![],
@@ -143,10 +142,10 @@ impl TestRig {
                 .expect("session store"),
         );
         let plugin_registry = Arc::new(PluginToolRegistry::new(Arc::new(ToolRegistry::new())));
-        let sandbox = Arc::new(RwLock::new(SandboxConfig::default()));
+        let _sandbox = Arc::new(RwLock::new(SandboxConfig::default()));
         let session_agents = Arc::new(SessionAgentPool::new(cfg.session_agents.agents.clone()));
 
-        let engine = tools_engine::Engine::for_testing(
+        let _engine = tools_engine::Engine::for_testing(
             tools.clone(),
             PathBuf::from("/tmp"),
             Arc::new(tokio::sync::RwLock::new(Box::new(tools_engine::DefaultSandbox) as Box<dyn tools_engine::SandboxConfig>)),
@@ -156,7 +155,6 @@ impl TestRig {
             tmp.path().join("test.db"),
             Arc::new(tools_engine::tools::ToolRegistry::new()),
             PathBuf::from("/tmp"),
-            None,
         )
         .await;
         // Wire the pre-built session_agents pool (with the test specs)

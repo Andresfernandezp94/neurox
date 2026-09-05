@@ -20,7 +20,6 @@ vi.mock("../api/sessions", async (importOriginal) => {
     getSessionMessages: vi.fn().mockResolvedValue({ messages: [] }),
     streamMessage: vi.fn(),
     cancelSession: vi.fn(),
-    sendMessage: vi.fn(),
     renameSession: vi.fn(),
   };
 });

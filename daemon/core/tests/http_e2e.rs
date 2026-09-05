@@ -14,8 +14,6 @@ use neurox::config::{
 };
 use neurox::protocols::{ProtocolKind, TransportKind};
 use neurox::registry::Registry;
-use neurox::router::AppState;
-use neurox::session_agents::SessionAgentPool;
 use neurox::config::SessionAgentsConfig;
 use neurox::session::SessionStore;
 use neurox::spawner::Spawner;
@@ -40,10 +38,10 @@ async fn free_port() -> u16 {
 
 #[tokio::test]
 async fn health_endpoint_returns_ok() {
-    let registry = std::sync::Arc::new(Registry::new("/tmp/x".into()));
-    let supervisor = std::sync::Arc::new(Supervisor::new());
-    let spawner = std::sync::Arc::new(Spawner::new(4));
-    let session = Arc::new(
+    let _registry = std::sync::Arc::new(Registry::new("/tmp/x".into()));
+    let _supervisor = std::sync::Arc::new(Supervisor::new());
+    let _spawner = std::sync::Arc::new(Spawner::new(4));
+    let _session = Arc::new(
         SessionStore::open(
             &std::env::temp_dir().join(format!("neurox-test-{}.db", Uuid::new_v4())),
         )
@@ -51,7 +49,7 @@ async fn health_endpoint_returns_ok() {
         .unwrap(),
     );
     let tools = Arc::new(tools_engine::tools::ToolRegistry::new());
-    let engine = tools_engine::Engine::for_testing(
+    let _engine = tools_engine::Engine::for_testing(
         tools.clone(),
         PathBuf::from("/tmp"),
         Arc::new(tokio::sync::RwLock::new(Box::new(tools_engine::DefaultSandbox) as Box<dyn tools_engine::SandboxConfig>)),
@@ -60,7 +58,6 @@ async fn health_endpoint_returns_ok() {
     let state = common::build_app_state_auto(
         tools.clone(),
         PathBuf::from("/tmp"),
-        None,
     )
     .await;
     let app = neurox::router::router(state);
@@ -128,7 +125,6 @@ async fn full_flow_register_session_message_with_real_default_agent() {
             persistent: vec![spec.clone()],
             ephemeral_templates: vec![],
         },
-        api_token: None,
         tls: None,
         spawner_concurrency: 4,
         in_process: vec![],
@@ -143,8 +139,8 @@ async fn full_flow_register_session_message_with_real_default_agent() {
 
     let supervisor = std::sync::Arc::new(Supervisor::new());
     supervisor.start_agent(spec.clone()).await.unwrap();
-    let spawner = std::sync::Arc::new(Spawner::new(4));
-    let session = Arc::new(
+    let _spawner = std::sync::Arc::new(Spawner::new(4));
+    let _session = Arc::new(
         SessionStore::open(
             &std::env::temp_dir().join(format!("neurox-test-{}.db", Uuid::new_v4())),
         )
@@ -152,7 +148,7 @@ async fn full_flow_register_session_message_with_real_default_agent() {
         .unwrap(),
     );
     let tools = Arc::new(tools_engine::tools::ToolRegistry::new());
-    let engine = tools_engine::Engine::for_testing(
+    let _engine = tools_engine::Engine::for_testing(
         tools.clone(),
         PathBuf::from("/tmp"),
         Arc::new(tokio::sync::RwLock::new(Box::new(tools_engine::DefaultSandbox) as Box<dyn tools_engine::SandboxConfig>)),
@@ -161,7 +157,6 @@ async fn full_flow_register_session_message_with_real_default_agent() {
     let state = common::build_app_state_auto(
         tools.clone(),
         PathBuf::from("/tmp"),
-        None,
     )
     .await;
     let app = neurox::router::router(state);
@@ -282,7 +277,6 @@ async fn websocket_streams_session_events() {
             persistent: vec![spec.clone()],
             ephemeral_templates: vec![],
         },
-        api_token: None,
         tls: None,
         spawner_concurrency: 4,
         in_process: vec![],
@@ -297,8 +291,8 @@ async fn websocket_streams_session_events() {
 
     let supervisor = std::sync::Arc::new(Supervisor::new());
     supervisor.start_agent(spec).await.unwrap();
-    let spawner = std::sync::Arc::new(Spawner::new(4));
-    let session = Arc::new(
+    let _spawner = std::sync::Arc::new(Spawner::new(4));
+    let _session = Arc::new(
         SessionStore::open(
             &std::env::temp_dir().join(format!("neurox-test-{}.db", Uuid::new_v4())),
         )
@@ -306,7 +300,7 @@ async fn websocket_streams_session_events() {
         .unwrap(),
     );
     let tools = Arc::new(tools_engine::tools::ToolRegistry::new());
-    let engine = tools_engine::Engine::for_testing(
+    let _engine = tools_engine::Engine::for_testing(
         tools.clone(),
         PathBuf::from("/tmp"),
         Arc::new(tokio::sync::RwLock::new(Box::new(tools_engine::DefaultSandbox) as Box<dyn tools_engine::SandboxConfig>)),
@@ -315,7 +309,6 @@ async fn websocket_streams_session_events() {
     let state = common::build_app_state_auto(
         tools.clone(),
         PathBuf::from("/tmp"),
-        None,
     )
     .await;
     let app = neurox::router::router(state);
@@ -430,7 +423,6 @@ async fn ephemeral_researcher_end_to_end() {
             persistent: vec![],
             ephemeral_templates: vec![template],
         },
-        api_token: None,
         tls: None,
         spawner_concurrency: 4,
         in_process: vec![],
@@ -443,7 +435,7 @@ async fn ephemeral_researcher_end_to_end() {
     };
     registry.load_from_config(&cfg).await.unwrap();
 
-    let supervisor = std::sync::Arc::new(Supervisor::new());
+    let _supervisor = std::sync::Arc::new(Supervisor::new());
     let spawner = std::sync::Arc::new(Spawner::new(4));
     let session = Arc::new(
         SessionStore::open(&cfg.db_path)
@@ -451,7 +443,7 @@ async fn ephemeral_researcher_end_to_end() {
             .expect("session store opens"),
     );
     let tools = Arc::new(tools_engine::tools::ToolRegistry::new());
-    let engine = tools_engine::Engine::for_testing(
+    let _engine = tools_engine::Engine::for_testing(
         tools.clone(),
         PathBuf::from("/tmp"),
         Arc::new(tokio::sync::RwLock::new(Box::new(tools_engine::DefaultSandbox) as Box<dyn tools_engine::SandboxConfig>)),
@@ -460,7 +452,6 @@ async fn ephemeral_researcher_end_to_end() {
     let state = common::build_app_state_auto(
         tools.clone(),
         PathBuf::from("/tmp"),
-        None,
     )
     .await;
     let app = neurox::router::router(state);

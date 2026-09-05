@@ -283,6 +283,7 @@ impl AppState {
     ) -> anyhow::Result<AgentResponse> {
         let (tx, mut rx) = mpsc::channel::<Event>(64);
         let event_tx = self.events.event_tx.clone();
+        let events_layer = self.events.clone();
         let cancel_for_forward = cancel.clone();
         let forward = tokio::spawn(async move {
             loop {
@@ -291,7 +292,19 @@ impl AppState {
                     () = cancel_for_forward.cancelled() => break,
                     evt = rx.recv() => {
                         match evt {
-                            Some(event) => {
+                            Some(mut event) => {
+                                // EP-2026-09-05 (stream seq): stamp the
+                                // per-session sequence right before the
+                                // event hits the bus. Content/Thinking
+                                // are born in the protocol stream with a
+                                // placeholder seq (0); assign the real
+                                // monotonic value here so ordering is
+                                // consistent for every subscriber.
+                                if let Event::Content { session_id, seq, .. }
+                                | Event::Thinking { session_id, seq, .. } = &mut event
+                                {
+                                    *seq = events_layer.next_seq(*session_id);
+                                }
                                 if event_tx.send(event).is_err() { break; }
                             }
                             None => break,
@@ -421,6 +434,7 @@ impl AppState {
                 tool: call.name.clone(),
                 result: err,
                 iteration,
+                seq: self.events.next_seq(session_id),
             });
             return Ok(None);
         };
@@ -432,6 +446,7 @@ impl AppState {
             tool: call.name.clone(),
             args: call.args.clone(),
             iteration,
+            seq: self.events.next_seq(session_id),
         });
 
         // Per-agent approval override: if the spec defines an explicit list,
@@ -521,6 +536,7 @@ impl AppState {
             tool: call.name.clone(),
             result: output.clone(),
             iteration,
+            seq: self.events.next_seq(session_id),
         });
 
         self.dispatch_session_tool_result(
@@ -773,6 +789,7 @@ impl AppState {
             let (tx, mut rx) = mpsc::channel::<Event>(64);
             let tx_for_drop = tx.clone(); // kept alive to close the channel after spawn
             let event_tx = self.events.event_tx.clone();
+            let events_layer = self.events.clone();
             let cancel_for_forward = cancel.clone();
             // Forward spawned-agent events to the broadcast channel
             let forward = tokio::spawn(async move {
@@ -782,7 +799,15 @@ impl AppState {
                         () = cancel_for_forward.cancelled() => break,
                         evt = rx.recv() => {
                             match evt {
-                                Some(event) => {
+                                Some(mut event) => {
+                                    // EP-2026-09-05 (stream seq): stamp
+                                    // the per-session sequence before
+                                    // broadcasting (see stream_session_agent).
+                                    if let Event::Content { session_id, seq, .. }
+                                    | Event::Thinking { session_id, seq, .. } = &mut event
+                                    {
+                                        *seq = events_layer.next_seq(*session_id);
+                                    }
                                     if event_tx.send(event).is_err() {
                                         break;
                                     }
@@ -983,6 +1008,7 @@ impl AppState {
             tool: call.name.clone(),
             args: call.args.clone(),
             iteration,
+            seq: self.events.next_seq(session_id),
         });
 
         // Check approval
@@ -1071,6 +1097,7 @@ impl AppState {
             tool: call.name.clone(),
             result: output.clone(),
             iteration,
+            seq: self.events.next_seq(session_id),
         });
 
         self.dispatch_tool_result(

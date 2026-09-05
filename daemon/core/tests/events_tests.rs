@@ -27,6 +27,7 @@ fn event_tag_is_type_field() {
     let ev = Event::Thinking {
         session_id: Uuid::nil(),
         text: "considerando".to_string(),
+        seq: 1,
     };
     let v: serde_json::Value = serde_json::to_value(&ev).unwrap();
     assert_eq!(v["type"], "thinking");
@@ -63,6 +64,7 @@ fn tool_call_carries_iteration() {
         tool: "shell".to_string(),
         args: serde_json::json!({"cmd": "ls"}),
         iteration: 3,
+        seq: 1,
     };
     let v = serde_json::to_value(&ev).unwrap();
     assert_eq!(v["type"], "tool_call");
@@ -96,22 +98,26 @@ fn session_id_extractor_works_on_all_variants() {
         Event::Thinking {
             session_id: sid,
             text: "t".into(),
+            seq: 1,
         },
         Event::Content {
             session_id: sid,
             text: "c".into(),
+            seq: 2,
         },
         Event::ToolCall {
             session_id: sid,
             tool: "x".into(),
             args: serde_json::json!({}),
             iteration: 0,
+            seq: 3,
         },
         Event::ToolResult {
             session_id: sid,
             tool: "x".into(),
             result: "r".into(),
             iteration: 0,
+            seq: 4,
         },
         Event::AgentSpawned {
             session_id: sid,

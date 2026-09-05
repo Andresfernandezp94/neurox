@@ -1132,6 +1132,7 @@ llm:
         // provider must not contain any value that would live in the env.
         let cfg = LlmConfig {
             default_provider: "openai".into(),
+            default_model: None,
             providers: vec![LlmProviderConfig {
                 id: "openai".into(),
                 kind: LlmProviderKind::OpenaiCompat,

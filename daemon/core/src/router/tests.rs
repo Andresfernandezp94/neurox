@@ -11,18 +11,17 @@ use tempfile::TempDir;
 use tower::ServiceExt;
 
 use crate::approval::ApprovalManager;
-use crate::config::{CoreConfig, SandboxConfig};
+use crate::config::CoreConfig;
 use crate::registry::Registry;
 use crate::router::state::{
     AppState, AuthLayer, EventsLayer, LifecycleLayer, WorkspaceLayer,
 };
-use crate::router::{router, AppState as _};
+use crate::router::router;
 use crate::session_agents::SessionAgentPool;
 use crate::session::SessionStore;
 use crate::spawner::Spawner;
 use crate::supervisor::Supervisor;
 use crate::tasks::TaskManager;
-use tokio::sync::RwLock;
 
 /// Build a minimal `AppState` for tests. Uses tmp paths for any state that
 /// needs persistence. Returns `(AppState, TempDir)`.

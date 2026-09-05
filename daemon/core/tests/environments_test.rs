@@ -16,9 +16,8 @@ use tower::ServiceExt;
 
 mod common;
 
-use neurox::config::{CoreConfig, SandboxConfig};
-use neurox::router::{router, AppState};
-use neurox::session_agents::SessionAgentPool;
+use neurox::config::CoreConfig;
+use neurox::router::router;
 use std::path::PathBuf;
 
 /// Global lock serializes integration tests — they share the process-wide
@@ -33,13 +32,13 @@ async fn env_lock() -> tokio::sync::MutexGuard<'static, ()> {
 
 /// Build a router with a fresh AppState (no LLM store needed for env tests).
 async fn build_app() -> axum::Router {
-    let registry = Arc::new(neurox::registry::Registry::new(
+    let _registry = Arc::new(neurox::registry::Registry::new(
         std::path::PathBuf::from("/tmp/np-test-env.yaml"),
     ));
     let session_tmp = NamedTempFile::new().unwrap();
     let session_path = session_tmp.path().to_path_buf();
     std::mem::forget(session_tmp);
-    let session = Arc::new(
+    let _session = Arc::new(
         neurox::session::SessionStore::open(&session_path)
             .await
             .unwrap(),
@@ -51,10 +50,10 @@ async fn build_app() -> axum::Router {
         Arc::new(tokio::sync::RwLock::new(Box::new(tools_engine::DefaultSandbox) as Box<dyn tools_engine::SandboxConfig>)),
     );
 
-    let cfg = CoreConfig::default();
+    let _cfg = CoreConfig::default();
 
     let tools = Arc::new(tools_engine::tools::ToolRegistry::new());
-    let engine = tools_engine::Engine::for_testing(
+    let _engine = tools_engine::Engine::for_testing(
         tools.clone(),
         PathBuf::from("/tmp"),
         Arc::new(tokio::sync::RwLock::new(Box::new(tools_engine::DefaultSandbox) as Box<dyn tools_engine::SandboxConfig>)),
@@ -64,7 +63,6 @@ async fn build_app() -> axum::Router {
         std::env::temp_dir().join(format!("neurox-test-{}.db", uuid::Uuid::new_v4())),
         tools.clone(),
         PathBuf::from("/tmp"),
-        None,
     )
     .await;
 

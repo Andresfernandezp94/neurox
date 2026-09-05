@@ -1,29 +1,21 @@
 // useChatStream — encapsulates the lifecycle of a chat SSE stream.
 //
-// The reducer (`chat/streaming/reducer.ts`) is the state machine; this
-// hook is the lifecycle wrapper around it:
+// Pure I/O wrapper. For each chunk it parses the wire format and
+// delegates immediately to the caller's `onChunk` callback (which
+// applies `applyStreamChunk` — the same pure utility the remote WS
+// path uses in `useChatTabs.ts`). Single source of truth: one reducer
+// runs per chunk, owned by the caller.
 //
-//   - opens the connection (via `streamMessage`)
-//   - parses each chunk (`parseStreamChunk`)
-//   - applies the reducer (`streamReducer`)
-//   - mirrors the resulting state back to the caller (via `onState`)
-//   - exposes a `cancel` that aborts in-flight streams
-//   - surfaces lifecycle as `status` and `error`
-//
-// Why a hook? Three things the reducer/parser don't know how to do:
-//   1. hold an `AbortController` across renders (cancel-safe)
-//   2. reuse the latest `onState` callback without re-creating `send`
-//      every render (so the dep array of `useCallback` stays small)
-//   3. clean up if the component unmounts mid-stream
+// What stays here:
+//   - AbortController across renders (cancel-safe)
+//   - Stable `onChunk` ref so `send`'s dep array stays minimal
+//   - Cleanup on unmount so the fetch + reader don't leak
+//   - Lifecycle surfaced as `status` and `error`
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { streamMessage, newRequestId } from "../api/sessions";
 import { parseStreamChunk } from "../components/chat/streaming/chunk";
-import {
-  initStreamState,
-  streamReducer,
-  type StreamState,
-} from "../components/chat/streaming/reducer";
+import type { StreamChunk } from "../components/chat/streaming/chunk";
 
 export type ChatStreamStatus = "idle" | "streaming" | "error";
 
@@ -38,22 +30,21 @@ export interface UseChatStreamOptions {
   /** Model id within `providerId`. Shipped with `providerId`. */
   model: string | null;
   /**
-   * Called for every successfully-parsed chunk with the resulting
-   * full state. Receives a fresh immutable reference per chunk so the
-   * caller can pass it straight to setState (no need to copy).
+   * Called for every successfully-parsed chunk. The caller applies it
+   * to its own message state via `applyStreamChunk(msg, chunk, acc)`
+   * — the same utility the remote WS path uses — so both paths emit
+   * the same collapsed timeline.
    */
-  onState: (state: StreamState) => void;
+  onChunk: (chunk: StreamChunk) => void;
 }
 
 export interface UseChatStreamReturn {
   /**
-   * Start a stream for `text`. The promise resolves with the final
-   * accumulated `StreamState` once the stream ends normally (so the
-   * caller can compute metrics like token counts / totalText).
-   * Rejects with the underlying error on fetch / network failures,
-   * or resolves to the partial state if `cancel()` is called.
+   * Start a stream for `text`. The promise resolves when the stream
+   * ends normally. Rejects with the underlying error on fetch / network
+   * failures, or resolves if `cancel()` is called.
    */
-  send: (text: string) => Promise<StreamState>;
+  send: (text: string) => Promise<void>;
   /** Abort the in-flight stream (if any). Idempotent. */
   cancel: () => void;
   status: ChatStreamStatus;
@@ -66,7 +57,7 @@ export function useChatStream({
   agentId,
   providerId,
   model,
-  onState,
+  onChunk,
 }: UseChatStreamOptions): UseChatStreamReturn {
   const [status, setStatus] = useState<ChatStreamStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -74,13 +65,13 @@ export function useChatStream({
   // Abort controller for the in-flight stream. Null when idle.
   const abortRef = useRef<AbortController | null>(null);
 
-  // Stable ref to the latest `onState`. Lets `send` keep a minimal dep
-  // array while still always invoking the freshest callback closure
-  // (important because `onState` typically captures tab-level state).
-  const onStateRef = useRef(onState);
+  // Stable refs to the latest callbacks. Lets `send` keep a minimal dep
+  // array while still always invoking the freshest closures (important
+  // because `onChunk` typically captures tab-level state).
+  const onChunkRef = useRef(onChunk);
   useEffect(() => {
-    onStateRef.current = onState;
-  }, [onState]);
+    onChunkRef.current = onChunk;
+  }, [onChunk]);
 
   // Cleanup: abort in-flight stream when the hook unmounts so we don't
   // leak the fetch + reader.
@@ -89,17 +80,13 @@ export function useChatStream({
   }, []);
 
   const send = useCallback(
-    async (text: string): Promise<StreamState> => {
-      if (!text.trim()) {
-        return initStreamState();
-      }
+    async (text: string): Promise<void> => {
+      if (!text.trim()) return;
       setError(null);
       setStatus("streaming");
 
       const abort = new AbortController();
       abortRef.current = abort;
-
-      let streamState = initStreamState();
 
       // EP-2026-08-15 (debug): wire-format inspection. Activate by
       // running in DevTools:
@@ -111,7 +98,7 @@ export function useChatStream({
         typeof window !== "undefined" &&
         window.localStorage?.getItem("debug_stream") === "1";
 
-        try {
+      try {
         // D3: tag this turn so the SSE reader drops cross-wired chunks
         // (only relevant if a previous stream is still being torn down).
         const requestId = newRequestId();
@@ -133,23 +120,18 @@ export function useChatStream({
               );
             }
             if (!chunk) return; // unknown / malformed — ignored
-            streamState = streamReducer(streamState, chunk);
-            onStateRef.current(streamState);
+            onChunkRef.current(chunk);
           },
           abort.signal,
           requestId,
         );
         setStatus("idle");
-        return streamState;
       } catch (e) {
         // AbortError is the expected fallout of `cancel()`. Don't
         // surface it as a user-facing error.
         if ((e as Error).name === "AbortError") {
           setStatus("idle");
-          // Return whatever had accumulated up to the cancel; the
-          // caller decides whether to discard it or close it out
-          // with whatever text streamed in.
-          return streamState;
+          return;
         }
         setError((e as Error).message);
         setStatus("error");

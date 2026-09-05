@@ -39,22 +39,6 @@ export function deleteSession(id: string): Promise<unknown> {
   return apiDelete(`/v1/sessions/${encodeURIComponent(id)}`);
 }
 
-export function sendMessage(
-  id: string,
-  agent_id: string,
-  text: string,
-  provider_id: string,
-  model: string,
-): Promise<unknown> {
-  return apiPost(`/v1/sessions/${encodeURIComponent(id)}/messages`, {
-    agent_id,
-    text,
-    provider_id,
-    model,
-    client_id: getWebClientId(),
-  });
-}
-
 /**
  * Stream a message response chunk-by-chunk via the SSE endpoint.
  *

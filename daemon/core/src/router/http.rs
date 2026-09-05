@@ -1429,19 +1429,30 @@ pub async fn post_message_stream(
     let client_id = body.client_id.clone();
 
     // Subscribe to the GLOBAL event bus (default::process_message emits here).
+    //
+    // EP-2026-09-05 (bug fix): the previous version of this loop
+    // re-emitted every received event via `broadcast_state.emit(...)`
+    // after pushing it to the SSE channel. That looked like the right
+    // way to propagate chunks to other devices, but THIS forwarder is
+    // ITSELF a subscriber to the same bus — so each re-emit was
+    // delivered right back to this `event_rx`, re-processed, and
+    // re-emitted, creating an infinite loop. Cross-device sync is
+    // already covered by `daemon/core/src/router/ws.rs::handle_socket`,
+    // which subscribes to the same bus and forwards per-session
+    // events to every device's `/v1/events` WS (filtered by user_id).
     let mut event_rx = state.events.event_tx.subscribe();
     let tx_for_forward = tx.clone();
     let request_id_for_forward = request_id.clone();
     let client_id_for_forward = client_id.clone();
-    let broadcast_state = state.clone();
     tokio::spawn(async move {
         loop {
             match event_rx.recv().await {
-                Ok(Event::Content { session_id, text }) if session_id == session_for_task => {
+                Ok(Event::Content { session_id, text, seq }) if session_id == session_for_task => {
                     if tx_for_forward
                         .send(serde_json::json!({
                             "type": "content",
                             "text": text,
+                            "seq": seq,
                             "request_id": request_id_for_forward,
                             "client_id": client_id_for_forward,
                         }))
@@ -1450,19 +1461,30 @@ pub async fn post_message_stream(
                     {
                         break;
                     }
-                    // EP-2026-09-05 cross-device: also broadcast on the
-                    // global event bus so OTHER devices (subscribed
-                    // via /v1/events WS) see the chunk in realtime.
-                    broadcast_state.emit(Event::Content {
-                        session_id,
-                        text,
-                    });
+                    // EP-2026-09-05 (cross-device sync): we DO NOT re-emit
+                    // here. The dispatcher (`json_rpc_stdio.rs`) already
+                    // put this event on the global bus, and the WS
+                    // handler at `daemon/core/src/router/ws.rs::handle_socket`
+                    // subscribes to the same bus and forwards per-session
+                    // events to every device's `/v1/events` WS (filtered
+                    // by user_id via `event_owned_by`).
+                    //
+                    // The previous version of this loop ALSO called
+                    // `broadcast_state.emit(...)` here, which created an
+                    // infinite loop: this forwarder is itself subscribed
+                    // to the bus (via `event_rx` at the top of this
+                    // handler), so each re-emit was immediately received
+                    // back here, re-processed, and re-emitted again. The
+                    // symptom was the daemon emitting chunks in a tight
+                    // loop until the SSE channel filled up or the
+                    // connection dropped.
                 }
-                Ok(Event::Thinking { session_id, text }) if session_id == session_for_task => {
+                Ok(Event::Thinking { session_id, text, seq }) if session_id == session_for_task => {
                     if tx_for_forward
                         .send(serde_json::json!({
                             "type": "thinking",
                             "text": text,
+                            "seq": seq,
                             "request_id": request_id_for_forward,
                             "client_id": client_id_for_forward,
                         }))
@@ -1471,16 +1493,14 @@ pub async fn post_message_stream(
                     {
                         break;
                     }
-                    broadcast_state.emit(Event::Thinking {
-                        session_id,
-                        text,
-                    });
+                    // See Content branch above — do NOT re-emit.
                 }
                 Ok(Event::ToolCall {
                     session_id,
                     tool,
                     args,
                     iteration,
+                    seq,
                 }) if session_id == session_for_task => {
                     if tx_for_forward
                         .send(serde_json::json!({
@@ -1488,6 +1508,7 @@ pub async fn post_message_stream(
                             "tool": tool,
                             "args": args,
                             "iteration": iteration,
+                            "seq": seq,
                             "request_id": request_id_for_forward,
                             "client_id": client_id_for_forward,
                         }))
@@ -1496,18 +1517,14 @@ pub async fn post_message_stream(
                     {
                         break;
                     }
-                    broadcast_state.emit(Event::ToolCall {
-                        session_id,
-                        tool,
-                        args,
-                        iteration,
-                    });
+                    // See Content branch above — do NOT re-emit.
                 }
                 Ok(Event::ToolResult {
                     session_id,
                     tool,
                     result,
                     iteration,
+                    seq,
                 }) if session_id == session_for_task => {
                     if tx_for_forward
                         .send(serde_json::json!({
@@ -1515,6 +1532,7 @@ pub async fn post_message_stream(
                             "tool": tool,
                             "result": result,
                             "iteration": iteration,
+                            "seq": seq,
                             "request_id": request_id_for_forward,
                             "client_id": client_id_for_forward,
                         }))
@@ -1523,12 +1541,7 @@ pub async fn post_message_stream(
                     {
                         break;
                     }
-                    broadcast_state.emit(Event::ToolResult {
-                        session_id,
-                        tool,
-                        result,
-                        iteration,
-                    });
+                    // See Content branch above — do NOT re-emit.
                 }
                 Ok(Event::ApprovalRequest { request })
                     if request.session_id == session_for_task =>

@@ -6,16 +6,7 @@ use std::sync::Arc;
 use futures::{SinkExt, StreamExt};
 mod common;
 
-use neurox::approval::ApprovalManager;
-use neurox::config::{CoreConfig, SandboxConfig};
 use neurox::protocols::{ProtocolKind, TransportKind};
-use neurox::registry::Registry;
-use neurox::router::AppState;
-use neurox::session_agents::SessionAgentPool;
-use neurox::session::SessionStore;
-use neurox::spawner::Spawner;
-use neurox::supervisor::Supervisor;
-use neurox::tasks::TaskManager;
 use std::path::PathBuf;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -27,32 +18,10 @@ async fn free_port() -> u16 {
 }
 
 async fn spawn_app() -> (u16, tokio::task::JoinHandle<()>) {
-    let registry = Arc::new(Registry::new("/tmp/x".into()));
-    let cfg = CoreConfig::default();
-    registry.load_from_config(&cfg).await.unwrap();
-    let supervisor = Arc::new(Supervisor::new());
-    let spawner = Arc::new(Spawner::new(4));
-    let tasks = Arc::new(TaskManager::new());
-    let approvals = Arc::new(ApprovalManager::default());
-    let session = Arc::new(
-        SessionStore::open(
-            &std::env::temp_dir().join(format!("neurox-test-{}.db", uuid::Uuid::new_v4())),
-        )
-        .await
-        .unwrap(),
-    );
-
     let tools = Arc::new(tools_engine::tools::ToolRegistry::new());
-    let engine = tools_engine::Engine::for_testing(
-        tools.clone(),
-        PathBuf::from("/tmp"),
-        Arc::new(tokio::sync::RwLock::new(Box::new(tools_engine::DefaultSandbox) as Box<dyn tools_engine::SandboxConfig>)),
-    ).await
-        .unwrap();
     let state = common::build_app_state_auto(
         tools.clone(),
         PathBuf::from("/tmp"),
-        None,
     )
     .await;
     let app = neurox::router::router(state);

@@ -12,15 +12,19 @@
 //
 // Backend event shapes:
 //
-//   {"type":"thinking",       "text":"..."}
-//   {"type":"content",        "text":"..."}
+//   {"type":"thinking",       "text":"...", "seq":N}
+//   {"type":"content",        "text":"...", "seq":N}
 //   {"type":"error",          "message":"..."}
-//   {"type":"tool_call",      "tool":"...", "args":{...}, "iteration":N}
-//   {"type":"tool_result",    "tool":"...", "result":"...", "iteration":N}
+//   {"type":"tool_call",      "tool":"...", "args":{...}, "iteration":N, "seq":N}
+//   {"type":"tool_result",    "tool":"...", "result":"...", "iteration":N, "seq":N}
 //   {"type":"approval_request","id":"...", "tool":"...", "args":{...},
 //                                  "reason":"..."}
 //   {"type":"approval_resolved","id":"...", "decision":"approve"|"deny"}
 //   "[DONE]"
+//
+// `seq` (PARTE A) is a monotonic per-session u64 the daemon assigns to
+// every stream chunk. The frontend uses it to apply each chunk exactly
+// once, in order, regardless of how many transport paths deliver it.
 
 export type StreamChunk =
   | ThinkingChunk
@@ -34,11 +38,17 @@ export type StreamChunk =
 export interface ThinkingChunk {
   type: "thinking";
   text: string;
+  /** Monotonic per-session sequence number assigned by the daemon
+   *  (PARTE A). Optional so legacy chunks without it still parse; the
+   *  ordering guard in `useChatTabs` ignores chunks without a `seq`. */
+  seq?: number;
 }
 
 export interface ContentChunk {
   type: "content";
   text: string;
+  /** Monotonic per-session sequence number (see `ThinkingChunk.seq`). */
+  seq?: number;
 }
 
 /** The LLM invoked a tool. Captured into the timeline as a pending
@@ -48,6 +58,8 @@ export interface ToolCallChunk {
   tool: string;
   args?: unknown;
   iteration?: number;
+  /** Monotonic per-session sequence number (see `ThinkingChunk.seq`). */
+  seq?: number;
 }
 
 /** The tool finished. Either fills the matching pending entry in the
@@ -58,6 +70,8 @@ export interface ToolResultChunk {
   tool: string;
   result: string;
   iteration?: number;
+  /** Monotonic per-session sequence number (see `ThinkingChunk.seq`). */
+  seq?: number;
 }
 
 /** The agent paused to ask for human approval on a potentially
@@ -104,14 +118,20 @@ export function parseStreamChunk(raw: unknown): StreamChunk | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
 
+  // The daemon (PARTE A) tags every stream event with a monotonic
+  // per-session `seq: u64`. It arrives as a plain JSON number. Legacy
+  // events without it parse fine — `seq` stays `undefined` and the
+  // ordering guard in `useChatTabs` ignores them.
+  const seq = typeof o.seq === "number" ? o.seq : undefined;
+
   switch (o.type) {
     case "thinking": {
       if (typeof o.text !== "string") return null;
-      return { type: "thinking", text: o.text };
+      return { type: "thinking", text: o.text, seq };
     }
     case "content": {
       if (typeof o.text !== "string") return null;
-      return { type: "content", text: o.text };
+      return { type: "content", text: o.text, seq };
     }
     case "tool_call": {
       if (typeof o.tool !== "string" || !o.tool) return null;
@@ -120,6 +140,7 @@ export function parseStreamChunk(raw: unknown): StreamChunk | null {
         tool: o.tool,
         args: o.args,
         iteration: typeof o.iteration === "number" ? o.iteration : undefined,
+        seq,
       };
     }
     case "tool_result": {
@@ -130,6 +151,7 @@ export function parseStreamChunk(raw: unknown): StreamChunk | null {
         tool: o.tool,
         result: o.result,
         iteration: typeof o.iteration === "number" ? o.iteration : undefined,
+        seq,
       };
     }
     case "approval_request": {

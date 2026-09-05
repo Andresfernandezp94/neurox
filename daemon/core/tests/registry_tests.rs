@@ -120,7 +120,6 @@ async fn load_from_config_populates_registry() {
             persistent: vec![persistent("default"), persistent("memory")],
             ephemeral_templates: vec![ephemeral("researcher")],
         },
-        api_token: None,
         tls: None,
         spawner_concurrency: 4,
         in_process: vec![],

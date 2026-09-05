@@ -17,10 +17,19 @@ pub enum Event {
     Thinking {
         session_id: Uuid,
         text: String,
+        /// EP-2026-09-05 (stream seq): strictly-increasing per-session
+        /// sequence number stamped at emission to the bus. Lets the
+        /// client apply each stream chunk exactly once (ordered by
+        /// seq) even though it may arrive via two paths (SSE + WS).
+        #[serde(default)]
+        seq: u64,
     },
     Content {
         session_id: Uuid,
         text: String,
+        /// EP-2026-09-05 (stream seq): see `Thinking::seq`.
+        #[serde(default)]
+        seq: u64,
     },
     /// EP-2026-09-05 (cross-device sync): emitted after a user OR
     /// assistant message is persisted. Other devices logged in as
@@ -47,12 +56,18 @@ pub enum Event {
         tool: String,
         args: serde_json::Value,
         iteration: u32,
+        /// EP-2026-09-05 (stream seq): see `Thinking::seq`.
+        #[serde(default)]
+        seq: u64,
     },
     ToolResult {
         session_id: Uuid,
         tool: String,
         result: String,
         iteration: u32,
+        /// EP-2026-09-05 (stream seq): see `Thinking::seq`.
+        #[serde(default)]
+        seq: u64,
     },
     AgentSpawned {
         session_id: Uuid,

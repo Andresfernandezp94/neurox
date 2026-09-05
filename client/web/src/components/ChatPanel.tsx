@@ -44,7 +44,19 @@ export function ChatPanel(_: ChatPanelProps = {}) {
   // daemon responde con `agent_id required` (más claro que
   // `agent not found: <stale-id>`).
   const daemonDefaultAgentId = useDefaultAgentId();
-  const { tabs, activeTab, activeId, createTab, createTabFromSession, closeTab, selectTab, renameTab, updateTab, updateTabSummary } = useChatTabs(daemonDefaultAgentId);
+  const {
+    tabs,
+    activeTab,
+    activeId,
+    createTab,
+    createTabFromSession,
+    closeTab,
+    selectTab,
+    renameTab,
+    updateTab,
+    updateTabSummary,
+    setStreamingMetrics,
+  } = useChatTabs(daemonDefaultAgentId);
   const inProcessDefaultAgent =
     activeTab?.sessionAgent ?? daemonDefaultAgentId ?? "";
 
@@ -113,22 +125,42 @@ export function ChatPanel(_: ChatPanelProps = {}) {
   // scrollear manualmente al fondo si quiere ver lo más reciente.
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  // EP-2026-08-15: refs que permiten que el callback `onState` del
-  // hook `useChatStream` sepa qué assistantMessage estamos
-  // actualizando (sin capturarlos en closures stale). Se setean al
-  // arrancar el send y se limpian al terminar.
-  const streamingAssistantIdRef = useRef<number | null>(null);
-  const streamingTabIdRef = useRef<string | null>(null);
-  // EP-2026-08-19: state paralela al ref — la necesitamos en
-  // ChatMain/MessageRow para saber si ESTE mensaje es el que se está
-  // streameando (el ref no causa re-render). Set/clear junto al ref.
-  const [streamingMessageId, setStreamingMessageId] = useState<number | null>(null);
+  // Mirror of `activeTab` so the SSE onChunk callback (which we don't
+  // want to re-create on every tab change) can read the current
+  // active tab without being captured stale.
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+  // Mirror of `tabs` so `handleSend`'s `await sendStream(text)` can
+  // read the LATEST tab state on resume. The closure's `tabs` is the
+  // value at handleSend creation — by the time the SSE resolves, the
+  // shell created by the first chunk may have been REPLACED by the
+  // canonical id via the WS MessageAppended handler. Looking up by
+  // `streamingMessageId` (the shell id) would miss it.
+  const tabsRef = useRef<typeof tabs>(tabs);
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+  // EP-2026-09-05: streamingMessageId is the id of the assistant
+  // message currently being streamed for the active tab. ChatMain
+  // uses it to pass `isStreaming` per-message to MessageRow so the
+  // caret animates only on the streaming row.
+  //
+  // Chunks now flow ONLY via the `/v1/events` WS (single source of
+  // truth), so ChatPanel no longer tracks the id imperatively. We
+  // derive it: while the turn is in flight, the streaming assistant is
+  // the LAST assistant row in the transcript (the shell created by the
+  // WS handler on the first chunk). Derivation happens below, after
+  // `messages` and `isStreaming` are in scope.
 
-  // EP-2026-08-15: hook de stream — encapsula AbortController, parseo,
-  // reducer y lifecycle. El callback `onState` se invoca por cada
-  // chunk procesado exitosamente; recibe el `StreamState` post-reducer
-  // y lo mirrorea al tab activo. `send` resuelve con el state final
-  // para que `handleSend` pueda calcular métricas post-stream.
+  // EP-2026-09-05: the SSE stream is used ONLY to trigger the turn on
+  // the backend. Chunks are applied EXCLUSIVELY via the `/v1/events`
+  // WS in `useChatTabs` (single source of truth, ordered by the
+  // daemon's per-session `seq`). So `onChunk` here is a no-op — it
+  // must NOT apply chunks, otherwise the assistant message would be
+  // double-updated (once via SSE, once via WS broadcast), which is the
+  // exact duplication/truncation bug this refactor removes.
   const {
     send: sendStream,
     cancel: cancelStream,
@@ -138,33 +170,8 @@ export function ChatPanel(_: ChatPanelProps = {}) {
     agentId: inProcessDefaultAgent,
     providerId: activeTab?.sessionModel?.provider_id ?? null,
     model: activeTab?.sessionModel?.model ?? null,
-    onState: useCallback((streamState) => {
-      const id = streamingAssistantIdRef.current;
-      const tabId = streamingTabIdRef.current;
-      if (id == null || tabId == null) return;
-      // EP-2026-08-19: backend `{"type":"error",...}` chunks now
-      // surface via streamState.error. Mirror non-null ones to the
-      // shared error banner so the UI shows "shell failed: …"
-      // instead of looking hung. Don't clear here — `handleSend`
-      // does that on the next message.
-      if (streamState.error !== null) {
-        setError(streamState.error);
-      }
-      updateTab(tabId, (prev) => ({
-        messages: prev.messages.map((m) =>
-          m.id === id
-            ? {
-                ...m,
-                content: streamState.content,
-                thinking: streamState.thinking,
-                toolLog: streamState.toolLog,
-                approvals: streamState.approvals,
-                timeline: streamState.timeline,
-              }
-            : m,
-        ),
-      }));
-    }, [updateTab]),
+    // No-op: the WS path owns chunk application. See the comment above.
+    onChunk: useCallback(() => {}, []),
   });
   const isStreaming = streamStatus === "streaming";
 
@@ -178,6 +185,20 @@ export function ChatPanel(_: ChatPanelProps = {}) {
   const messages = activeTab?.messages ?? [];
   const sessionId = activeTab?.sessionId ?? null;
   const sessionModel = activeTab?.sessionModel ?? null;
+
+  // Derived: the assistant row currently streaming (see the note near
+  // the top of the component). While a turn is in flight, it's the
+  // last assistant message in the transcript — the shell the WS
+  // handler created on the first chunk. `null` when idle so no caret
+  // renders.
+  const streamingMessageId = useMemo<number | null>(() => {
+    if (!isStreaming) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]!.role === "assistant") return messages[i]!.id;
+    }
+    return null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStreaming, messages]);
 
   // EP-0026-01 R2: auto-create a backend session for the active tab
   // if it doesn't have one yet. The <textarea> stays disabled with
@@ -409,7 +430,22 @@ export function ChatPanel(_: ChatPanelProps = {}) {
           ts: m.ts,
           thinking: m.thinking ?? undefined,
         }));
-        updateTab(tabId, { messages: loaded });
+        // BUGFIX (cross-device realtime): apply the snapshot with the
+        // FUNCTIONAL form and guard against clobbering messages that
+        // arrived over the `/v1/events` WS while this fetch was in
+        // flight. If another device sent a prompt (or the assistant
+        // started streaming) between the `messages.length === 0`
+        // check above and this resolve, `prev.messages` is no longer
+        // empty — keeping the live copy is correct (it's fresher than
+        // this snapshot, which may predate the new turn). We also
+        // never overwrite a non-empty transcript with an empty
+        // snapshot (a just-created session whose first row hasn't
+        // been persisted yet).
+        updateTab(tabId, (prev) => {
+          if (prev.messages.length > 0) return prev;
+          if (loaded.length === 0) return prev;
+          return { ...prev, messages: loaded };
+        });
         await refreshSessionModel(sid, tabId);
       } catch (e) {
         setError(`Failed to load session: ${(e as Error).message}`);
@@ -489,77 +525,78 @@ useLayoutEffect(() => {
     setError(null);
 
     const sessionId = activeTab.sessionId;
-    // EP-2026-09-05 cross-device: the user message is added by the WS
-    // MessageAppended event on EVERY device (including this one —
-    // it's the single source of truth). Adding it here too would
-    // duplicate the bubble on the sending device because the temp
-    // local id (Date.now()) can't be deduped against the daemon's
-    // autoincrement row id.
-    const assistantId = Date.now() + 1;
-    const assistantMsg: Message = { id: assistantId, session_id: sessionId, role: "assistant", content: "", ts: new Date().toISOString(), timeline: [] };
-    // EP-0024: use the updater form of updateTab so each patch is
-    // applied on top of the freshest state. The id of the assistant
-    // message becomes the key the stream hook's `onState` callback
-    // uses to mirror the chunked streamState back onto it.
-    updateTab(activeTab.id, (prev) => ({
-      messages: [...prev.messages, assistantMsg],
-    }));
+    const tabId = activeTab.id;
 
-    // EP-2026-08-15: stash id + tabId en refs así `onState` del hook
-    // puede mutar el assistant message sin tener que capturarlo en
-    // closures stale (los closures se re-evalúan por chunk pero el
-    // id del assistant es per-send).
-    streamingAssistantIdRef.current = assistantId;
-    streamingTabIdRef.current = activeTab.id;
-    setStreamingMessageId(assistantId);
+    // ─── Order fix: user message BEFORE assistant ─────────────────────
+    // We add the user message NOW with a NEGATIVE temp id (a
+    // sentinel that never collides with the daemon's positive
+    // autoincrement ids). The WS handler in `useChatTabs` replaces
+    // this temp id with the canonical one when MessageAppended
+    // arrives — keeping the row at its current position in the
+    // array, so the chat reads "user → assistant" top-to-bottom.
+    //
+    // Earlier the assistant shell was pre-created here BEFORE the
+    // user message, which is what made the chat render "assistant
+    // thinking → user message" — and F5 (which reloads from the
+    // DB in chronological order) was the only way to see the right
+    // order. With this fix, the assistant shell is now created
+    // lazily by `applyStreamChunk` on the first SSE chunk, AFTER
+    // the user message is in the array.
+    const tempUserId = -Date.now();
+    const userMsg: Message = {
+      id: tempUserId,
+      session_id: sessionId,
+      role: "user",
+      content: text,
+      ts: new Date().toISOString(),
+    };
+    updateTab(tabId, (prev) => ({
+      ...prev,
+      messages: [...prev.messages, userMsg],
+    }));
 
     const t0 = Date.now();
     try {
-      // `sendStream` del hook hace todo el streaming + parse + reducer.
-      // Resuelve con el `StreamState` final cuando el stream termina
-      // (o con el parcial si lo cancelamos).
-      const finalState = await sendStream(text);
+      // `sendStream` del hook dispara el turno en el backend y resuelve
+      // cuando el stream SSE termina. Los chunks NO se aplican aquí:
+      // llegan por el WS `/v1/events` (fuente única) y se aplican en
+      // `useChatTabs`, ordenados por el `seq` monotónico del daemon.
+      // Esto elimina la doble aplicación SSE+WS que causaba la
+      // duplicación/truncación en el receptor.
+      await sendStream(text);
       const durationMs = Date.now() - t0;
-      const totalText = finalState.content + finalState.thinking;
-      updateTab(activeTab.id, (prev) => ({
-        messages: prev.messages.map((m) =>
-          m.id === assistantId
-            ? {
-                ...m,
-                content: finalState.content || "(empty response)",
-                metrics: computeMetrics(durationMs, totalText),
-              }
-            : m,
-        ),
-      }));
+      // Apply metrics to the assistant message we just streamed. We
+      // look up by ROLE (last assistant) from `tabsRef` rather than
+      // by `streamingMessageId` because the WS MessageAppended
+      // handler replaces the shell id with the canonical one as the
+      // stream finishes — the id we tracked is now stale.
+      const liveTab = tabsRef.current.find((t) => t.id === tabId);
+      const lastAssistant = liveTab
+        ? [...liveTab.messages].reverse().find((m) => m.role === "assistant")
+        : null;
+      if (lastAssistant) {
+        const totalText = (lastAssistant.content ?? "") + (lastAssistant.thinking ?? "");
+        if (lastAssistant.content) {
+          setStreamingMetrics(tabId, lastAssistant.id, computeMetrics(durationMs, totalText));
+        }
+      }
     } catch (e) {
       setError((e as Error).message);
-      updateTab(activeTab.id, (prev) => ({
-        messages: prev.messages.filter((m) => m.id !== assistantId || m.content),
-      }));
-      // EP-2026-08-31: stream failure recovery. If the stream fails
-      // (typically a 410/404 because the daemon's session_agent died
-      // for this session_id — happens for legacy NULL-client_id
-      // sessions left over from before the partitioning fix), drop
-      // the dead sessionId so the auto-create effect below spins
-      // up a fresh one for the same tab. The user can then re-send
-      // the message without manually closing the tab.
-      updateTab(activeTab.id, () => ({ sessionId: undefined }));
+      // EP-2026-08-31: stream failure recovery. Drop the dead
+      // sessionId so the auto-create effect below spins up a fresh
+      // one for the same tab. The user can re-send without
+      // manually closing the tab.
+      updateTab(tabId, () => ({ sessionId: undefined }));
     } finally {
-      // EP-2026-08-15: limpiar refs siempre, aunque haya error.
-      streamingAssistantIdRef.current = null;
-      streamingTabIdRef.current = null;
-      setStreamingMessageId(null);
-      // EP-0028: refresh the tab title after the first user message
-      // — the backend has populated `sessions.summary` with a preview
-      // of the message, so the tab header can now match the History
-      // sidebar entry.
+      // EP-0028: refresh the tab title after the first user
+      // message — the backend has populated `sessions.summary` with
+      // a preview of the message.
       if (activeTab.sessionId) {
         void refreshTabSummary(activeTab.sessionId, activeTab.id);
       }
       inputRef.current?.focus();
     }
-  }, [input, isStreaming, activeTab, sendStream, updateTab, refreshTabSummary]);
+  }, [input, isStreaming, activeTab, sendStream, updateTab, refreshTabSummary, setStreamingMetrics]);
 
   const handleCancel = useCallback(async () => {
     if (!activeTab?.sessionId) return;
