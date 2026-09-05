@@ -18,7 +18,7 @@ import type {
   Health,
   SessionSummary,
 } from '../types';
-import { apiGet, getApiBase } from '../api/client';
+import { apiGet, getApiBase, getToken } from '../api/client';
 import { getCommandsClient } from '../api/commands';
 
 // ─── Tipos ──────────────────────────────────────────────────────────────
@@ -333,21 +333,33 @@ export function StoreProvider({ children, eventsPath = '/v1/events' }: StoreProv
     } catch {
       apiBase = '';
     }
-    const wsUrl = eventsPath.startsWith('ws')
+    const baseWsUrl = eventsPath.startsWith('ws')
       ? eventsPath
       : apiBase
         ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${apiBase.replace(/^https?:\/\//, '')}${eventsPath}`
         : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}${eventsPath}`;
+
+    // EP-2026-09-02: el daemon exige JWT en `?token=` para el upgrade WS
+    // (los browsers no permiten headers custom en WS). Lo leemos fresh en
+    // cada connect() para que un login reabra la conexión sin esperar el
+    // backoff. VITE_API_BASE ya viene encoded en baseWsUrl, solo el token.
+    function buildWsUrl(): string {
+      const token = getToken();
+      if (!token) return baseWsUrl;
+      const sep = baseWsUrl.includes('?') ? '&' : '?';
+      return `${baseWsUrl}${sep}token=${encodeURIComponent(token)}`;
+    }
 
     let socket: WebSocket | null = null;
     let backoff = 1000;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let manuallyClosed = false;
     let consecutiveFailures = 0;
+    let wantImmediateRetry = false;
 
     function connect() {
       if (manuallyClosed) return;
-      socket = new WebSocket(wsUrl);
+      socket = new WebSocket(buildWsUrl());
       dispatch({ type: 'WS_STATUS_CHANGED', status: 'connecting' });
 
       socket.addEventListener('open', () => {
@@ -373,8 +385,16 @@ export function StoreProvider({ children, eventsPath = '/v1/events' }: StoreProv
         dispatch({ type: 'WS_STATUS_CHANGED', status: 'closed' });
         socket = null;
         if (!manuallyClosed) {
-          retryTimer = setTimeout(connect, backoff);
-          backoff = Math.min(backoff * 2, 30_000);
+          if (wantImmediateRetry) {
+            // EP-2026-09-02: disparado por neurox:auth-changed. Saltamos
+            // el backoff y reintentamos ya con el token fresh.
+            wantImmediateRetry = false;
+            backoff = 1000;
+            retryTimer = setTimeout(connect, 0);
+          } else {
+            retryTimer = setTimeout(connect, backoff);
+            backoff = Math.min(backoff * 2, 30_000);
+          }
           consecutiveFailures += 1;
         }
       });
@@ -384,11 +404,28 @@ export function StoreProvider({ children, eventsPath = '/v1/events' }: StoreProv
       });
     }
 
+    // EP-2026-09-02: cuando el user hace login o logout, useAuth dispara
+    // `neurox:auth-changed`. Cerramos el socket actual (si lo hay) para
+    // forzar el reconnect inmediato con el token fresh; el close handler
+    // ve `wantImmediateRetry` y no aplica backoff.
+    function onAuthChanged() {
+      wantImmediateRetry = true;
+      const s = socket;
+      if (!s) return;
+      if (s.readyState === WebSocket.OPEN) {
+        s.close();
+      } else if (s.readyState === WebSocket.CONNECTING) {
+        setTimeout(() => s.close(), 0);
+      }
+    }
+    window.addEventListener('neurox:auth-changed', onAuthChanged);
+
     connect();
     void snapshot();
 
     return () => {
       manuallyClosed = true;
+      window.removeEventListener('neurox:auth-changed', onAuthChanged);
       if (retryTimer !== null) clearTimeout(retryTimer);
       // EP-0023-04 (2026-08-12): React 18 StrictMode en dev ejecuta el
       // mount-unmount-mount inmediato. El primer socket no ha abierto

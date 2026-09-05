@@ -17,7 +17,7 @@
 //   3. clean up if the component unmounts mid-stream
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { streamMessage } from "../api/sessions";
+import { streamMessage, newRequestId } from "../api/sessions";
 import { parseStreamChunk } from "../components/chat/streaming/chunk";
 import {
   initStreamState,
@@ -105,6 +105,9 @@ export function useChatStream({
         window.localStorage?.getItem("debug_stream") === "1";
 
       try {
+        // D3: tag this turn so the SSE reader drops cross-wired chunks
+        // (only relevant if a previous stream is still being torn down).
+        const requestId = newRequestId();
         await streamMessage(
           sessionId,
           agentId,
@@ -125,6 +128,7 @@ export function useChatStream({
             onStateRef.current(streamState);
           },
           abort.signal,
+          requestId,
         );
         setStatus("idle");
         return streamState;

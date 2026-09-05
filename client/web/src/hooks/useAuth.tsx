@@ -61,6 +61,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     writeStoredUser(newUser);
     setTokenState(newToken);
     setUser(newUser);
+    // EP-2026-09-02: notificar a las WebSockets (/v1/events, /v1/commands)
+    // que ya hay un token disponible para que agreguen `?token=<jwt>`
+    // al handshake. Sin esto, las WS quedan en loop 401 hasta el
+    // próximo backoff.
+    window.dispatchEvent(new CustomEvent('neurox:auth-changed'));
   }, []);
 
   const clear = useCallback(() => {
@@ -68,6 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     writeStoredUser(null);
     setTokenState(null);
     setUser(null);
+    window.dispatchEvent(new CustomEvent('neurox:auth-changed'));
   }, []);
 
   return (

@@ -114,9 +114,23 @@ fn read_kv(path: &PathBuf) -> std::io::Result<BTreeMap<String, String>> {
 }
 
 /// Apply the diff between the previous snapshot and the new one. Sets
-/// new keys, removes deleted keys. Logs the action so operators can
-/// see what propagated. Returns `true` if anything changed (so the caller
-/// can invalidate dependent caches).
+/// new keys. **Does NOT remove keys** — see `EP-2026-09-02` notes below.
+///
+/// EP-2026-09-02: auto-removal was a footgun. Two problems:
+///   1. In a multi-threaded process (tokio) `std::env::remove_var` is
+///      marked `unsafe` since Rust 1.65 because libc's unsetenv modifies
+///      a per-libc copy of the environ array that `std::env::var` later
+///      reads. The kernel-managed `/proc/<pid>/environ` keeps the
+///      original, but the daemon's libc view is left permanently
+///      corrupted — there's no safe way to re-sync without a restart.
+///   2. Any partial write to the env file (PUT /v1/env/:key, manual
+///      edit, accidental overwrite) would silently nuke every key not
+///      in the new file. Operators only learned about it via 401s and
+///      the chat model selector going blank.
+///
+/// The canonical way to remove a key is `DELETE /v1/env/:key`, which
+/// already handles the lifecycle explicitly. The watcher is now
+/// strictly additive.
 fn apply_diff(prev: &BTreeMap<String, String>, next: &BTreeMap<String, String>, path: &Path) -> bool {
     let mut changed = false;
     // Added or updated keys.
@@ -128,18 +142,6 @@ fn apply_diff(prev: &BTreeMap<String, String>, next: &BTreeMap<String, String>, 
                 "env_watcher: propagated env var to daemon process"
             );
             std::env::set_var(k, v);
-            changed = true;
-        }
-    }
-    // Removed keys.
-    for k in prev.keys() {
-        if !next.contains_key(k) {
-            info!(
-                key = %k,
-                path = %path.display(),
-                "env_watcher: removed env var from daemon process"
-            );
-            std::env::remove_var(k);
             changed = true;
         }
     }

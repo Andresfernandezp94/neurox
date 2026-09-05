@@ -48,6 +48,8 @@ export interface SessionSummary {
   started_at: string;
   ended_at?: string | null;
   summary?: string | null;
+  /** Per-session client_id (web / sidebar-*). Set by the daemon. */
+  client_id?: string | null;
 }
 
 export interface SessionsResponse {

@@ -67,22 +67,28 @@ describe('api/sessions', () => {
     vi.restoreAllMocks();
   });
 
-  it('listSessions hits /v1/sessions', async () => {
+  it('listSessions hits /v1/sessions with client_id filter', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       new Response('{}', { status: 200 }),
     );
     await listSessions();
-    expect(globalThis.fetch).toHaveBeenCalledWith('/v1/sessions', expect.anything());
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(call[0]).toMatch(/^\/v1\/sessions\?client_id=web-[a-z0-9]+$/);
   });
 
-  it('createSession sends agent_id in body', async () => {
+  it('createSession sends agent_id + client_id in body', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       new Response('{}', { status: 200 }),
     );
     await createSession('default');
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(call[0]).toBe('/v1/sessions');
-    expect(JSON.parse(call[1].body)).toEqual({ agent_id: 'default' });
+    const body = JSON.parse(call[1].body);
+    expect(body.agent_id).toBe('default');
+    // D3 / partitioning: client_id is auto-injected so the daemon
+    // can partition this session from sidebar sessions.
+    expect(typeof body.client_id).toBe('string');
+    expect(body.client_id).toMatch(/^web-[a-z0-9]+$/);
   });
 
   it('getSessionMessages hits /v1/sessions/:id/messages', async () => {
@@ -107,16 +113,18 @@ describe('api/sessions', () => {
     );
   });
 
-  it('sendMessage POSTs agent_id + text', async () => {
+  it('sendMessage POSTs agent_id + text + client_id', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       new Response('{}', { status: 200 }),
     );
     await sendMessage('abc', 'default', 'hello');
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(JSON.parse(call[1].body)).toEqual({
-      agent_id: 'default',
-      text: 'hello',
-    });
+    const body = JSON.parse(call[1].body);
+    expect(body.agent_id).toBe('default');
+    expect(body.text).toBe('hello');
+    // client_id is auto-injected for partitioning.
+    expect(typeof body.client_id).toBe('string');
+    expect(body.client_id).toMatch(/^web-[a-z0-9]+$/);
   });
 });
 

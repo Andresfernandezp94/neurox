@@ -498,6 +498,14 @@ useLayoutEffect(() => {
       updateTab(activeTab.id, (prev) => ({
         messages: prev.messages.filter((m) => m.id !== assistantId || m.content),
       }));
+      // EP-2026-08-31: stream failure recovery. If the stream fails
+      // (typically a 410/404 because the daemon's session_agent died
+      // for this session_id — happens for legacy NULL-client_id
+      // sessions left over from before the partitioning fix), drop
+      // the dead sessionId so the auto-create effect below spins
+      // up a fresh one for the same tab. The user can then re-send
+      // the message without manually closing the tab.
+      updateTab(activeTab.id, () => ({ sessionId: undefined }));
     } finally {
       // EP-2026-08-15: limpiar refs siempre, aunque haya error.
       streamingAssistantIdRef.current = null;

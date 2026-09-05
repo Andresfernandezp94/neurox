@@ -29,6 +29,10 @@ pub struct SessionRecord {
     pub tool_mode: Option<String>,
     /// EP-0016: sampling temperature per session (0.0–2.0). `None` = daemon default.
     pub temperature: Option<f64>,
+    /// Stable client id that opened the session (e.g. "web",
+    /// "sidebar-<instance>"). Used to partition session lists so
+    /// each client only sees sessions it owns.
+    pub client_id: Option<String>,
 }
 
 type SessionRow = (
@@ -43,6 +47,7 @@ type SessionRow = (
     Option<String>,   // 8: ui_mode
     Option<String>,   // 9: tool_mode
     Option<f64>,      // 10: temperature
+    Option<String>,   // 11: client_id
 );
 type MessageRow = (i64, String, String, String, Option<String>, String);
 
@@ -105,6 +110,9 @@ impl SessionStore {
         Self::ensure_column(&pool, "sessions", "tool_mode").await?;
         // EP-0016: per-session sampling temperature. NULL = use daemon default.
         Self::ensure_column(&pool, "sessions", "temperature").await?;
+        // Per-session client_id (web/sidebar/etc.) for partitioning
+        // session lists by client. NULL = legacy / no client tag.
+        Self::ensure_column(&pool, "sessions", "client_id").await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS messages (
@@ -184,6 +192,10 @@ impl SessionStore {
                 ("sessions", "temperature") => {
                     "ALTER TABLE sessions ADD COLUMN temperature REAL"
                 }
+                // Per-session client_id (web/sidebar/etc.).
+                ("sessions", "client_id") => {
+                    "ALTER TABLE sessions ADD COLUMN client_id TEXT"
+                }
                 // EP-0026-rev-fix: thinking persisted per assistant message.
                 ("messages", "thinking") => {
                     "ALTER TABLE messages ADD COLUMN thinking TEXT"
@@ -206,6 +218,37 @@ impl SessionStore {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Idempotent: store the client_id that opened this session
+    /// (e.g. "web" or "sidebar-<instance>"). Used to partition session
+    /// lists so each client only sees its own. `None` for legacy
+    /// callers — those sessions show up under client_id == NULL and
+    /// are visible to every client unless they specify a `?client_id`
+    /// query param.
+    pub async fn set_client_id(
+        &self,
+        session_id: Uuid,
+        client_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let result = sqlx::query("UPDATE sessions SET client_id = ? WHERE session_id = ?")
+            .bind(client_id)
+            .bind(session_id.to_string())
+            .execute(&self.pool)
+            .await?;
+        if result.rows_affected() == 0 {
+            anyhow::bail!("session not found: {session_id}");
+        }
+        Ok(())
+    }
+
+    pub async fn get_client_id(&self, session_id: Uuid) -> anyhow::Result<Option<String>> {
+        let row: Option<Option<String>> =
+            sqlx::query_scalar("SELECT client_id FROM sessions WHERE session_id = ?")
+                .bind(session_id.to_string())
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.flatten())
     }
 
     pub async fn end_session(&self, session_id: Uuid, summary: Option<&str>) -> anyhow::Result<()> {
@@ -267,7 +310,7 @@ impl SessionStore {
 
     pub async fn list_sessions(&self, limit: u32) -> anyhow::Result<Vec<SessionRecord>> {
                 let rows: Vec<SessionRow> = sqlx::query_as(
-            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature
+            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id
              FROM sessions ORDER BY started_at DESC LIMIT ?",
         )
         .bind(i64::from(limit))
@@ -277,7 +320,7 @@ impl SessionStore {
         Ok(rows
             .into_iter()
             .map(
-                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature)| {
+                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id)| {
                     SessionRecord {
                         session_id: sid,
                         agent_id: agent,
@@ -290,6 +333,47 @@ impl SessionStore {
                         ui_mode,
                         tool_mode,
                         temperature,
+                        client_id,
+                    }
+                },
+            )
+            .collect())
+    }
+
+    /// List sessions filtered by `client_id`. Sessions with
+    /// `client_id == NULL` are treated as legacy and are NOT
+    /// returned here — they're only visible via `list_sessions()`.
+    /// This is what each client uses to see its own sessions.
+    pub async fn list_sessions_by_client(
+        &self,
+        client_id: &str,
+        limit: u32,
+    ) -> anyhow::Result<Vec<SessionRecord>> {
+        let rows: Vec<SessionRow> = sqlx::query_as(
+            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id
+             FROM sessions WHERE client_id = ? ORDER BY started_at DESC LIMIT ?",
+        )
+        .bind(client_id)
+        .bind(i64::from(limit))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id)| {
+                    SessionRecord {
+                        session_id: sid,
+                        agent_id: agent,
+                        started_at: started,
+                        ended_at: ended,
+                        summary,
+                        provider_id,
+                        model,
+                        tokens_used,
+                        ui_mode,
+                        tool_mode,
+                        temperature,
+                        client_id,
                     }
                 },
             )

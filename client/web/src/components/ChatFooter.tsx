@@ -232,8 +232,17 @@ export function ChatFooter({
                 <button
                   className="btn btn-primary chat__action"
                   onClick={onSend}
-                  disabled={!sessionId || input.trim() === ""}
-                  title="Send (Shift+Enter)"
+                  // EP-2026-09-02: also disable when no model is picked.
+                  // The user must explicitly choose a model in the
+                  // selector before the chat can send anything —
+                  // previously the daemon's default model was
+                  // preselected silently, which surprised new users.
+                  disabled={!sessionId || !sessionModel || input.trim() === ""}
+                  title={
+                    !sessionModel
+                      ? "Pick a model first"
+                      : "Send (Shift+Enter)"
+                  }
                   aria-label="Send"
                   data-testid="chat-send"
                 >

@@ -1,12 +1,21 @@
 import { apiGet, apiPost, apiPut, apiDelete, buildApiUrl } from './client';
+import { getWebClientId } from '../shared/clientId';
 import type { SessionsResponse, MessagesResponse } from '../types';
 
+// Per-turn request id so the daemon can route concurrent streams on the
+// same session without cross-wiring events (D3). Reset on each `send`.
+export function newRequestId(): string {
+  return "req_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
 export function listSessions(): Promise<SessionsResponse> {
-  return apiGet<SessionsResponse>('/v1/sessions');
+  // Pass client_id so the daemon filters to sessions owned by this
+  // browser. Without this we'd see sidebar sessions too.
+  return apiGet<SessionsResponse>(`/v1/sessions?client_id=${encodeURIComponent(getWebClientId())}`);
 }
 
 export function createSession(agent_id: string): Promise<{ session_id: string; agent_id: string }> {
-  return apiPost('/v1/sessions', { agent_id });
+  return apiPost('/v1/sessions', { agent_id, client_id: getWebClientId() });
 }
 
 export function getSessionMessages(id: string): Promise<MessagesResponse> {
@@ -34,6 +43,7 @@ export function sendMessage(id: string, agent_id: string, text: string): Promise
   return apiPost(`/v1/sessions/${encodeURIComponent(id)}/messages`, {
     agent_id,
     text,
+    client_id: getWebClientId(),
   });
 }
 
@@ -43,11 +53,16 @@ export function sendMessage(id: string, agent_id: string, text: string): Promise
  * Calls `onChunk` for each parsed JSON object as it arrives. Resolves when
  * the stream ends with `[DONE]`. Rejects on network errors or non-2xx status.
  *
- * Backend event shapes:
- *   {"type":"thinking","text":"..."}
- *   {"type":"content","text":"..."}
- *   {"type":"error","message":"..."}
- *   "[DONE]"
+ * `requestId` (optional): when provided, the client filters out any chunk
+ * whose `request_id` field doesn't match. This is what prevents
+ * cross-wiring when two `send()` calls overlap on the same session
+ * (rare in the UI because `useChatStream` aborts the previous one,
+ * but possible during teardown).
+ *
+ * SSE framing is parsed properly: events are separated by `\n\n`,
+ * multi-line `data:` continuations are joined, comments (`:`) are
+ * ignored. Earlier versions split on `\n` which broke for chunks
+ * whose JSON payload contained literal newlines (W1).
  */
 export async function streamMessage(
   id: string,
@@ -55,12 +70,17 @@ export async function streamMessage(
   text: string,
   onChunk: (chunk: unknown) => void,
   signal?: AbortSignal,
+  requestId?: string,
 ): Promise<void> {
   const url = buildApiUrl(`/v1/sessions/${encodeURIComponent(id)}/messages/stream`);
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ agent_id, text }),
+    body: JSON.stringify({
+      agent_id,
+      text,
+      client_id: getWebClientId(),
+    }),
     signal,
   });
 
@@ -80,30 +100,55 @@ export async function streamMessage(
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
 
-    let newlineIdx: number;
-    while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
-      const rawLine = buffer.slice(0, newlineIdx);
-      buffer = buffer.slice(newlineIdx + 1);
-      const line = rawLine.replace(/\r$/, "").trim();
-      if (!line) continue;
-      if (!line.startsWith("data:")) continue;
-      const payload = line.slice(5).trim();
-      if (payload === "[DONE]") return;
-      try {
-        onChunk(JSON.parse(payload));
-      } catch {
-        // ignore malformed JSON
-      }
+    // Split on SSE event terminator (\n\n). Each event is one or
+    // more `field: value\n` lines ending with a blank line.
+    let frameEnd: number;
+    while ((frameEnd = buffer.indexOf("\n\n")) !== -1) {
+      const rawFrame = buffer.slice(0, frameEnd);
+      buffer = buffer.slice(frameEnd + 2);
+      processFrame(rawFrame, onChunk, requestId);
     }
   }
 
-  // Flush any trailing buffer as a final chunk.
+  // Flush trailing partial frame if any.
   const trailing = buffer.replace(/\r$/, "").trim();
   if (trailing) {
-    try {
-      onChunk(JSON.parse(trailing));
-    } catch {
-      // ignore
+    processFrame(trailing, onChunk, requestId);
+  }
+}
+
+function processFrame(
+  rawFrame: string,
+  onChunk: (chunk: unknown) => void,
+  requestId?: string,
+): void {
+  // Concatenate multi-line `data:` fields per SSE spec.
+  let dataLines: string[] = [];
+  for (const rawLine of rawFrame.split("\n")) {
+    const line = rawLine.replace(/\r$/, "");
+    if (!line) continue;
+    if (line.startsWith(":")) continue; // comment
+    const idx = line.indexOf(":");
+    const field = idx >= 0 ? line.slice(0, idx) : line;
+    let value = idx >= 0 ? line.slice(idx + 1) : "";
+    if (value.startsWith(" ")) value = value.slice(1);
+    if (field === "data") dataLines.push(value);
+  }
+  if (dataLines.length === 0) return;
+  const payload = dataLines.join("\n");
+  if (payload === "[DONE]") return; // end of stream
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return; // malformed JSON — ignore
+  }
+  // D3: drop chunks whose request_id doesn't match this turn.
+  if (requestId && typeof parsed === "object" && parsed !== null) {
+    const obj = parsed as Record<string, unknown>;
+    if (typeof obj.request_id === "string" && obj.request_id !== requestId) {
+      return;
     }
   }
+  onChunk(parsed);
 }

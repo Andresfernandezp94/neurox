@@ -16,7 +16,7 @@
 //   }
 
 import type { ApprovalDecision } from './approvals';
-import { getApiBase } from './client';
+import { getApiBase, getToken } from './client';
 
 export type WsCommand =
   | { type: 'list_agents' }
@@ -58,6 +58,12 @@ export class CommandsClient {
   private pending = new Map<string, PendingRequest>();
   private requestCounter = 0;
   private latencySamples: number[] = [];
+  // EP-2026-09-02: cuando el user hace login o logout, queremos
+  // reconectar inmediatamente con el token fresh en lugar de esperar
+  // el backoff exponencial. El listener de `neurox:auth-changed`
+  // (registrado en init, removido en shutdown) flaguea esto y el
+  // close handler hace el retry sin delay.
+  private wantImmediateRetry = false;
 
   constructor(opts: {
     path?: string;
@@ -75,6 +81,12 @@ export class CommandsClient {
   /** Inicializa la conexión. Idempotente. Llamar después del primer render. */
   init(): void {
     if (this.socket || typeof WebSocket === 'undefined') return;
+    if (typeof window !== 'undefined') {
+      // EP-2026-09-02: listener para forzar reconexión inmediata cuando
+      // useAuth dispare `neurox:auth-changed` (login / logout). Bound
+      // como arrow para no perder `this` y removido en shutdown().
+      window.addEventListener('neurox:auth-changed', this.onAuthChanged);
+    }
     this.connect();
   }
 
@@ -121,6 +133,9 @@ export class CommandsClient {
 
   close(): void {
     this.manuallyClosed = true;
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('neurox:auth-changed', this.onAuthChanged);
+    }
     if (this.retryTimer !== null) {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
@@ -155,11 +170,20 @@ export class CommandsClient {
     } catch {
       apiBase = '';
     }
-    const wsUrl = this.path.startsWith('ws')
+    const baseWsUrl = this.path.startsWith('ws')
       ? this.path
       : apiBase
         ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${apiBase.replace(/^https?:\/\//, '')}${this.path}`
         : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}${this.path}`;
+
+    // EP-2026-09-02: el daemon exige JWT en `?token=` para WS upgrades
+    // (los browsers no permiten headers custom en el handshake). Leemos
+    // el token fresh en cada connect para que un login reabra la
+    // conexión sin esperar el backoff.
+    const token = getToken();
+    const wsUrl = token
+      ? `${baseWsUrl}${baseWsUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+      : baseWsUrl;
 
     const socket = new WebSocket(wsUrl);
     this.socket = socket;
@@ -197,9 +221,17 @@ export class CommandsClient {
         this.pending.delete(id);
       }
       if (!this.manuallyClosed) {
-        const wait = this.backoff;
-        this.backoff = Math.min(this.backoff * 2, this.maxBackoffMs);
-        this.retryTimer = setTimeout(() => this.connect(), wait);
+        if (this.wantImmediateRetry) {
+          // EP-2026-09-02: disparado por neurox:auth-changed. Saltamos
+          // el backoff y reintentamos ya con el token fresh.
+          this.wantImmediateRetry = false;
+          this.backoff = this.initialBackoffMs;
+          this.retryTimer = setTimeout(() => this.connect(), 0);
+        } else {
+          const wait = this.backoff;
+          this.backoff = Math.min(this.backoff * 2, this.maxBackoffMs);
+          this.retryTimer = setTimeout(() => this.connect(), wait);
+        }
       }
     });
 
@@ -207,6 +239,19 @@ export class CommandsClient {
       socket.close();
     });
   }
+
+  // EP-2026-09-02: arrow fn para preservar `this` cuando se usa como
+  // listener de `neurox:auth-changed`.
+  private onAuthChanged = (): void => {
+    this.wantImmediateRetry = true;
+    const s = this.socket;
+    if (!s) return;
+    if (s.readyState === WebSocket.OPEN) {
+      s.close();
+    } else if (s.readyState === WebSocket.CONNECTING) {
+      setTimeout(() => s.close(), 0);
+    }
+  };
 }
 
 // ─── Singleton ──────────────────────────────────────────────────────────

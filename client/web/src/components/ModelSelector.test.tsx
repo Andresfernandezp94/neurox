@@ -107,13 +107,17 @@ describe("ModelSelector", () => {
     expect(screen.getByTestId("model-selector-group-openrouter")).toBeInTheDocument();
   });
 
-  it("preselects the daemon default when no currentModel is provided", async () => {
+  // EP-2026-09-02: no default model. The selector shows the
+  // "select model" placeholder until the user explicitly picks one
+  // (was: auto-pick the daemon's default_provider/default_model).
+  it("shows 'select model' placeholder when no currentModel is provided", async () => {
     render(<ModelSelector sessionId={SID} />);
-    // Wait for catalog to load. The trigger label is the
-    // user-friendly name (formatModelName replaces `-` with space).
+    // Catalog loads in the background; the trigger text is "loading…"
+    // initially, then "select model" once providersResp resolves.
     await waitFor(() => {
       const trigger = screen.getByTestId("model-selector-trigger");
-      expect(trigger.textContent).toContain("MiniMax M3");
+      expect(trigger.textContent).toContain("select model");
+      expect(trigger.textContent).not.toContain("MiniMax M3");
     });
   });
 
@@ -179,7 +183,7 @@ describe("ModelSelector", () => {
 
   it("reverts to the previous selection when PUT fails", async () => {
     mockSetSessionModel.mockRejectedValueOnce(new Error("backend boom"));
-    render(<ModelSelector sessionId={SID} />);
+    render(<ModelSelector sessionId={SID} currentModel={{ provider_id: "minimax", model: "MiniMax-M3" }} />);
     await waitFor(() => {
       expect(screen.getByTestId("model-selector-trigger").textContent).toContain("MiniMax M3");
     });

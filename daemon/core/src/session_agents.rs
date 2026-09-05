@@ -23,6 +23,26 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+#[cfg(unix)]
+unsafe extern "C" {
+    fn syscall(num: i64, ...) -> i64;
+}
+
+#[cfg(unix)]
+const SYS_KILL: i64 = 37; // Linux x86_64. Same on arm64.
+
+/// Probe a pid via `syscall(SYS_kill, pid, 0)`. Sending signal 0
+/// doesn't deliver anything but performs an existence/permission
+/// check — returns 0 if the process exists, -1 otherwise.
+///
+/// Using `syscall` directly instead of libc::kill avoids any Rust
+/// symbol shadowing surprises.
+#[cfg(unix)]
+#[inline]
+unsafe fn probe_pid(pid: u32) -> bool {
+    syscall(SYS_KILL, pid as i64, 0i64) == 0
+}
 use tokio::sync::RwLock;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -291,6 +311,102 @@ impl SessionAgentPool {
         self.agents.lock().await.get(&session_id).cloned()
     }
 
+    /// EP-2026-08-31: validate that the cached agent's subprocess is
+    /// actually alive. The daemon's map can hold an `Arc<SessionAgent>`
+    /// whose subprocess died (OOM, crash, manual kill, idle eviction
+    /// race). When the daemon hands out a dead handle, the next
+    /// `protocol.stream()` call hangs on `read_line` because the
+    /// pipe never produces data — the user sees a 30s timeout per
+    /// request. This helper does a non-destructive `kill(pid, 0)`
+    /// probe. `true` if the agent is gone OR the cached pid is
+    /// absent / dead.
+    pub fn is_subprocess_alive(agent: &SessionAgent) -> bool {
+        match agent.pid {
+            None => false,
+            Some(pid) => unsafe { probe_pid(pid) },
+        }
+    }
+
+    /// EP-2026-08-31: `get_or_respawn` returns the cached agent only
+    /// if its subprocess is still alive. Otherwise removes the dead
+    /// entry from the map, spawns a fresh subprocess with the same
+    /// `agent_id`, and returns the new agent. Returns `None` if
+    /// either no entry exists or respawn fails.
+    pub async fn get_or_respawn(
+        self: &Arc<Self>,
+        session_id: Uuid,
+    ) -> Option<Arc<SessionAgent>> {
+        // Take a quick snapshot first to release the lock before any
+        // (potentially blocking) spawn. If the cached agent's
+        // subprocess is alive, return it without touching the map.
+        let needs_respawn = {
+            let agents = self.agents.lock().await;
+            match agents.get(&session_id) {
+                Some(a) => !Self::is_subprocess_alive(a),
+                None => return None,
+            }
+        };
+        if !needs_respawn {
+            return self.agents.lock().await.get(&session_id).cloned();
+        }
+        // Subprocess is dead. Remove the stale entry and respawn.
+        let agent_id = {
+            let mut agents = self.agents.lock().await;
+            let old = agents.remove(&session_id);
+            old.map(|a| a.agent_id.clone())
+        };
+        let Some(agent_id) = agent_id else {
+            return None;
+        };
+        tracing::warn!(
+            session_id = %session_id,
+            agent_id = %agent_id,
+            "session agent subprocess died — respawning"
+        );
+        match self.start_for_session(session_id, &agent_id).await {
+            Ok(a) => Some(a),
+            Err(e) => {
+                tracing::error!(session_id = %session_id, error = %e, "respawn failed");
+                None
+            }
+        }
+    }
+
+    /// Drop any session agent whose subprocess has died. Called by
+    /// the daemon's idle-eviction sweep so dead-but-cached entries
+    /// don't accumulate forever. Returns the number of entries
+    /// dropped.
+    pub async fn reap_dead(&self) -> usize {
+        // 1. collect dead (sid, agent_id) pairs.
+        let dead: Vec<(Uuid, String)> = {
+            let agents = self.agents.lock().await;
+            agents
+                .iter()
+                .filter(|(_, a)| !Self::is_subprocess_alive(a))
+                .map(|(sid, a)| (*sid, a.agent_id.clone()))
+                .collect()
+        };
+        let n = dead.len();
+        if n == 0 {
+            return 0;
+        }
+        // 2. remove from map.
+        {
+            let mut agents = self.agents.lock().await;
+            for (sid, _) in &dead {
+                agents.remove(sid);
+            }
+        }
+        for (sid, agent_id) in dead {
+            tracing::warn!(
+                session_id = %sid,
+                agent_id = %agent_id,
+                "reaped dead session agent"
+            );
+        }
+        n
+    }
+
     /// Update `last_active`. Called on every dispatch.
     pub async fn touch(self: &Arc<Self>, session_id: Uuid) {
         if let Some(agent) = self.agents.lock().await.get(&session_id) {
@@ -351,7 +467,8 @@ impl SessionAgentPool {
     }
 
     /// Sweep idle sessions, kill the ones whose `idle_secs` exceed their
-    /// spec's `idle_timeout_secs`. Returns the evicted session ids.
+    /// spec's `idle_timeout_secs`. Also reaps dead subprocesses
+    /// (manual kill / crash / OOM). Returns the evicted session ids.
     pub async fn evict_idle(self: &Arc<Self>) -> Vec<Uuid> {
         let mut agents = self.agents.lock().await;
         let now = Instant::now();
@@ -359,7 +476,9 @@ impl SessionAgentPool {
             .iter()
             .filter_map(|(sid, a)| {
                 let idle = now.duration_since(*a.last_active.lock());
-                if idle >= Duration::from_secs(a.spec.idle_timeout_secs) {
+                let timed_out = idle >= Duration::from_secs(a.spec.idle_timeout_secs);
+                let dead = !Self::is_subprocess_alive(a);
+                if timed_out || dead {
                     Some(*sid)
                 } else {
                     None
@@ -372,7 +491,7 @@ impl SessionAgentPool {
             }
         }
         if !to_remove.is_empty() {
-            info!(count = to_remove.len(), "idle session agents evicted");
+            info!(count = to_remove.len(), "idle/dead session agents evicted");
         }
         to_remove
     }
@@ -601,5 +720,40 @@ impl SessionAgentPool {
             .unwrap_or("")
             .to_string();
         Ok(PersistentChatOutcome { text })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// EP-2026-08-31: probe_pid must NOT return `true` for a pid
+    /// whose process is gone. The previous libc::kill binding
+    /// silently shadowed and always returned 0, which let dead
+    /// agents linger in the map and hang the next dispatch for
+    /// 30s. Regressing this re-introduces the original bug.
+    #[test]
+    fn probe_pid_returns_false_for_dead_process() {
+        // Spawn /bin/true, capture its pid, wait for it to exit.
+        let child = std::process::Command::new("/bin/true")
+            .spawn()
+            .expect("spawn /bin/true");
+        let pid = child.id();
+        // Give the kernel time to reap the zombie. On Linux the
+        // process is gone from the process table as soon as it
+        // exits, but we wait a moment to be safe.
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(
+            !unsafe { probe_pid(pid) },
+            "probe_pid({}) should return false after child exited",
+            pid
+        );
+    }
+
+    #[test]
+    fn probe_pid_returns_true_for_self() {
+        let pid = std::process::id();
+        assert!(unsafe { probe_pid(pid) }, "self pid must probe alive");
     }
 }

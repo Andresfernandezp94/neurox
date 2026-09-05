@@ -106,8 +106,6 @@ export function ModelSelector({
   disabled,
 }: ModelSelectorProps) {
   const [models, setModels] = useState<CatalogModel[]>([]);
-  const [defaultProvider, setDefaultProvider] = useState<string>("");
-  const [defaultModel, setDefaultModel] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -159,8 +157,6 @@ export function ModelSelector({
           }),
         );
         setModels(perProvider.flat());
-        setDefaultProvider(providersResp.default_provider);
-        setDefaultModel(providersResp.default_model);
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -193,8 +189,6 @@ export function ModelSelector({
         }),
       );
       setModels(perProvider.flat());
-      setDefaultProvider(providersResp.default_provider);
-      setDefaultModel(providersResp.default_model);
     } catch {
       // Silencioso: la carga inicial ya maneja errores visibles.
     } finally {
@@ -219,16 +213,14 @@ export function ModelSelector({
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  const defaultSelection = useMemo(() => {
-    if (defaultProvider && defaultModel) {
-      return encodeValue(defaultProvider, defaultModel);
-    }
-    return "";
-  }, [defaultProvider, defaultModel]);
-
+  // EP-2026-09-02: no default model. The user must pick one before
+  // the chat can send — the previous behavior auto-picked the
+  // daemon's `default_provider` + `default_model`, which is a
+  // sensible default for power users but confusing for new ones
+  // (messages went to a model they never chose). The trigger shows
+  // "select model" until the user picks one.
   const selected = userSelection
     ?? (currentModel ? encodeValue(currentModel.provider_id, currentModel.model) : null)
-    ?? (defaultSelection || null)
     ?? "";
 
   const grouped = useMemo(() => {
@@ -273,6 +265,9 @@ export function ModelSelector({
   );
 
   const activeModel = decodeValue(selected);
+  // EP-2026-09-02: explicit placeholder copy. "select model" reads
+  // like an instruction; using a verb instead of an ellipsis or a
+  // muted "—" so the user knows they need to act.
   const activeLabel = activeModel
     ? formatModelName(activeModel.model)
     : (loading ? "loading…" : "select model");

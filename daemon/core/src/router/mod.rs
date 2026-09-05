@@ -219,9 +219,16 @@ impl AppState {
             }
         };
 
-        // If the agent returned a tool_call, run it through the local
-        // ToolRegistry and loop results back through the agent (mirrors the
-        // persistent-agent path).
+        // If the agent returned tool_call(s), run them through the local
+        // ToolRegistry and loop results back through the agent (mirrors
+        // the persistent-agent path).
+        //
+        // D1 fix: dispatch ALL parallel calls (tool_calls is an array).
+        // The previous implementation took only tool_calls[0] and
+        // silently dropped the rest, which broke the standard chat-API
+        // contract when the model emitted parallel function calls.
+        // The dispatch is sequential so the SSE stream preserves the
+        // tool_call/tool_result pairing order expected by both clients.
         if let Some(ref result_obj) = response.result {
             let tool_calls: Vec<serde_json::Value> = result_obj
                 .get("tool_calls")
@@ -229,24 +236,26 @@ impl AppState {
                 .cloned()
                 .unwrap_or_default();
             // Also fall back to the legacy single `tool_call` field.
-            let first_call = if !tool_calls.is_empty() {
-                Some(tool_calls[0].clone())
+            let calls: Vec<serde_json::Value> = if !tool_calls.is_empty() {
+                tool_calls
+            } else if let Some(single) = result_obj.get("tool_call").cloned() {
+                vec![single]
             } else {
-                result_obj.get("tool_call").cloned()
+                Vec::new()
             };
 
-        if let Some(call) = first_call {
-            let (_cancel_id, cancel) = self.lifecycle.tasks.create(session_id).await;
-            return Box::pin(self.handle_session_tool_call(
-                agent,
-                session_id,
-                call,
-                &params,
-                cancel,
-                1,
-            ))
-            .await;
-        }
+            if !calls.is_empty() {
+                let (_cancel_id, cancel) = self.lifecycle.tasks.create(session_id).await;
+                return Box::pin(self.handle_session_tool_calls_batch(
+                    agent,
+                    session_id,
+                    calls,
+                    &params,
+                    cancel,
+                    1,
+                ))
+                .await;
+            }
         }
 
         // Emit a final Done event with the agent's text. The streamed
@@ -563,19 +572,26 @@ impl AppState {
             return Ok(None);
         }
 
-        let next_call = resp.result.as_ref().and_then(|r| {
+        // D1 fix: take ALL parallel tool_calls, not just [0]. If the
+        // LLM emitted a batch in the next round, dispatch each one
+        // sequentially (preserving order in the SSE stream).
+        let next_calls: Vec<serde_json::Value> = if let Some(ref r) = resp.result {
             if let Some(arr) = r.get("tool_calls").and_then(|v| v.as_array()) {
-                arr.first().cloned()
+                arr.clone()
+            } else if let Some(single) = r.get("tool_call").cloned() {
+                vec![single]
             } else {
-                r.get("tool_call").cloned()
+                Vec::new()
             }
-        });
+        } else {
+            Vec::new()
+        };
 
-        if let Some(next_call) = next_call {
-            return Box::pin(self.handle_session_tool_call(
+        if !next_calls.is_empty() {
+            return Box::pin(self.handle_session_tool_calls_batch(
                 agent,
                 session_id,
-                next_call,
+                next_calls,
                 original_params,
                 cancel,
                 iteration + 1,
@@ -588,6 +604,44 @@ impl AppState {
             text: serde_json::to_string(&resp.result)?,
         });
         Ok(resp.result)
+    }
+
+    /// D1 fix: dispatch a batch of parallel tool_calls sequentially.
+    /// Each call emits its own ToolCall + ToolResult pair; the SSE
+    /// forwarder preserves order, so the client sees a deterministic
+    /// call1→result1→call2→result2→... chain.
+    ///
+    /// Tool execution is synchronous within this function. Parallel
+    /// execution (tokio::join!) would be faster for I/O-bound tools
+    /// but complicates ordering and the Event::Error recovery path.
+    /// Sequential is safer and good enough until we have evidence of a
+    /// real perf bottleneck.
+    async fn handle_session_tool_calls_batch(
+        &self,
+        agent: Arc<crate::session_agents::SessionAgent>,
+        session_id: Uuid,
+        calls: Vec<serde_json::Value>,
+        original_params: &serde_json::Value,
+        cancel: CancellationToken,
+        iteration: u32,
+    ) -> anyhow::Result<Option<serde_json::Value>> {
+        let mut last_result: Option<serde_json::Value> = None;
+        for call in calls {
+            let r = self
+                .handle_session_tool_call(
+                    agent.clone(),
+                    session_id,
+                    call,
+                    original_params,
+                    cancel.clone(),
+                    iteration,
+                )
+                .await?;
+            if r.is_some() {
+                last_result = r;
+            }
+        }
+        Ok(last_result)
     }
 
     pub async fn dispatch_to_agent(
@@ -610,12 +664,19 @@ impl AppState {
         // picking "Live switch: mismo session_id, agente cambia al vuelo".
         if self.lifecycle.session_agents.is_session_agent(agent_id).await {
             // Fast path: session already on the requested agent — just dispatch.
-            if let Some(existing) = self.lifecycle.session_agents.get(session_id).await {
+            // EP-2026-08-31: `get_or_respawn` replaces the cached
+            // SessionAgent if its subprocess died (manual kill, OOM,
+            // crash). Without this the dispatch tries to read from a
+            // dead pipe and hangs for the full HTTP timeout.
+            if let Some(existing) = self.lifecycle.session_agents.get_or_respawn(session_id).await {
                 if existing.agent_id == agent_id {
                     return self
                         .dispatch_to_session_agent(existing, method, session_id, params)
                         .await;
                 }
+                // Live-switch path: agent_id differs. Tear down the
+                // respawned one and start fresh for the new agent_id.
+                let _ = self.lifecycle.session_agents.stop(session_id).await;
             }
             // Slow path: bind (or rebind) the session to the requested agent.
             // `start_for_session` handles the "kill old, insert new" atomically
@@ -832,13 +893,13 @@ impl AppState {
                         .unwrap_or_default();
 
                     if !tool_calls.is_empty() {
-                        // Execute tool calls sequentially, sending each result back
-                        let first = tool_calls[0].clone();
+                        // D1 fix: dispatch ALL parallel tool_calls
+                        // sequentially, not just [0].
                         return self
-                            .handle_tool_call(
+                            .handle_tool_calls_batch(
                                 agent_id,
                                 session_id,
-                                first,
+                                tool_calls,
                                 &params_for_tool,
                                 cancel.clone(),
                                 1,
@@ -1075,20 +1136,26 @@ impl AppState {
 
         match result {
             Ok(resp) if resp.ok => {
-                // Check for tool_calls array first, then single tool_call
-                let next_call = resp.result.as_ref().and_then(|r| {
-                    // Try array first
-                    if let Some(arr) = r.get("tool_calls").and_then(|v| v.as_array()) {
-                        arr.first().cloned()
+                // D1 fix: dispatch ALL parallel tool_calls, not just
+                // tool_calls[0]. The persistent-agent path mirrors the
+                // session-agent path fix.
+                let next_calls: Vec<serde_json::Value> =
+                    if let Some(ref r) = resp.result {
+                        if let Some(arr) = r.get("tool_calls").and_then(|v| v.as_array()) {
+                            arr.clone()
+                        } else if let Some(single) = r.get("tool_call").cloned() {
+                            vec![single]
+                        } else {
+                            Vec::new()
+                        }
                     } else {
-                        r.get("tool_call").cloned()
-                    }
-                });
-                if let Some(next_call) = next_call {
-                    return Box::pin(self.handle_tool_call(
+                        Vec::new()
+                    };
+                if !next_calls.is_empty() {
+                    return Box::pin(self.handle_tool_calls_batch(
                         agent_id,
                         session_id,
-                        next_call,
+                        next_calls,
                         _original_params,
                         cancel.clone(),
                         iteration + 1,
@@ -1116,6 +1183,35 @@ impl AppState {
                 Err(e)
             }
         }
+    }
+
+    /// D1 fix: persistent-agent variant of the parallel batch handler.
+    async fn handle_tool_calls_batch(
+        &self,
+        agent_id: &str,
+        session_id: Uuid,
+        calls: Vec<serde_json::Value>,
+        original_params: &serde_json::Value,
+        cancel: tokio_util::sync::CancellationToken,
+        iteration: u32,
+    ) -> anyhow::Result<Option<serde_json::Value>> {
+        let mut last_result: Option<serde_json::Value> = None;
+        for call in calls {
+            let r = self
+                .handle_tool_call(
+                    agent_id,
+                    session_id,
+                    call,
+                    original_params,
+                    cancel.clone(),
+                    iteration,
+                )
+                .await?;
+            if r.is_some() {
+                last_result = r;
+            }
+        }
+        Ok(last_result)
     }
 
     pub fn emit(&self, event: Event) {

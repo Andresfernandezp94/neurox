@@ -1,12 +1,15 @@
 // TimelineRenderer — walks a Message.timeline in order and renders
 // each entry inline (thinking → tool → approval → content → …).
 //
-// EP-2026-08-19: thinking se reordena al inicio del timeline. El wire
-// format del backend a veces entrega `content` antes que `thinking`
-// (raro pero pasa — ej. agentes que primero escriben la respuesta y
-// luego emiten el razonamiento). Para la lectura natural, el toggle
-// de Thinking debe quedar ARRIBA de la respuesta del agente. El resto
-// del timeline mantiene el orden de llegada.
+// EP-2026-08-31: the previous implementation hoisted thinking to the
+// top of the timeline (see git blame). That made the chat read
+// out-of-order when the agent emitted tool calls interleaved with
+// reasoning: "Thinking… [some text] Tool: read_file (above the
+// thinking block) Tool result Content reply" — confusing. We now
+// render strictly in arrival order so the conversation reads
+// top-to-bottom exactly as the agent produced it. This matches
+// what the user sees in the sidebar (which never reordered) and
+// what the SSE stream actually emits.
 //
 // EP-2026-08-19: cuando el stream arranca y aún no hay entries,
 // mostramos un loader "Thinking…" + 3 dots para que la espera sea
@@ -19,12 +22,6 @@ import { ToolNode } from "./ToolNode";
 import { ApprovalNode } from "./ApprovalNode";
 import { StreamingText } from "./StreamingText";
 
-function reorderTimeline(timeline: TimelineEntry[]): TimelineEntry[] {
-  const thinking = timeline.filter((e) => e.type === "thinking");
-  const others = timeline.filter((e) => e.type !== "thinking");
-  return [...thinking, ...others];
-}
-
 export function TimelineRenderer({
   timeline,
   isStreaming,
@@ -34,7 +31,7 @@ export function TimelineRenderer({
   isStreaming: boolean;
   sessionId: string | null;
 }) {
-  const ordered = reorderTimeline(timeline);
+  const ordered = timeline;
   return (
     <>
       {isStreaming && ordered.length === 0 && (
@@ -54,23 +51,21 @@ export function TimelineRenderer({
           </span>
         </div>
       )}
-      {ordered.map((entry) => {
-        // EP-2026-08-19: previously keyed by array index, which
-        // shifted when `reorderTimeline()` hoisted new thinking
-        // entries to the front — React would then unmount and
-        // remount every tool/approval node, losing internal state
-        // (toggle open/closed, scroll position). Keys now derive
-        // from entry identity:
+      {ordered.map((entry, idx) => {
+        // Keys derive from entry identity so React keeps state
+        // (toggle open/closed, scroll position) across updates:
         //   - thinking/content collapse to one entry (reducer
         //     appendToTimeline), so a stable per-kind key is enough
         //   - tool uses (tool, iteration) — the reducer guarantees
         //     unique iteration per call within a stream
         //   - approval already keyed by its daemon-issued id
+        // idx is appended to disambiguate duplicate entries of the
+        // same kind after the no-reorder change.
         switch (entry.type) {
           case "thinking":
             return entry.text.trim() ? (
               <ThinkingNode
-                key="thinking"
+                key={`thinking-${idx}`}
                 content={entry.text}
                 isStreaming={isStreaming}
               />
@@ -78,7 +73,7 @@ export function TimelineRenderer({
           case "tool":
             return (
               <ToolNode
-                key={`tool-${entry.tool}-${entry.iteration}`}
+                key={`tool-${entry.tool}-${entry.iteration}-${idx}`}
                 activity={{
                   tool: entry.tool,
                   args: entry.args,
@@ -91,7 +86,7 @@ export function TimelineRenderer({
           case "approval":
             return (
               <ApprovalNode
-                key={entry.id}
+                key={`approval-${entry.id}-${idx}`}
                 approval={{
                   id: entry.id,
                   tool: entry.tool,
@@ -105,11 +100,11 @@ export function TimelineRenderer({
           case "content":
             if (!entry.text) return null;
             return isStreaming ? (
-              <div key="content" className="chat__row-content">
+              <div key={`content-${idx}`} className="chat__row-content">
                 <StreamingText text={entry.text} />
               </div>
             ) : (
-              <div key="content" className="chat__row-content">
+              <div key={`content-${idx}`} className="chat__row-content">
                 <Markdown>{entry.text}</Markdown>
               </div>
             );

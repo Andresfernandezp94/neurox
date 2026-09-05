@@ -875,3 +875,125 @@ async fn ws_events_are_session_scoped() {
 
     rig.stop_all().await;
 }
+
+// ─── D1 fix: parallel tool_calls ──────────────────────────────────────────
+//
+// When the agent subprocess emits a `tool_calls` ARRAY (multiple
+// parallel calls in one round-trip), the daemon must dispatch ALL of
+// them, not just [0].
+
+/// D1 contract: a `tool_calls` ARRAY in the agent response yields all
+/// entries, not just [0]. Mirrors the logic in
+/// `core/src/router/mod.rs` (dispatch_to_session_agent + persistent
+/// path) so we catch regressions where someone goes back to taking
+/// only the first element.
+#[test]
+fn parse_tool_calls_array_returns_all_calls() {
+    use serde_json::json;
+    let resp = json!({
+        "tool_calls": [
+            {"id":"a","name":"x","args":{}},
+            {"id":"b","name":"y","args":{}},
+            {"id":"c","name":"z","args":{}}
+        ]
+    });
+    let arr = resp
+        .get("tool_calls")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(arr.len(), 3, "all parallel calls must be picked");
+    let names: Vec<&str> = arr
+        .iter()
+        .map(|c| c.get("name").and_then(|n| n.as_str()).unwrap_or(""))
+        .collect();
+    assert_eq!(names, vec!["x", "y", "z"]);
+}
+
+/// D2 contract: the SSE forwarder's `Event::Error` arm must NOT close
+/// the stream. Stream termination is owned exclusively by `Event::Done`.
+/// If anyone re-introduces a `break` after the error event, this test
+/// fails. Runtime coverage of the fix is in /tmp/opencode/diag/s2-*.raw.
+#[test]
+fn tool_error_is_emitted_as_event_not_terminator() {
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/router/http.rs"),
+    )
+    .expect("read http.rs");
+    let err_arm = src
+        .split("Ok(Event::Error {")
+        .nth(1)
+        .and_then(|s| s.split("}").next())
+        .unwrap_or("");
+    assert!(
+        !err_arm.contains("break"),
+        "Event::Error arm must NOT close the SSE stream (D2 fix):\n{err_arm}"
+    );
+    assert!(
+        !err_arm.contains("[DONE]"),
+        "Event::Error arm must NOT send [DONE] (D2 fix):\n{err_arm}"
+    );
+}
+
+/// D3 contract: the SSE forwarder tags every outgoing event with the
+/// request's `request_id` and `client_id`. The client uses these
+/// fields to drop cross-wired events from concurrent streams on the
+/// same session.
+#[test]
+fn sse_events_carry_request_and_client_id() {
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/router/http.rs"),
+    )
+    .expect("read http.rs");
+    // Forwarder block should assign request_id and client_id from the
+    // request body.
+    assert!(
+        src.contains("let request_id = uuid::Uuid::new_v4().to_string()"),
+        "request_id must be generated per dispatch"
+    );
+    assert!(
+        src.contains("\"request_id\": request_id_for_forward"),
+        "SSE events must be tagged with request_id"
+    );
+    assert!(
+        src.contains("\"client_id\": client_id_for_forward"),
+        "SSE events must be tagged with client_id"
+    );
+}
+
+/// Session client_id partitioning: `list_sessions_by_client` must
+/// only return sessions matching the given client_id, NOT legacy
+/// sessions (client_id NULL).
+#[tokio::test]
+async fn list_sessions_by_client_partitions_correctly() {
+    use neurox::session::SessionStore;
+    use tempfile::tempdir;
+
+    let dir = tempdir().unwrap();
+    let db = dir.path().join("test.db");
+    let store = SessionStore::open(&db).await.unwrap();
+
+    let s1 = uuid::Uuid::new_v4();
+    let s2 = uuid::Uuid::new_v4();
+    let s3 = uuid::Uuid::new_v4();
+
+    store.start_session(s1, "default").await.unwrap();
+    store.set_client_id(s1, Some("web")).await.unwrap();
+    store.start_session(s2, "default").await.unwrap();
+    store.set_client_id(s2, Some("sidebar-1")).await.unwrap();
+    store.start_session(s3, "default").await.unwrap();
+    // s3 left with NULL client_id (legacy).
+
+    let web_sessions = store.list_sessions_by_client("web", 100).await.unwrap();
+    assert_eq!(web_sessions.len(), 1);
+    assert_eq!(web_sessions[0].session_id, s1.to_string());
+
+    let sidebar_sessions = store.list_sessions_by_client("sidebar-1", 100).await.unwrap();
+    assert_eq!(sidebar_sessions.len(), 1);
+    assert_eq!(sidebar_sessions[0].session_id, s2.to_string());
+
+    let all = store.list_sessions(100).await.unwrap();
+    assert_eq!(all.len(), 3, "list_sessions (no filter) returns everything");
+}

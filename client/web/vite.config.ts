@@ -25,6 +25,17 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
+      // EP-0003-05: WebSocket bidireccional para comandos
+      // (start_agent, stop_agent, cancel_session, approval_response).
+      // Mismo problema que /v1/events: si cae en la regla `/v1` (HTTP
+      // proxy), el upgrade WS nunca se completa y los comandos se
+      // quedan colgados. Bug latente: en dev la conexión siempre
+      // fallaba silenciosamente.
+      '/v1/commands': {
+        target: 'ws://127.0.0.1:7878',
+        ws: true,
+        changeOrigin: true,
+      },
       // EP-0002: WebSocket para el voice MCP (`mcps/voice/voiced`,
       // puerto 9998). Mismo patrón que /v1/events — DEBE ir antes que
       // cualquier regla `/voice*` más amplia.

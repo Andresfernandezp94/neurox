@@ -7,26 +7,50 @@
 //! (post_message uses `lifecycle.tasks`, SSE forwarders, etc.).
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
+use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::router::state::AppState;
 
+#[derive(Deserialize, Default)]
+pub struct ListSessionsQuery {
+    /// Optional client_id filter. When provided, the response only
+    /// includes sessions whose `client_id` matches. Sessions with
+    /// `client_id == NULL` are never returned in that mode.
+    #[serde(default)]
+    pub client_id: Option<String>,
+}
+
 /// GET /v1/sessions — list recent sessions.
+///
+/// With `?client_id=web` (or `?client_id=sidebar-1`), the response is
+/// partitioned to that client only. With no query param, all sessions
+/// are returned (legacy behavior; admins / debug).
 pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
+    Query(q): Query<ListSessionsQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let sessions = state
-        .lifecycle
-        .session
-        .list_sessions(50)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let sessions = if let Some(cid) = q.client_id.as_deref() {
+        state
+            .lifecycle
+            .session
+            .list_sessions_by_client(cid, 50)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    } else {
+        state
+            .lifecycle
+            .session
+            .list_sessions(50)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    };
 
     let items: Vec<serde_json::Value> = sessions
         .into_iter()
@@ -39,6 +63,7 @@ pub async fn list_sessions(
                 "summary": s.summary,
                 "provider_id": s.provider_id,
                 "model": s.model,
+                "client_id": s.client_id,
             })
         })
         .collect();

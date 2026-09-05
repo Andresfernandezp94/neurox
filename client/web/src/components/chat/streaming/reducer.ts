@@ -232,6 +232,20 @@ export function streamReducer(
 
     case "tool_call": {
       const iteration = chunk.iteration ?? 0;
+      // W3 dedupe: if a tool_call with the same (tool, iteration)
+      // is already pending, drop the duplicate. The daemon emits
+      // tool_call once per dispatch, but a buggy backend or a
+      // re-emission from a retried connection could produce a
+      // duplicate — better to render one node than two.
+      const dupTimeline = state.timeline.findIndex(
+        (e) =>
+          e.type === "tool" &&
+          e.tool === chunk.tool &&
+          e.iteration === iteration,
+      );
+      const dupLog = state.toolLog.findIndex(
+        (t) => t.tool === chunk.tool && t.iteration === iteration,
+      );
       const activity: ToolActivity = {
         tool: chunk.tool,
         args: chunk.args,
@@ -245,8 +259,14 @@ export function streamReducer(
       };
       return {
         ...state,
-        toolLog: [...state.toolLog, activity],
-        timeline: [...state.timeline, timelineEntry],
+        toolLog:
+          dupLog >= 0
+            ? state.toolLog.map((t, i) => (i === dupLog ? { ...t, ...activity } : t))
+            : [...state.toolLog, activity],
+        timeline:
+          dupTimeline >= 0
+            ? state.timeline
+            : [...state.timeline, timelineEntry],
         lastNonContentEvent: "tool",
         lastToolName: chunk.tool,
       };
