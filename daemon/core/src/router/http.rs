@@ -1692,7 +1692,11 @@ pub async fn cancel_session(
     Path(session_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     // Owner check: refuse to operate on sessions the caller doesn't
-    // own. Same 404-not-leak convention as list/messages.
+    // own. Same 404-not-leak convention as list/messages. Legacy rows
+    // (no user_id, from before the per-user migration) are treated as
+    // owned-by-anyone — they can't be tied to a user since none was
+    // recorded when they were created. New sessions always have user_id
+    // (see `create_session` → `start_session_for_user`).
     let owner = state
         .lifecycle
         .session
@@ -1701,6 +1705,7 @@ pub async fn cancel_session(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     match owner {
         Some(uid) if uid == user.user_id.to_string() => {}
+        None => {} // legacy orphan session
         _ => {
             return Err((
                 StatusCode::NOT_FOUND,
@@ -1797,7 +1802,7 @@ pub async fn delete_session(
     user: UserContext,
     Path(session_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    // Owner check (same convention as cancel_session).
+    // Owner check: same legacy-orphan exception as cancel_session.
     let owner = state
         .lifecycle
         .session
@@ -1806,6 +1811,7 @@ pub async fn delete_session(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     match owner {
         Some(uid) if uid == user.user_id.to_string() => {}
+        None => {} // legacy orphan session
         _ => {
             return Err((
                 StatusCode::NOT_FOUND,
@@ -2123,7 +2129,7 @@ pub async fn set_session_model(
         if let Err(e2) = state
             .lifecycle
             .session
-            .start_session(session_id, "default")
+            .start_session_for_user(session_id, "default", &user.user_id.to_string())
             .await
         {
             return Err((

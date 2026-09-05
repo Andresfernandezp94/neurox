@@ -160,7 +160,13 @@ async fn event_owned_by(
     };
     match state.lifecycle.session.get_session_user(sid).await {
         Ok(Some(owner)) => owner == user_id.to_string(),
-        _ => false,
+        // Legacy orphan session (no user_id) — let the event through.
+        // Per-session lifecycle events aren't sensitive enough to leak
+        // and the alternative is the tab never closing on the user's
+        // own devices.
+        Ok(None) => true,
+        Ok(Some(_)) => false,
+        Err(_) => false,
     }
 }
 
