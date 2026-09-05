@@ -381,6 +381,45 @@ export function ChatPanel(_: ChatPanelProps = {}) {
     }
   }, [createTabFromSession, refreshSessionModel, updateTab]);
 
+  // Cross-device chat history hydration. When the active tab has a
+  // sessionId but no messages loaded yet (typical when the tab
+  // appeared via WS sync or initial hydrate on a different device),
+  // pull the full transcript from the daemon so all devices see the
+  // same chat. Deduped via `loadedSessions` ref to avoid re-fetching
+  // when the user re-selects the same tab.
+  const loadedSessions = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const sid = activeTab?.sessionId;
+    const tabId = activeTab?.id;
+    if (!sid || !tabId) return;
+    if (activeTab.messages.length > 0) {
+      loadedSessions.current.add(sid);
+      return;
+    }
+    if (loadedSessions.current.has(sid)) return;
+    loadedSessions.current.add(sid);
+    (async () => {
+      try {
+        const res = await getSessionMessages(sid);
+        const loaded: Message[] = (res.messages ?? []).map((m, i) => ({
+          id: i + 1,
+          session_id: sid,
+          role: m.role as Message["role"],
+          content: m.content,
+          ts: m.ts,
+          thinking: m.thinking ?? undefined,
+        }));
+        updateTab(tabId, { messages: loaded });
+        await refreshSessionModel(sid, tabId);
+      } catch (e) {
+        setError(`Failed to load session: ${(e as Error).message}`);
+        // Allow retry on next tab switch.
+        loadedSessions.current.delete(sid);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab?.id, activeTab?.sessionId]);
+
   // EP-0028: pull the backend's auto-summary for the given session
   // and mirror it onto the tab header (unless the user already
   // renamed it). Called after `handleSend` so the first user
