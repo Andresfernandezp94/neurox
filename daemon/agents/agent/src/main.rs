@@ -67,6 +67,12 @@ struct DefaultAgentState {
     /// daemon via `NEUROX_TOOLS_ALLOWLIST` (comma-separated). `None`
     /// means no restriction (admin / default behaviour).
     tools_allowlist: Option<Vec<String>>,
+    /// Per-message model tracking. The daemon ships the selected
+    /// provider+model in `process` params; if they differ from the
+    /// currently-built `client`, the subprocess rebuilds the client
+    /// before the LLM call. (`None` until the first such call.)
+    current_provider_id: Option<String>,
+    current_model: Option<String>,
 }
 
 /// EP-2026-08-15 (live-switch history injection): bulk-load messages
@@ -278,6 +284,8 @@ async fn main() -> anyhow::Result<()> {
         identity_dir,
         manifest,
         tools_allowlist,
+        current_provider_id: None,
+        current_model: None,
     }));
 
     // JSON-RPC loop
@@ -548,6 +556,62 @@ async fn handle_process(
         .and_then(|v| v.as_str())
         .unwrap_or("default")
         .to_string();
+
+    // Per-message LLM override: when the daemon ships `params.llm`
+    // (kind + api_key + base_url + model), use it to (re)build the
+    // LlmClient if it differs from the currently-bound one. Without
+    // this the subprocess would always answer with whatever model it
+    // was launched with — the user's mid-session model picker would be
+    // purely cosmetic. The state already carries the manifest-derived
+    // sampling so we re-apply it on rebuild.
+    {
+        let mut s = state.lock().await;
+        if let Some(llm_cfg) = params.get("llm").cloned() {
+            let kind_str = llm_cfg.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+            let api_key = llm_cfg.get("api_key").and_then(|v| v.as_str()).unwrap_or("");
+            let base_url = llm_cfg.get("base_url").and_then(|v| v.as_str()).unwrap_or("");
+            let model = llm_cfg.get("model").and_then(|v| v.as_str()).unwrap_or("");
+            let provider_id = params
+                .get("provider_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let same = s.current_provider_id.as_deref() == Some(provider_id)
+                && s.current_model.as_deref() == Some(model);
+            if !api_key.is_empty()
+                && !model.is_empty()
+                && !kind_str.is_empty()
+                && !same
+            {
+                if let Some(kind) =
+                    tools_engine::backend::LlmProviderKind::from_str(kind_str)
+                {
+                    let sampling = s
+                        .client
+                        .as_ref()
+                        .map(|c| c.sampling().clone())
+                        .unwrap_or_default();
+                    let new_client = LlmClient::with_kind(
+                        api_key.to_string(),
+                        base_url.to_string(),
+                        model.to_string(),
+                        kind,
+                        sampling,
+                    );
+                    eprintln!(
+                        "[default] switching LLM: provider={} model={} kind={}",
+                        provider_id, model, kind_str
+                    );
+                    s.client = Some(new_client);
+                    s.current_provider_id = Some(provider_id.to_string());
+                    s.current_model = Some(model.to_string());
+                } else {
+                    eprintln!(
+                        "[default] unknown LlmProviderKind '{kind_str}' in params.llm; keeping current client"
+                    );
+                }
+            }
+        }
+    }
 
     // Parse tools sent by core
     let incoming_tools = llm::parse_tools_param(&params);

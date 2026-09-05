@@ -71,7 +71,7 @@ export function setToken(token: string | null): void {
   }
 }
 
-function buildHeaders(): HeadersInit {
+export function buildHeaders(): HeadersInit {
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = getToken();
   if (token) h['Authorization'] = `Bearer ${token}`;

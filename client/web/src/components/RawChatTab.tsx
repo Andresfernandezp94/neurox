@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card } from "../shared/components/molecules/Card";
 import { ErrorBanner } from "../shared/components/molecules/ErrorBanner";
+import { buildApiUrl, buildHeaders } from "../api/client";
 
 type ViewMode = "json" | "formatted";
 
@@ -54,7 +55,7 @@ export function RawChatTab(): React.JSX.Element {
   useEffect(() => {
     void (async () => {
       try {
-        const r = await fetch("/v1/providers/active");
+        const r = await fetch(buildApiUrl("/v1/providers/active"), { headers: buildHeaders() });
         if (!r.ok) return;
         const v = (await r.json()) as { provider_id?: string; model?: string };
         if (v.provider_id) setProvider(v.provider_id);
@@ -74,9 +75,9 @@ export function RawChatTab(): React.JSX.Element {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     try {
-      const res = await fetch("/v1/chat/raw", {
+      const res = await fetch(buildApiUrl("/v1/chat/raw"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildHeaders(),
         body: JSON.stringify({
           text: prompt,
           provider_id: provider || undefined,

@@ -136,6 +136,8 @@ export function ChatPanel(_: ChatPanelProps = {}) {
   } = useChatStream({
     sessionId: activeTab?.sessionId ?? "",
     agentId: inProcessDefaultAgent,
+    providerId: activeTab?.sessionModel?.provider_id ?? null,
+    model: activeTab?.sessionModel?.model ?? null,
     onState: useCallback((streamState) => {
       const id = streamingAssistantIdRef.current;
       const tabId = streamingTabIdRef.current;

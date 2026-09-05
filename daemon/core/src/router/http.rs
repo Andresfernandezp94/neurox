@@ -1008,11 +1008,29 @@ pub async fn create_session(
 pub struct MessageReq {
     pub agent_id: String,
     pub text: String,
+    /// LLM provider the user selected for THIS message. The session
+    /// records it as the "last model used" and the subprocess uses it
+    /// to (re)build the LlmClient if it differs from the current one.
+    /// Optional for backward compat — falls back to the daemon's
+    /// configured default provider (ChatBubble / old clients).
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    /// Model identifier within `provider_id`. Same semantics as above.
+    /// Optional — falls back to the provider's configured default model.
+    #[serde(default)]
+    pub model: Option<String>,
     /// Optional stable client id (e.g. "web", "sidebar-<instance>").
     /// Used to tag the dispatch with a `request_id` so concurrent
     /// streams on the same session don't cross-wire events.
     #[serde(default)]
     pub client_id: Option<String>,
+    /// Client-supplied turn id (frontend uses `newRequestId()` →
+    /// `"req_…"`). When present, the daemon echoes it back on every
+    /// SSE chunk so the frontend's per-turn filter can drop
+    /// cross-wired chunks. Falls back to a daemon-generated UUID when
+    /// missing (back-compat with clients that don't send one).
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
 #[tracing::instrument(skip_all, fields(session_id = %session_id, agent_id = tracing::field::Empty))]
@@ -1045,6 +1063,28 @@ pub async fn post_message(
     };
     let _ = state.lifecycle.session.update_summary(session_id, &preview).await;
 
+    // Resolve the provider+model the user (or default) selected for this
+    // message. Falls back to the daemon's configured default provider
+    // (ChatBubble / old clients don't send them).
+    let (provider_id, model) =
+        resolve_default_model(&state, body.provider_id.as_deref(), body.model.as_deref()).await;
+
+    // Persist the selected model on every message so the session always
+    // reflects the last model the user actually used. UI restoration on
+    // session load reads back `session.provider_id`/`session.model`.
+    if let Err(e) = state
+        .lifecycle
+        .session
+        .set_model(session_id, &provider_id, &model)
+        .await
+    {
+        tracing::warn!(
+            session_id = %session_id,
+            error = %e,
+            "failed to persist session model (non-fatal)"
+        );
+    }
+
     let tools_specs: Vec<serde_json::Value> = state.engine
         .tools
         .list_specs()
@@ -1061,7 +1101,22 @@ pub async fn post_message(
         })
         .collect();
 
-    let params = json!({ "text": body.text, "tools": tools_specs });
+    let resolved = resolve_provider_runtime(&state, &provider_id, &model).await;
+    let llm_param = resolved.as_ref().map(|r| {
+        json!({
+            "kind": r.kind.as_str(),
+            "api_key": r.api_key,
+            "base_url": r.base_url,
+            "model": r.model,
+        })
+    });
+    let params = json!({
+        "text": body.text,
+        "tools": tools_specs,
+        "provider_id": provider_id,
+        "model": model,
+        "llm": llm_param,
+    });
     let result = state
         .dispatch_to_agent(&body.agent_id, "process", session_id, params)
         .await
@@ -1275,7 +1330,13 @@ pub async fn post_message_stream(
     let session_for_task = session_id;
     // D3 fix: tag this dispatch with a unique request_id so concurrent
     // SSE streams on the same session can filter to their own events.
-    let request_id = uuid::Uuid::new_v4().to_string();
+    // Prefer the client's `request_id` when provided (lets the
+    // frontend's per-turn filter match); fall back to a daemon-generated
+    // UUID when missing (back-compat with clients that don't send one).
+    let request_id = body
+        .request_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let client_id = body.client_id.clone();
 
     // Subscribe to the GLOBAL event bus (default::process_message emits here).
@@ -1467,7 +1528,44 @@ pub async fn post_message_stream(
             })
         })
         .collect();
-    let params = serde_json::json!({ "text": body.text, "tools": tools_specs });
+    // Resolve the provider+model the user (or default) selected for this
+    // message. Falls back to the daemon's configured default provider
+    // (ChatBubble / old clients don't send them).
+    let (provider_id, model) =
+        resolve_default_model(&state, body.provider_id.as_deref(), body.model.as_deref()).await;
+
+    // Persist the selected model on every message so the session always
+    // reflects the last model the user actually used. UI restoration on
+    // session load reads back `session.provider_id`/`session.model`.
+    if let Err(e) = state
+        .lifecycle
+        .session
+        .set_model(session_id, &provider_id, &model)
+        .await
+    {
+        tracing::warn!(
+            session_id = %session_id,
+            error = %e,
+            "failed to persist session model (non-fatal)"
+        );
+    }
+
+    let resolved = resolve_provider_runtime(&state, &provider_id, &model).await;
+    let llm_param = resolved.as_ref().map(|r| {
+        serde_json::json!({
+            "kind": r.kind.as_str(),
+            "api_key": r.api_key,
+            "base_url": r.base_url,
+            "model": r.model,
+        })
+    });
+    let params = serde_json::json!({
+        "text": body.text,
+        "tools": tools_specs,
+        "provider_id": provider_id,
+        "model": model,
+        "llm": llm_param,
+    });
     let dispatch_state = state.clone();
 
     tokio::spawn(async move {
@@ -1860,21 +1958,49 @@ pub async fn set_session_model(
         ));
     }
 
-    state.lifecycle
+    // `set_model` errors with "session not found" when the row doesn't
+    // exist yet. This happens on tabs whose sessionId came from
+    // localStorage (useChatTabs) but the daemon's DB doesn't have that
+    // session anymore (DB reset, different client partition, etc.).
+    // Instead of returning 404 and forcing the user to send a message
+    // first, auto-create the session row with the default in-process
+    // agent and retry. The full session init (subprocess spawn, etc.)
+    // still happens lazily on first message via `create_session`.
+    let set_result = state
+        .lifecycle
         .session
         .set_model(session_id, &body.provider_id, &body.model)
-        .await
-        .map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("session not found") {
-                (StatusCode::NOT_FOUND, Json(json!({"error": msg})))
-            } else {
+        .await;
+    if let Err(e) = set_result {
+        if !e.to_string().contains("session not found") {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            ));
+        }
+        if let Err(e2) = state
+            .lifecycle
+            .session
+            .start_session(session_id, "default")
+            .await
+        {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("auto-create session: {e2}")})),
+            ));
+        }
+        state
+            .lifecycle
+            .session
+            .set_model(session_id, &body.provider_id, &body.model)
+            .await
+            .map_err(|e| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": msg})),
+                    Json(json!({"error": e.to_string()})),
                 )
-            }
-        })?;
+            })?;
+    }
 
     Ok(Json(json!({
         "session_id": session_id,
@@ -3113,6 +3239,67 @@ pub fn provider_api_key(provider_id: Option<&str>) -> Option<String> {
         })
         .unwrap_or("NEUROX_LLM_API_KEY");
     std::env::var(env_var).ok().or_else(|| std::env::var("NEUROX_LLM_API_KEY").ok())
+}
+
+/// Resolved runtime config for a provider (kind + api_key + base_url + model).
+/// Used by post_message / post_message_stream to forward the LLM call
+/// details to the agent subprocess, which uses them to (re)build its
+/// LlmClient when the user picks a different model mid-session.
+struct ResolvedProvider {
+    kind: tools_engine::backend::LlmProviderKind,
+    api_key: String,
+    base_url: String,
+    model: String,
+}
+
+/// Look up the configured provider by id, resolve its api_key from the
+/// env var named by `api_key_env`, and bundle everything for the
+/// subprocess. Returns `None` if the provider is unknown OR not
+/// configured (api_key_env empty / unset).
+async fn resolve_provider_runtime(
+    state: &AppState,
+    provider_id: &str,
+    model: &str,
+) -> Option<ResolvedProvider> {
+    let list = state.engine.list_providers().await.ok()?;
+    let cfg = list.into_iter().find(|p| p.id == provider_id)?;
+    let api_key = cfg
+        .api_key_env
+        .as_deref()
+        .and_then(|env| std::env::var(env).ok())?;
+    Some(ResolvedProvider {
+        kind: tools_engine::backend::LlmProviderKind::from_str(cfg.kind.as_str())
+            .unwrap_or(tools_engine::backend::LlmProviderKind::OpenaiCompat),
+        api_key,
+        base_url: cfg.effective_base_url(),
+        model: model.to_string(),
+    })
+}
+
+/// Resolve the (provider_id, model) tuple for a message: prefer what
+/// the client sent; otherwise fall back to the daemon's configured
+/// default provider / model. Used by post_message + post_message_stream
+/// so ChatBubble (which doesn't have a model picker) still works.
+async fn resolve_default_model(
+    state: &AppState,
+    provider_id: Option<&str>,
+    model: Option<&str>,
+) -> (String, String) {
+    let providers = state.engine.list_providers().await.unwrap_or_default();
+    let default_pid = if state.config.llm.default_provider.is_empty() {
+        "minimax".to_string()
+    } else {
+        state.config.llm.default_provider.clone()
+    };
+    let pid = provider_id
+        .map(str::to_string)
+        .unwrap_or_else(|| default_pid.clone());
+    let cfg = providers.into_iter().find(|p| p.id == pid);
+    let m = model
+        .map(str::to_string)
+        .or_else(|| cfg.as_ref().map(|c| c.effective_model()))
+        .unwrap_or_else(|| "MiniMax-M3".to_string());
+    (pid, m)
 }
 
 // ─── EP-frontend-config: write endpoints for skills / tools / agents / env / sandbox ───

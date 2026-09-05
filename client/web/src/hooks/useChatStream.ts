@@ -32,6 +32,11 @@ export interface UseChatStreamOptions {
   sessionId: string;
   /** Agent id used by the stream endpoint. */
   agentId: string;
+  /** LLM provider the user picked for the current session (or null to fall
+   *  back to the daemon's configured default). Shipped on every message. */
+  providerId: string | null;
+  /** Model id within `providerId`. Shipped with `providerId`. */
+  model: string | null;
   /**
    * Called for every successfully-parsed chunk with the resulting
    * full state. Receives a fresh immutable reference per chunk so the
@@ -59,6 +64,8 @@ export interface UseChatStreamReturn {
 export function useChatStream({
   sessionId,
   agentId,
+  providerId,
+  model,
   onState,
 }: UseChatStreamOptions): UseChatStreamReturn {
   const [status, setStatus] = useState<ChatStreamStatus>("idle");
@@ -104,7 +111,7 @@ export function useChatStream({
         typeof window !== "undefined" &&
         window.localStorage?.getItem("debug_stream") === "1";
 
-      try {
+        try {
         // D3: tag this turn so the SSE reader drops cross-wired chunks
         // (only relevant if a previous stream is still being torn down).
         const requestId = newRequestId();
@@ -112,6 +119,8 @@ export function useChatStream({
           sessionId,
           agentId,
           text,
+          providerId ?? "",
+          model ?? "",
           (raw) => {
             if (DEBUG_STREAM) {
               console.log("[stream-chunk] raw:", JSON.stringify(raw));
@@ -149,9 +158,8 @@ export function useChatStream({
         abortRef.current = null;
       }
     },
-    [sessionId, agentId],
+    [sessionId, agentId, providerId, model],
   );
-
   const cancel = useCallback(() => {
     if (!abortRef.current) return;
     abortRef.current.abort();

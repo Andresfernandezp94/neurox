@@ -113,15 +113,17 @@ describe('api/sessions', () => {
     );
   });
 
-  it('sendMessage POSTs agent_id + text + client_id', async () => {
+  it('sendMessage POSTs agent_id + text + provider_id + model + client_id', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       new Response('{}', { status: 200 }),
     );
-    await sendMessage('abc', 'default', 'hello');
+    await sendMessage('abc', 'default', 'hello', 'minimax', 'MiniMax-M3');
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
     const body = JSON.parse(call[1].body);
     expect(body.agent_id).toBe('default');
     expect(body.text).toBe('hello');
+    expect(body.provider_id).toBe('minimax');
+    expect(body.model).toBe('MiniMax-M3');
     // client_id is auto-injected for partitioning.
     expect(typeof body.client_id).toBe('string');
     expect(body.client_id).toMatch(/^web-[a-z0-9]+$/);

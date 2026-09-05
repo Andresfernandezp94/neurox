@@ -116,6 +116,22 @@ impl LlmClient {
             .ok()
             .and_then(|s| tools_engine::backend::LlmProviderKind::from_str(&s))
             .unwrap_or(tools_engine::backend::LlmProviderKind::Minimax);
+        Self::with_kind(api_key, base_url, model, kind, sampling)
+    }
+
+    /// Build with an explicit provider kind. Used by the agent subprocess
+    /// to (re)build its LlmClient on every `process` call when the user
+    /// picks a different model — the daemon resolves the provider
+    /// config (api_key + base_url + kind) from its config and ships
+    /// it in the JSON-RPC params so the subprocess doesn't have to
+    /// know about providers configured elsewhere.
+    pub fn with_kind(
+        api_key: String,
+        base_url: String,
+        model: String,
+        kind: tools_engine::backend::LlmProviderKind,
+        sampling: LlmSampling,
+    ) -> Self {
         let http = std::sync::Arc::new(
             tools_engine::http_client::build(&tools_engine::http_client::HttpClientConfig::default())
                 .expect("http client"),
@@ -148,6 +164,12 @@ impl LlmClient {
     }
     pub fn model(&self) -> &str {
         self.backend.model()
+    }
+    /// Borrow the sampling config — used by the agent subprocess when
+    /// rebuilding the client mid-session (it must preserve the manifest-
+    /// derived sampling when swapping provider/model).
+    pub fn sampling(&self) -> &LlmSampling {
+        &self.sampling
     }
 
     /// Stream a chat completion through the engine's backend.

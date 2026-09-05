@@ -68,6 +68,16 @@ export const MessageRow = memo(function MessageRow({
         <div className="chat__row-content">
           <Markdown>{m.content}</Markdown>
         </div>
+      ) : timeline.length === 0 && m.content ? (
+        // Historical messages reloaded from /v1/sessions/:id/messages
+        // don't carry `timeline` (the daemon only persists content +
+        // thinking in the messages table — see MessageRecord in
+        // daemon/core/src/session.rs). Render the saved content as a
+        // plain markdown bubble so the conversation doesn't show
+        // empty rows after a reload / cold start.
+        <div className="chat__row-content">
+          <Markdown>{m.content}</Markdown>
+        </div>
       ) : (
         <TimelineRenderer
           timeline={timeline}

@@ -74,6 +74,11 @@ export function ChatBubble() {
         id,
         defaultAgentId ?? "",
         text,
+        // ChatBubble is the floating widget — no per-session model
+        // picker. Empty strings let the daemon fall back to its
+        // `llm.default_provider` / provider.effective_model().
+        "",
+        "",
       )) as {
         session_id: string;
         agent_id: string;

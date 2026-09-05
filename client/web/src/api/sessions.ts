@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiPut, apiDelete, buildApiUrl } from './client';
+import { apiGet, apiPost, apiPut, apiDelete, buildApiUrl, buildHeaders } from './client';
 import { getWebClientId } from '../shared/clientId';
 import type { SessionsResponse, MessagesResponse } from '../types';
 
@@ -39,10 +39,18 @@ export function deleteSession(id: string): Promise<unknown> {
   return apiDelete(`/v1/sessions/${encodeURIComponent(id)}`);
 }
 
-export function sendMessage(id: string, agent_id: string, text: string): Promise<unknown> {
+export function sendMessage(
+  id: string,
+  agent_id: string,
+  text: string,
+  provider_id: string,
+  model: string,
+): Promise<unknown> {
   return apiPost(`/v1/sessions/${encodeURIComponent(id)}/messages`, {
     agent_id,
     text,
+    provider_id,
+    model,
     client_id: getWebClientId(),
   });
 }
@@ -68,6 +76,8 @@ export async function streamMessage(
   id: string,
   agent_id: string,
   text: string,
+  provider_id: string,
+  model: string,
   onChunk: (chunk: unknown) => void,
   signal?: AbortSignal,
   requestId?: string,
@@ -75,11 +85,20 @@ export async function streamMessage(
   const url = buildApiUrl(`/v1/sessions/${encodeURIComponent(id)}/messages/stream`);
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    // buildHeaders() agrega Authorization: Bearer <jwt> cuando hay token
+    // (mismo helper que usa apiPost/apiGet/etc). Sin esto, el backend
+    // responde 401 en /v1/* (rutas protegidas por JwtAuthLayer).
+    headers: buildHeaders(),
     body: JSON.stringify({
       agent_id,
       text,
+      provider_id,
+      model,
       client_id: getWebClientId(),
+      // EP-D3: el daemon lo refleja en cada chunk para que el filtro
+      // per-turn del frontend (requestId vs chunk.request_id) pueda
+      // descartar chunks cruzados entre streams concurrentes.
+      ...(requestId ? { request_id: requestId } : {}),
     }),
     signal,
   });
