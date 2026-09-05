@@ -347,19 +347,20 @@ impl SessionStore {
         role: &str,
         content: &str,
         thinking: Option<&str>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<i64> {
                 let now = chrono::Utc::now().to_rfc3339();
-        sqlx::query(
-            "INSERT INTO messages (session_id, role, content, thinking, ts) VALUES (?, ?, ?, ?, ?)",
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO messages (session_id, role, content, thinking, ts) \
+             VALUES (?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(session_id.to_string())
         .bind(role)
         .bind(content)
         .bind(thinking)
         .bind(now)
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
-        Ok(())
+        Ok(id)
     }
 
     pub async fn list_sessions(&self, limit: u32) -> anyhow::Result<Vec<SessionRecord>> {

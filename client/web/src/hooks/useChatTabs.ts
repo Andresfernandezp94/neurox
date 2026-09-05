@@ -144,39 +144,129 @@ export function useChatTabs(defaultAgentId: string | null = null) {
     const url = buildWsUrl("/v1/events", token);
     const ws = new WebSocket(url);
     ws.onmessage = (e) => {
-      let evt: { type: string; session_id?: string; summary?: string };
+      let evt: Record<string, unknown>;
       try {
         evt = JSON.parse(e.data);
       } catch {
         return;
       }
-      if (evt.type === "session_started" && evt.session_id) {
-        if (seenSessions.current.has(evt.session_id)) return;
-        seenSessions.current.add(evt.session_id);
+      const type = evt.type;
+      const sid = evt.session_id as string | undefined;
+      if (type === "session_started" && sid) {
+        if (seenSessions.current.has(sid)) return;
+        seenSessions.current.add(sid);
         upsertSession({
-          session_id: evt.session_id,
-          agent_id: "", // unknown; refresh will fill it in
+          session_id: sid,
+          agent_id: "",
           started_at: new Date().toISOString(),
           summary: null,
         });
-        // Refresh the list so agent_id / provider / model get filled in.
         void apiGet<{ sessions: SessionRow[] }>("/v1/sessions")
           .then((res) => {
-            const row = res.sessions.find((s) => s.session_id === evt.session_id);
+            const row = res.sessions.find((s) => s.session_id === sid);
             if (row) upsertSession(row);
           })
           .catch(() => {});
-      } else if (evt.type === "session_ended" && evt.session_id) {
-        seenSessions.current.delete(evt.session_id);
+      } else if (type === "session_ended" && sid) {
+        seenSessions.current.delete(sid);
         setTabs((prev) => {
-          const next = prev.filter((t) => t.sessionId !== evt.session_id);
-          // If we just closed the active tab, move focus to a neighbor.
+          const next = prev.filter((t) => t.sessionId !== sid);
           if (activeId && !next.some((t) => t.id === activeId) && next.length > 0) {
             setActiveId(next[0]!.id);
           } else if (next.length === 0) {
             setActiveId(null);
           }
           return next;
+        });
+      } else if (type === "message_appended" && sid) {
+        // Other device (or this one on reload) added a message to a
+        // session. Mirror it into the local tab's transcript with
+        // dedup by `message_id` (which the daemon mints on insert).
+        const message_id = evt.message_id as number | undefined;
+        const role = (evt.role as string) ?? "user";
+        const content = (evt.content as string) ?? "";
+        const ts = (evt.ts as string) ?? new Date().toISOString();
+        const thinking = evt.thinking as string | undefined;
+        if (message_id == null) return;
+        setTabs((prev) => {
+          const tab = prev.find((t) => t.sessionId === sid);
+          if (!tab) return prev;
+          if (tab.messages.some((m) => (m as { id: number }).id === message_id)) {
+            return prev; // already have this message — dedupe
+          }
+          return prev.map((t) =>
+            t.id === tab.id
+              ? {
+                  ...t,
+                  messages: [
+                    ...t.messages,
+                    {
+                      id: message_id,
+                      session_id: sid,
+                      role: role as Message["role"],
+                      content,
+                      thinking: thinking ?? undefined,
+                      ts,
+                    },
+                  ],
+                }
+              : t,
+          );
+        });
+      } else if (
+        (type === "content" || type === "thinking") &&
+        sid &&
+        typeof evt.text === "string"
+      ) {
+        // Remote stream chunk (another device is talking). Append to
+        // the tab's last assistant message (creating one if absent).
+        const text = evt.text;
+        const chunkKind = type === "content" ? "content" : "thinking";
+        setTabs((prev) => {
+          const tab = prev.find((t) => t.sessionId === sid);
+          if (!tab) return prev;
+          return prev.map((t) => {
+            if (t.id !== tab.id) return t;
+            const msgs = t.messages;
+            // Find the last assistant message; create one if none.
+            const lastAssistant = [...msgs].reverse().find(
+              (m) => m.role === "assistant",
+            );
+            const newMessage: Message = lastAssistant ?? {
+              id: Date.now(),
+              session_id: sid,
+              role: "assistant",
+              content: "",
+              timeline: [],
+              ts: new Date().toISOString(),
+            };
+            const timelineEntry =
+              chunkKind === "content"
+                ? { type: "content" as const, text }
+                : { type: "thinking" as const, text };
+            const merged: Message = lastAssistant
+              ? {
+                  ...lastAssistant,
+                  content:
+                    chunkKind === "content"
+                      ? (lastAssistant.content ?? "") + text
+                      : lastAssistant.content ?? "",
+                  thinking:
+                    chunkKind === "thinking"
+                      ? (lastAssistant.thinking ?? "") + text
+                      : lastAssistant.thinking,
+                  timeline: [
+                    ...(lastAssistant.timeline ?? []),
+                    timelineEntry,
+                  ],
+                }
+              : newMessage;
+            const replaced =
+              lastAssistant !== undefined
+                ? msgs.map((m) => (m === lastAssistant ? merged : m))
+                : [...msgs, merged];
+            return { ...t, messages: replaced };
+          });
         });
       }
     };

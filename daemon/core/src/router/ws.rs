@@ -141,6 +141,7 @@ async fn event_owned_by(
         | Event::SessionEnded { session_id, .. }
         | Event::Thinking { session_id, .. }
         | Event::Content { session_id, .. }
+        | Event::MessageAppended { session_id, .. }
         | Event::ToolCall { session_id, .. }
         | Event::ToolResult { session_id, .. }
         | Event::AgentSpawned { session_id, .. }

@@ -22,6 +22,26 @@ pub enum Event {
         session_id: Uuid,
         text: String,
     },
+    /// EP-2026-09-05 (cross-device sync): emitted after a user OR
+    /// assistant message is persisted. Other devices logged in as
+    /// the same user use this to mirror the message into their chat
+    /// tab in realtime — without it, the user's own message only
+    /// shows on the device that sent it (assistant responses DO
+    /// propagate via the stream events, but the user's prompt is
+    /// only persisted, not broadcast).
+    MessageAppended {
+        session_id: Uuid,
+        /// i64 id from the messages table. Lets the receiver dedupe
+        /// (ignore if the row is already in the local tab's messages).
+        message_id: i64,
+        role: String,
+        content: String,
+        /// EP-0026-rev-fix: assistant-only thinking block (the
+        /// `<think>…</think>` portion). `None` for user messages
+        /// or old rows persisted before the column was added.
+        thinking: Option<String>,
+        ts: String,
+    },
     ToolCall {
         session_id: Uuid,
         tool: String,
@@ -105,6 +125,7 @@ impl Event {
             | Event::SessionEnded { session_id, .. }
             | Event::Thinking { session_id, .. }
             | Event::Content { session_id, .. }
+            | Event::MessageAppended { session_id, .. }
             | Event::ToolCall { session_id, .. }
             | Event::ToolResult { session_id, .. }
             | Event::AgentSpawned { session_id, .. }

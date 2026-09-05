@@ -1069,12 +1069,29 @@ pub async fn post_message(
 
     // Persist user message. Non-fatal if it fails. User messages never
     // carry thinking (EP-0026-rev-fix), so the column stays NULL.
-    if let Err(e) = state.lifecycle
+    // On success, broadcast `MessageAppended` so other devices of the
+    // same user see the prompt appear in their chat in realtime.
+    match state
+        .lifecycle
         .session
         .log_message(session_id, "user", &body.text, None)
         .await
     {
-        tracing::warn!(session_id = %session_id, error = %e, "user msg persist failed");
+        Ok(msg_id) => {
+            state.emit(Event::MessageAppended {
+                session_id,
+                message_id: msg_id,
+                role: "user".to_string(),
+                content: body.text.clone(),
+                thinking: None,
+                ts: chrono::Utc::now().to_rfc3339(),
+            });
+        }
+        Err(e) => tracing::warn!(
+            session_id = %session_id,
+            error = %e,
+            "user msg persist failed; skipping broadcast"
+        ),
     }
 
     // Update session summary with first user message (preview for session list)
@@ -1161,13 +1178,29 @@ pub async fn post_message(
         let thinking = result
             .as_ref()
             .and_then(|r| r.get("thinking"))
-            .and_then(|t| t.as_str());
-        if let Err(e) = state.lifecycle
+            .and_then(|t| t.as_str())
+            .map(str::to_string);
+        match state
+            .lifecycle
             .session
-            .log_message(session_id, "assistant", text, thinking)
+            .log_message(session_id, "assistant", text, thinking.as_deref())
             .await
         {
-            tracing::warn!(session_id = %session_id, error = %e, "assistant msg persist failed");
+            Ok(msg_id) => {
+                state.emit(Event::MessageAppended {
+                    session_id,
+                    message_id: msg_id,
+                    role: "assistant".to_string(),
+                    content: text.to_string(),
+                    thinking: thinking.clone(),
+                    ts: chrono::Utc::now().to_rfc3339(),
+                });
+            }
+            Err(e) => tracing::warn!(
+                session_id = %session_id,
+                error = %e,
+                "assistant msg persist failed; skipping broadcast"
+            ),
         }
     }
 
@@ -1341,12 +1374,32 @@ pub async fn post_message_stream(
 
     // Persist user message (non-fatal if it fails). User messages never
     // carry thinking (EP-0026-rev-fix), so the column stays NULL.
-    if let Err(e) = state.lifecycle
+    // On success, broadcast `MessageAppended` so other devices of the
+    // same user see the prompt appear in their chat in realtime —
+    // without this, the user's own messages only show on the device
+    // that sent them (assistant responses DO propagate via the
+    // stream events; user messages need their own broadcast).
+    match state
+        .lifecycle
         .session
         .log_message(session_id, "user", &body.text, None)
         .await
     {
-        tracing::warn!(session_id = %session_id, error = %e, "user msg persist failed");
+        Ok(msg_id) => {
+            state.emit(Event::MessageAppended {
+                session_id,
+                message_id: msg_id,
+                role: "user".to_string(),
+                content: body.text.clone(),
+                thinking: None,
+                ts: chrono::Utc::now().to_rfc3339(),
+            });
+        }
+        Err(e) => tracing::warn!(
+            session_id = %session_id,
+            error = %e,
+            "user msg persist failed; skipping broadcast"
+        ),
     }
 
     // Update session summary with first user message
@@ -1636,17 +1689,33 @@ pub async fn post_message_stream(
             let thinking = result
                 .as_ref()
                 .and_then(|r| r.get("thinking"))
-                .and_then(|t| t.as_str());
-            if let Err(e) = state.lifecycle
+                .and_then(|t| t.as_str())
+                .map(str::to_string);
+            match state
+                .lifecycle
                 .session
-                .log_message(session_for_task, "assistant", text, thinking)
+                .log_message(session_for_task, "assistant", text, thinking.as_deref())
                 .await
             {
-                tracing::warn!(
-                    session_id = %session_for_task,
-                    error = %e,
-                    "assistant msg persist failed"
-                );
+                Ok(msg_id) => {
+                    event_tx
+                        .send(Event::MessageAppended {
+                            session_id: session_for_task,
+                            message_id: msg_id,
+                            role: "assistant".to_string(),
+                            content: text.to_string(),
+                            thinking: thinking.clone(),
+                            ts: chrono::Utc::now().to_rfc3339(),
+                        })
+                        .ok();
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        session_id = %session_for_task,
+                        error = %e,
+                        "assistant msg persist failed; skipping broadcast"
+                    );
+                }
             }
         }
         let _ = event_tx.send(Event::Done {
