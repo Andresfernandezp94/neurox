@@ -14,7 +14,6 @@ use super::ws;
 #[allow(clippy::let_and_return)]
 pub fn router(state: AppState) -> axum::Router {
     use axum::routing::{delete, get, post, put};
-    let auth_token = state.auth.api_token.clone();
 
     let cors = tower_http::cors::CorsLayer::new()
         .allow_origin(tower_http::cors::Any)
@@ -167,7 +166,6 @@ pub fn router(state: AppState) -> axum::Router {
             .layer(crate::auth::JwtAuthLayer::new(secret, public_paths))
             .layer(Extension(auth_state))
     } else {
-        let _ = auth_token;
         axum::Router::new()
             .route("/health", get(http::health))
             .route("/v1/default/status", get(http::default_agent_status))

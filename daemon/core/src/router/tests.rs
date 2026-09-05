@@ -2,9 +2,7 @@
 //!
 //! Validates that the daemon is API-only (no static serving):
 //!   - `/health` returns JSON
-//!   - `/v1/tools` works without auth when when
-//!   - `/v1/tools` returns a non-empty list with the `shell` tool
-//!   - `/v1/tools` requires Bearer token when `api_token` is set
+//!   - root path returns 404
 use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
 use std::path::PathBuf;
@@ -28,7 +26,7 @@ use tokio::sync::RwLock;
 
 /// Build a minimal `AppState` for tests. Uses tmp paths for any state that
 /// needs persistence. Returns `(AppState, TempDir)`.
-async fn build_test_state(api_token: Option<&str>) -> (AppState, TempDir) {
+async fn build_test_state() -> (AppState, TempDir) {
     let tmp = TempDir::new().expect("tempdir");
     let db_path = tmp.path().join("test.db");
 
@@ -72,7 +70,7 @@ async fn build_test_state(api_token: Option<&str>) -> (AppState, TempDir) {
         Arc::new(crate::plugins::PluginToolRegistry::new(tools)),
     ));
 
-    let auth = AuthLayer::new(api_token.map(|s| s.to_string()));
+    let auth = AuthLayer::new();
     let workspace_sandbox: Arc<tokio::sync::RwLock<Box<dyn tools_engine::SandboxConfig>>> = Arc::new(
         tokio::sync::RwLock::new(Box::new(tools_engine::DefaultSandbox) as Box<dyn tools_engine::SandboxConfig>),
     );
@@ -95,7 +93,7 @@ async fn build_test_state(api_token: Option<&str>) -> (AppState, TempDir) {
 #[tokio::test]
 async fn root_path_returns_404_since_daemon_is_api_only() {
     // standalone `neurox-mcp-gui` plugin on its own port.
-    let (state, _tmp) = build_test_state(None).await;
+    let (state, _tmp) = build_test_state().await;
     let app = router(state);
 
     let response = app
@@ -108,7 +106,7 @@ async fn root_path_returns_404_since_daemon_is_api_only() {
 
 #[tokio::test]
 async fn health_returns_json_even_when_root_returns_404() {
-    let (state, _tmp) = build_test_state(None).await;
+    let (state, _tmp) = build_test_state().await;
     let app = router(state);
 
     let response = app
@@ -135,75 +133,4 @@ async fn health_returns_json_even_when_root_returns_404() {
         body_str.contains("neurox"),
         "body should be /health JSON, got: {body_str}"
     );
-}
-
-#[tokio::test]
-#[ignore = "uses legacy api_token auth removed by EP-2026-08-19 follow-up #7; port to JWT"]
-async fn v1_tools_endpoint_returns_list_without_auth() {
-    let (state, _tmp) = build_test_state(None).await;
-    let app = router(state);
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/v1/tools")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .expect("response");
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), 32_768)
-        .await
-        .expect("body bytes");
-    let body_str = std::str::from_utf8(&body).expect("utf8");
-    let json: serde_json::Value = serde_json::from_str(body_str).expect("parse JSON");
-    let tools = json["tools"].as_array().expect("tools array");
-    assert!(!tools.is_empty(), "tools list must not be empty");
-    let names: Vec<&str> = tools
-        .iter()
-        .map(|t| t["name"].as_str().expect("name"))
-        .collect();
-    assert!(
-        names.contains(&"shell"),
-        "tools list must include 'shell', got: {names:?}"
-    );
-}
-
-#[tokio::test]
-#[ignore = "uses legacy api_token auth removed by EP-2026-08-19 follow-up #7; port to JWT"]
-async fn v1_tools_endpoint_with_auth_requires_token() {
-    let (state, _tmp) = build_test_state(Some("secret123")).await;
-    let app = router(state);
-
-    // Without token: should be rejected by AuthLayer.
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v1/tools")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .expect("response without token");
-    assert_eq!(
-        response.status(),
-        StatusCode::UNAUTHORIZED,
-        "no token => 401"
-    );
-
-    // With token: 200 OK.
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/v1/tools")
-                .header("authorization", "Bearer secret123")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .expect("response with token");
-    assert_eq!(response.status(), StatusCode::OK, "with valid token => 200");
 }

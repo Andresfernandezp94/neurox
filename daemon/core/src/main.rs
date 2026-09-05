@@ -339,7 +339,7 @@ async fn serve(
     let workspace = Arc::new(WorkspaceLayer::new(workspace_root.clone(), workspace_sandbox));
     let (event_tx, _) = broadcast::channel(1024);
     let events = Arc::new(EventsLayer::new(event_tx));
-    let auth = AuthLayer::new(core_config.api_token.clone())
+    let auth = AuthLayer::new()
         .with_orchestrator(local_orchestrator.clone());
 
     let state = AppState::new(

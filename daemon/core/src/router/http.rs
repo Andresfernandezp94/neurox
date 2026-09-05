@@ -30,7 +30,7 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
     // EP-0023-01 + EP-0023-02: tell the admin whether the daemon requires
     // auth so the LoginScreen gate can decide to render or skip.
     // EP-0007: also true when the new JWT-based auth is enabled.
-    let auth_required = state.auth.api_token.is_some() || state.auth.auth.is_some();
+    let auth_required = state.auth.auth.is_some();
 
     // Snapshot the connected plugins once — they're shared across all
     // sessions (tool proxy is daemon-wide).
@@ -1692,11 +1692,10 @@ pub async fn cancel_session(
     Path(session_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     // Owner check: refuse to operate on sessions the caller doesn't
-    // own. Same 404-not-leak convention as list/messages. Legacy rows
-    // (no user_id, from before the per-user migration) are treated as
-    // owned-by-anyone — they can't be tied to a user since none was
-    // recorded when they were created. New sessions always have user_id
-    // (see `create_session` → `start_session_for_user`).
+    // own. Same 404-not-leak convention as list/messages. Sessions
+    // without a `user_id` (legacy or unowned) are NOT accessible —
+    // strict ownership required. New sessions always have user_id via
+    // `create_session` → `start_session_for_user`.
     let owner = state
         .lifecycle
         .session
@@ -1705,7 +1704,6 @@ pub async fn cancel_session(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     match owner {
         Some(uid) if uid == user.user_id.to_string() => {}
-        None => {} // legacy orphan session
         _ => {
             return Err((
                 StatusCode::NOT_FOUND,
@@ -1802,7 +1800,7 @@ pub async fn delete_session(
     user: UserContext,
     Path(session_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    // Owner check: same legacy-orphan exception as cancel_session.
+    // Owner check: same strict-ownership convention as cancel_session.
     let owner = state
         .lifecycle
         .session
@@ -1811,7 +1809,6 @@ pub async fn delete_session(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     match owner {
         Some(uid) if uid == user.user_id.to_string() => {}
-        None => {} // legacy orphan session
         _ => {
             return Err((
                 StatusCode::NOT_FOUND,

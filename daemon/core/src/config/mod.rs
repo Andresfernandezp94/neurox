@@ -323,9 +323,6 @@ pub struct CoreConfig {
     pub log_level: String,
     #[serde(default)]
     pub agents: AgentsConfig,
-    /// Bearer token for HTTP/WS auth. If None, auth is disabled.
-    #[serde(default)]
-    pub api_token: Option<String>,
     /// TLS configuration. If None, plain HTTP is used.
     #[serde(default)]
     pub tls: Option<TlsConfig>,
@@ -740,7 +737,6 @@ impl Default for CoreConfig {
             db_path: default_db_path(),
             log_level: default_log_level(),
             agents: AgentsConfig::default(),
-            api_token: None,
             tls: None,
             spawner_concurrency: default_spawner_concurrency(),
             in_process: Vec::new(),
@@ -1020,7 +1016,7 @@ llm:
 
     #[test]
     fn llm_missing_section_falls_back_to_minimax_default() {
-        let yaml = "api_token: tok\n";
+        let yaml = "";
         let cfg: CoreConfig = serde_yml::from_str(yaml).unwrap();
         assert_eq!(cfg.llm.default_provider, "minimax");
         assert_eq!(cfg.llm.providers.len(), 1);
