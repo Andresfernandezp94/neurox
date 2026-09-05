@@ -564,15 +564,25 @@ async fn handle_process(
     // was launched with — the user's mid-session model picker would be
     // purely cosmetic. The state already carries the manifest-derived
     // sampling so we re-apply it on rebuild.
+    //
+    // Note: the daemon wraps our params inside `params.params` (one
+    // level of nesting for the JSON-RPC envelope). Look in both
+    // places so the override works whether or not the daemon is
+    // running nested.
     {
         let mut s = state.lock().await;
-        if let Some(llm_cfg) = params.get("llm").cloned() {
+        let llm_cfg = params
+            .get("llm")
+            .or_else(|| params.get("params").and_then(|p| p.get("llm")))
+            .cloned();
+        if let Some(llm_cfg) = llm_cfg {
             let kind_str = llm_cfg.get("kind").and_then(|v| v.as_str()).unwrap_or("");
             let api_key = llm_cfg.get("api_key").and_then(|v| v.as_str()).unwrap_or("");
             let base_url = llm_cfg.get("base_url").and_then(|v| v.as_str()).unwrap_or("");
             let model = llm_cfg.get("model").and_then(|v| v.as_str()).unwrap_or("");
             let provider_id = params
                 .get("provider_id")
+                .or_else(|| params.get("params").and_then(|p| p.get("provider_id")))
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let same = s.current_provider_id.as_deref() == Some(provider_id)
