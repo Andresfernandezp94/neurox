@@ -117,7 +117,7 @@ describe("ModelSelector", () => {
     await waitFor(() => {
       const trigger = screen.getByTestId("model-selector-trigger");
       expect(trigger.textContent).toContain("select model");
-      expect(trigger.textContent).not.toContain("MiniMax M3");
+      expect(trigger.textContent).not.toContain("MiniMax-M3");
     });
   });
 
@@ -132,7 +132,7 @@ describe("ModelSelector", () => {
     // replaces `-` with a space).
     await waitFor(() => {
       const trigger = screen.getByTestId("model-selector-trigger");
-      expect(trigger.textContent).toContain("gpt 4o");
+      expect(trigger.textContent).toContain("gpt-4o");
     });
   });
 
@@ -177,7 +177,7 @@ describe("ModelSelector", () => {
     });
     // Trigger label reflects the new selection.
     await waitFor(() => {
-      expect(screen.getByTestId("model-selector-trigger").textContent).toContain("gpt 4o");
+      expect(screen.getByTestId("model-selector-trigger").textContent).toContain("gpt-4o");
     });
   });
 
@@ -185,7 +185,7 @@ describe("ModelSelector", () => {
     mockSetSessionModel.mockRejectedValueOnce(new Error("backend boom"));
     render(<ModelSelector sessionId={SID} currentModel={{ provider_id: "minimax", model: "MiniMax-M3" }} />);
     await waitFor(() => {
-      expect(screen.getByTestId("model-selector-trigger").textContent).toContain("MiniMax M3");
+      expect(screen.getByTestId("model-selector-trigger").textContent).toContain("MiniMax-M3");
     });
     await openDropdown();
     fireEvent.click(screen.getByTestId("model-selector-group-openai"));
@@ -197,7 +197,7 @@ describe("ModelSelector", () => {
       expect(screen.getByText("backend boom")).toBeInTheDocument();
     });
     // Selection reverted.
-    expect(screen.getByTestId("model-selector-trigger").textContent).toContain("MiniMax M3");
+    expect(screen.getByTestId("model-selector-trigger").textContent).toContain("MiniMax-M3");
   });
 
   it("renders a loading hint before the catalog arrives", () => {

@@ -35,47 +35,11 @@ function decodeValue(value: string): ModelSelection | null {
   return { provider_id: value.slice(0, idx), model: value.slice(idx + 2) };
 }
 
-/** Parse a raw model id into a human-readable name.
- *  Examples:
- *    inclusionai/ling-3.0-tiny:free      → "ling-3.0-tiny:free"  → "ling 3.0 tiny:free"
- *    meta/muse-spark-1.2-20260805        → "muse-spark-1.2-20260805"  → "muse spark 1.2"
- *    mistral-large-latest               → "mistral-large-latest"  → "mistral large latest"
- *    qwen2.5-1.5b-instruct-q4_k_m.gguf  → "qwen 2.5 1.5b instruct q4 k m.gguf"
- *  Replaces `-` with spaces (so separators read as words), strips a
- *  trailing `-YYYYMMDD` date suffix and a `:free`/`:beta` suffix, and
- *  truncates at `max` chars with an ellipsis if longer.
- */
-export function formatModelName(modelId: string, max = 36): string {
-  let name = modelId;
-
-  // Strip a `provider/` prefix (common in openrouter model ids).
-  if (name.includes("/")) {
-    name = name.slice(name.lastIndexOf("/") + 1);
-  }
-
-  // Strip a `:free` or `:beta` suffix.
-  if (name.includes(":")) {
-    name = name.slice(0, name.indexOf(":"));
-  }
-
-  // Strip a trailing `-YYYYMMDD` date suffix (openrouter sometimes adds it).
-  if (name.length >= 9) {
-    const tail = name.slice(-9);
-    if (/^-\d{8}$/.test(tail)) {
-      name = name.slice(0, -9);
-    }
-  }
-
-  // Replace `-` with spaces for readability (keep `.`, `_`).
-  name = name.replace(/-/g, " ");
-
-  // Collapse multiple spaces.
-  name = name.replace(/\s+/g, " ").trim();
-
-  if (name.length > max) {
-    name = name.slice(0, max - 1) + "…";
-  }
-  return name;
+/** Display model id as-is from the backend (no formatting). The
+ *  function name is kept for call-site compatibility; it just
+ *  returns the raw id. */
+export function formatModelName(modelId: string): string {
+  return modelId;
 }
 
 /** Map the daemon's kebab-case capability to a short Title Case label
