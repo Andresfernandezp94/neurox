@@ -1,154 +1,42 @@
-// useChatTabs — manages a list of chat tabs (parallel sessions) with
-// localStorage persistence. Each tab is a separate session with the
-// agent; switching tabs preserves input/messages/session state.
+// useChatTabs — manages chat tabs synced from the daemon per user.
 //
-// EP-0028: the tab title is kept in sync with the backend session
-// `summary` (the same field shown in the History sidebar). This makes
-// the visible title a single source of truth — whatever the user sees
-// in the History also shows up in the tab header above the chat.
+// Source of truth: `/v1/sessions` filtered server-side by the
+// authenticated `user_id`. Tabs are shared across every device
+// logged in as the same user; `/v1/events` WS pushes realtime
+// updates (SessionStarted/Ended) so a tab opened on the laptop shows
+// up on the mobile seconds later, and vice versa.
 //
-// Note on agent resolution: the tab's `sessionAgent` is the
-// user-explicit choice (from AgentSelector). On first mount, if the
-// daemon's `/v1/agents` snapshot is already available (`defaultAgentId`
-// passed in), tabs created from that point use it directly. Tabs that
-// were persisted with the empty sentinel (legacy migration, or created
-// before the snapshot arrived) are back-filled ONCE when the agent
-// id first arrives — after that, the user's explicit choice is
-// preserved (we never overwrite a non-empty `sessionAgent`).
+// What stays LOCAL (per-tab UI state, not persisted on the server):
+//   - `title` and `manuallyRenamed` flag
+//   - `searchQuery` / `searchActive` (in-chat search)
+//   - `messages` (the full transcript including the streaming timeline)
+//   - `sessionModel` / `sessionAgent` (overrides the user has applied)
+//
+// Local state is keyed by `sessionId` once it exists. While a tab
+// has no session yet (right after the user clicks `+`), it lives in
+// a local-only slot and gets cleaned up if the session-creation
+// fails.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message } from "../types";
 import type { ModelSelection } from "../components/ModelSelector";
-import { renameSession } from "../api/sessions";
+import { apiGet, apiPost, getToken } from "../api/client";
+import { getWebClientId } from "../shared/clientId";
 
 export interface ChatTab {
-  /** Stable id for the tab (uuid). */
   id: string;
-  /** User-visible title. Editable (double-click rename). */
   title: string;
-  /** Backend session id (`null` until the backend creates one). */
   sessionId: string | null;
-  /** Model override for this session. */
   sessionModel: ModelSelection | null;
-  /**
-   * Agent for this session. Empty string means "no explicit choice" —
-   * the consumer (ChatPanel) resolves the daemon's in-process default
-   * at message-send time via `useDefaultAgentId()`. Legacy tabs
-   * persisted with `default` or `agent` are migrated to this
-   * empty sentinel so the runtime resolver fills them in.
-   */
   sessionAgent: string;
-  /** Messages exchanged in this tab. */
   messages: Message[];
-  /** When the tab was created (for sorting / fallback title). */
   createdAt: number;
-  /**
-   * `true` once the title was set explicitly by the user (double-click
-   * rename). When set, the auto-summary sync must not overwrite it.
-   * `false` (default) means the title is either the fallback "Chat N"
-   * or a backend summary that may be refreshed as the session evolves.
-   */
   manuallyRenamed: boolean;
-  /** Search-in-chat: debounced query. Empty string = no active search. */
-  searchQuery?: string;
-  /** Search-in-chat: index of the currently focused match (0-based). */
-  searchActive?: number;
+  searchQuery: string;
+  searchActive: number;
 }
 
-const STORAGE_KEY = "chat-tabs-v1";
-const ACTIVE_KEY = "chat-active-tab-v1";
-
-// Sentinel for "no explicit agent choice". The consumer resolves the
-// daemon's in-process agent at message-send time via `useDefaultAgentId`.
 const NO_AGENT_SENTINEL = "";
-
-function isModelSelection(x: unknown): x is ModelSelection | null {
-  if (x === null) return true;
-  if (typeof x !== "object") return false;
-  const o = x as Record<string, unknown>;
-  return typeof o.provider_id === "string" && typeof o.model === "string";
-}
-
-// Backwards-compat shim: tabs persisted with the legacy `default`
-// id get migrated to the empty sentinel so the runtime resolver
-// (`useDefaultAgentId`) kicks in on first message. Bump STORAGE_KEY
-// once most callers have migrated, then drop this function.
-//
-// EP-2026-08-19: removed the `"agent"` legacy branch — the agent id
-// `agent` no longer exists (per-session subprocesses use `admin`/`user`
-// from `session_agents`, no fallback `agent`/`default`). Tabs
-// persisted with `agent` will fall through to the runtime resolver
-// like any other unknown id.
-function normalizeAgentId(x: unknown): string {
-  if (typeof x !== "string") return NO_AGENT_SENTINEL;
-  if (x === "default") return NO_AGENT_SENTINEL;
-  return x;
-}
-
-function isValidManuallyRenamed(x: unknown): x is boolean {
-  return typeof x === "boolean";
-}
-
-function load(): { tabs: ChatTab[]; activeId: string | null } {
-  if (typeof window === "undefined") return { tabs: [], activeId: null };
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    const activeId = window.localStorage.getItem(ACTIVE_KEY);
-    if (!raw) return { tabs: [], activeId };
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return { tabs: [], activeId };
-    const tabs: ChatTab[] = parsed.flatMap((t: unknown) => {
-      if (!t || typeof t !== "object") return [];
-      const o = t as Record<string, unknown>;
-      if (typeof o.id !== "string" || typeof o.title !== "string") return [];
-      if (typeof o.createdAt !== "number") return [];
-      const sessionId = typeof o.sessionId === "string" ? o.sessionId : null;
-      const sessionModel = isModelSelection(o.sessionModel) ? o.sessionModel : null;
-      const sessionAgent = normalizeAgentId(o.sessionAgent);
-      const messages = Array.isArray(o.messages) ? (o.messages as Message[]) : [];
-      // EP-0028: prefer the explicit flag; fall back to a heuristic
-      // so tabs persisted before the flag existed still get sane
-      // behaviour. Heuristic: if the title doesn't match the "Chat N"
-      // pattern AND there's a sessionId, treat it as manually named.
-      const manuallyRenamed = isValidManuallyRenamed(o.manuallyRenamed)
-        ? o.manuallyRenamed
-        : o.sessionId
-          ? !/^Chat \d+$/.test(o.title)
-          : false;
-      const searchQuery = typeof o.searchQuery === "string" ? o.searchQuery : "";
-      const searchActive = typeof o.searchActive === "number" ? o.searchActive : 0;
-      return [{
-        id: o.id,
-        title: o.title,
-        sessionId,
-        sessionModel,
-        sessionAgent,
-        messages,
-        createdAt: o.createdAt,
-        manuallyRenamed,
-        searchQuery,
-        searchActive,
-      }];
-    });
-    return { tabs, activeId: activeId && tabs.some((t) => t.id === activeId) ? activeId : null };
-  } catch {
-    return { tabs: [], activeId: null };
-  }
-}
-
-function persist(tabs: ChatTab[], activeId: string | null) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs));
-    if (activeId) {
-      window.localStorage.setItem(ACTIVE_KEY, activeId);
-    } else {
-      window.localStorage.removeItem(ACTIVE_KEY);
-    }
-  } catch {
-    // ignore
-  }
-}
 
 function uuid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -157,23 +45,154 @@ function uuid(): string {
   return "tab-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+/** Subset of SessionSummary that drives the tab UI. */
+interface SessionRow {
+  session_id: string;
+  agent_id: string;
+  provider_id?: string | null;
+  model?: string | null;
+  started_at: string;
+  ended_at?: string | null;
+  summary?: string | null;
+}
+
 export function useChatTabs(defaultAgentId: string | null = null) {
-  const [tabs, setTabs] = useState<ChatTab[]>(() => load().tabs);
-  const [activeId, setActiveId] = useState<string | null>(() => load().activeId);
+  const [tabs, setTabs] = useState<ChatTab[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  // Track session_ids we've already created a local tab for, to dedupe
+  // SessionStarted events that fire right after createSession.
+  const seenSessions = useRef<Set<string>>(new Set());
+  const wsRef = useRef<WebSocket | null>(null);
 
-  // Persist on every change.
-  useEffect(() => {
-    persist(tabs, activeId);
-  }, [tabs, activeId]);
+  // Helper: create or update the local tab for a given backend session.
+  const upsertSession = useCallback((row: SessionRow, opts?: { activate?: boolean }) => {
+    setTabs((prev) => {
+      if (prev.some((t) => t.sessionId === row.session_id)) return prev;
+      const fresh: ChatTab = {
+        id: uuid(),
+        title:
+          row.summary && row.summary.trim().length > 0
+            ? row.summary
+            : `Chat ${prev.length + 1}`,
+        sessionId: row.session_id,
+        sessionModel:
+          row.provider_id && row.model
+            ? { provider_id: row.provider_id, model: row.model }
+            : null,
+        sessionAgent: row.agent_id,
+        messages: [],
+        createdAt: Date.parse(row.started_at) || Date.now(),
+        manuallyRenamed: !!row.summary,
+        searchQuery: "",
+        searchActive: 0,
+      };
+      const next = [...prev, fresh];
+      if (opts?.activate) setActiveId(fresh.id);
+      return next;
+    });
+  }, []);
 
-  // EP-0026-01 R1: auto-create a tab on mount if localStorage is
-  // empty. The ChatPanel <textarea> reads `sessionId` from
-  // activeTab and stays disabled with "Connecting…" placeholder
-  // when no tab exists. Without this auto-create, first-time
-  // users had to click `+` on the ChatTabs header before they
-  // could type.
+  // One-time hydration: fetch the active sessions for this user, build
+  // local tabs for each. The daemon is the source of truth — there's
+  // no localStorage fallback (every device re-syncs from the server
+  // on mount).
   useEffect(() => {
-    if (tabs.length === 0 && activeId === null) {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiGet<{ sessions: SessionRow[] }>("/v1/sessions");
+        if (cancelled) return;
+        res.sessions.forEach((s) => seenSessions.current.add(s.session_id));
+        setTabs(
+          res.sessions.map((row, idx) => ({
+            id: uuid(),
+            title:
+              row.summary && row.summary.trim().length > 0
+                ? row.summary
+                : `Chat ${idx + 1}`,
+            sessionId: row.session_id,
+            sessionModel:
+              row.provider_id && row.model
+                ? { provider_id: row.provider_id, model: row.model }
+                : null,
+            sessionAgent: row.agent_id,
+            messages: [],
+            createdAt: Date.parse(row.started_at) || Date.now(),
+            manuallyRenamed: !!row.summary,
+            searchQuery: "",
+            searchActive: 0,
+          })),
+        );
+      } catch (e) {
+        console.warn("useChatTabs: failed to load sessions", e);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // WS subscription: every WS message is already filtered server-side
+  // by the calling user's `user_id` (see daemon/core/src/router/ws.rs).
+  // We just react to the events we care about.
+  useEffect(() => {
+    const token = getToken();
+    if (!token) return;
+    const url = buildWsUrl("/v1/events", token);
+    const ws = new WebSocket(url);
+    ws.onmessage = (e) => {
+      let evt: { type: string; session_id?: string; summary?: string };
+      try {
+        evt = JSON.parse(e.data);
+      } catch {
+        return;
+      }
+      if (evt.type === "session_started" && evt.session_id) {
+        if (seenSessions.current.has(evt.session_id)) return;
+        seenSessions.current.add(evt.session_id);
+        upsertSession({
+          session_id: evt.session_id,
+          agent_id: "", // unknown; refresh will fill it in
+          started_at: new Date().toISOString(),
+          summary: null,
+        });
+        // Refresh the list so agent_id / provider / model get filled in.
+        void apiGet<{ sessions: SessionRow[] }>("/v1/sessions")
+          .then((res) => {
+            const row = res.sessions.find((s) => s.session_id === evt.session_id);
+            if (row) upsertSession(row);
+          })
+          .catch(() => {});
+      } else if (evt.type === "session_ended" && evt.session_id) {
+        seenSessions.current.delete(evt.session_id);
+        setTabs((prev) => {
+          const next = prev.filter((t) => t.sessionId !== evt.session_id);
+          // If we just closed the active tab, move focus to a neighbor.
+          if (activeId && !next.some((t) => t.id === activeId) && next.length > 0) {
+            setActiveId(next[0]!.id);
+          } else if (next.length === 0) {
+            setActiveId(null);
+          }
+          return next;
+        });
+      }
+    };
+    wsRef.current = ws;
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
+
+  // First-time UX: if the user has no active sessions yet, auto-create
+  // an empty "draft" tab so the chat panel isn't empty. The first
+  // message they send will create the actual session.
+  useEffect(() => {
+    if (loaded && tabs.length === 0 && activeId === null) {
       const fresh: ChatTab = {
         id: uuid(),
         title: "Chat 1",
@@ -190,20 +209,17 @@ export function useChatTabs(defaultAgentId: string | null = null) {
       setActiveId(fresh.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loaded]);
 
-  // Si por alguna razón no hay tab activa pero hay tabs, activa la primera.
+  // Neighbor selection if active tab got removed (e.g. SessionEnded
+  // for the tab in focus).
   useEffect(() => {
     if (activeId === null && tabs.length > 0) {
       setActiveId(tabs[0]!.id);
     }
   }, [activeId, tabs]);
 
-  // Back-fill sentinel tabs once the daemon's agent id is available.
-  // Only fires when `defaultAgentId` transitions from null → string (or
-  // changes between non-null values) AND there are still tabs with
-  // `sessionAgent === ""`. Existing explicit choices are never
-  // overwritten.
+  // Back-fill the agent id on draft tabs once the daemon reports it.
   useEffect(() => {
     if (!defaultAgentId) return;
     setTabs((prev) => {
@@ -219,7 +235,11 @@ export function useChatTabs(defaultAgentId: string | null = null) {
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? null;
 
-  const createTab = useCallback(() => {
+  const createTab = useCallback(async () => {
+    // Server-side: POST creates the session, returns session_id. The
+    // WS broadcast will fire SessionStarted, but we also optimistically
+    // add the tab here so the UI moves instantly without waiting for
+    // the round-trip.
     const id = uuid();
     const tab: ChatTab = {
       id,
@@ -235,22 +255,47 @@ export function useChatTabs(defaultAgentId: string | null = null) {
     };
     setTabs((prev) => [...prev, tab]);
     setActiveId(id);
+
+    try {
+      const res = await apiPost<{
+        session_id: string;
+        agent_id: string;
+      }>("/v1/sessions", {
+        agent_id: defaultAgentId ?? "default",
+        client_id: getWebClientId(),
+      });
+      seenSessions.current.add(res.session_id);
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === id ? { ...t, sessionId: res.session_id, sessionAgent: res.agent_id } : t,
+        ),
+      );
+    } catch (e) {
+      console.error("useChatTabs: failed to create session", e);
+    }
     return tab;
   }, [tabs.length, defaultAgentId]);
 
   /**
-   * EP-0028: load (or focus) a tab for a given backend session. Used
-   * by the History sidebar when the user clicks a past conversation.
-   * If a tab already binds this sessionId, just focus it. Otherwise
-   * create a new tab pre-populated with the session's summary (so
-   * the tab header matches the entry in the History panel).
+   * Load (or focus) a tab for a given backend session. Used by the
+   * History sidebar (closed sessions) — the user clicks a past
+   * conversation, we reactivate it server-side and focus the tab.
    */
   const createTabFromSession = useCallback(
-    (sessionId: string, summary: string | null) => {
+    async (sessionId: string, summary: string | null) => {
+      // Existing tab for this session? Just focus.
       const existing = tabs.find((t) => t.sessionId === sessionId);
       if (existing) {
         setActiveId(existing.id);
         return existing;
+      }
+      // Otherwise: reactivate the session (sets ended_at = NULL) and
+      // create a local tab. If activation fails (e.g. session doesn't
+      // exist), fall back to creating a fresh one.
+      try {
+        await apiPost(`/v1/sessions/${sessionId}/reactivate`);
+      } catch {
+        /* swallow — we'll still create the tab; the user can retry */
       }
       const id = uuid();
       const tab: ChatTab = {
@@ -261,12 +306,11 @@ export function useChatTabs(defaultAgentId: string | null = null) {
         sessionAgent: defaultAgentId ?? NO_AGENT_SENTINEL,
         messages: [],
         createdAt: Date.now(),
-        // Loading from History is treated as authoritative: don't let
-        // the auto-summary sync overwrite it on the next message.
         manuallyRenamed: true,
         searchQuery: "",
         searchActive: 0,
       };
+      seenSessions.current.add(sessionId);
       setTabs((prev) => [...prev, tab]);
       setActiveId(id);
       return tab;
@@ -274,11 +318,24 @@ export function useChatTabs(defaultAgentId: string | null = null) {
     [tabs, defaultAgentId],
   );
 
-  const closeTab = useCallback((id: string) => {
+  const closeTab = useCallback(async (id: string) => {
+    // Find the session_id of the tab we're closing. If it has one,
+    // tell the daemon to deactivate it (set ended_at). The WS event
+    // will also remove the tab from local state — we dedupe by
+    // matching session_id.
+    const tab = tabs.find((t) => t.id === id);
+    if (tab?.sessionId) {
+      try {
+        await apiPost(`/v1/sessions/${tab.sessionId}/cancel`);
+      } catch (e) {
+        console.error("useChatTabs: cancel failed", e);
+      }
+      seenSessions.current.delete(tab.sessionId);
+    }
     setTabs((prev) => {
       const next = prev.filter((t) => t.id !== id);
       if (next.length === 0) {
-        // Always keep at least one tab.
+        // Keep at least one (draft) tab so the UI doesn't collapse.
         const fresh: ChatTab = {
           id: uuid(),
           title: "Chat 1",
@@ -301,25 +358,32 @@ export function useChatTabs(defaultAgentId: string | null = null) {
       }
       return next;
     });
-  }, [activeId, defaultAgentId]);
+  }, [tabs, activeId, defaultAgentId]);
+
+  const closeSession = useCallback(async (sessionId: string) => {
+    // Cancel the session server-side (sets ended_at). WS event will
+    // remove the matching local tab.
+    try {
+      await apiPost(`/v1/sessions/${sessionId}/cancel`);
+    } catch (e) {
+      console.error("useChatTabs: closeSession failed", e);
+    }
+    seenSessions.current.delete(sessionId);
+  }, []);
 
   const selectTab = useCallback((id: string) => {
     setActiveId(id);
   }, []);
 
   /**
-   * EP-0028: rename a tab. Persists to the backend (so the History
-   * panel shows the same title) and marks the tab as manually
-   * renamed (so the auto-summary sync won't overwrite it later).
-   * Returns a promise so the caller can await the backend write and
-   * surface errors.
+   * Rename a tab. Persists to the backend so the History panel shows
+   * the same title.
    */
   const renameTab = useCallback(
     async (id: string, title: string): Promise<void> => {
       const trimmed = title.trim();
       if (!trimmed) return;
 
-      // Optimistic local update first so the UI responds instantly.
       let sessionId: string | null = null;
       setTabs((prev) =>
         prev.map((t) => {
@@ -329,15 +393,11 @@ export function useChatTabs(defaultAgentId: string | null = null) {
         }),
       );
 
-      // Sync to backend only if the tab is bound to a real session.
-      // Otherwise (no session yet) the local title is fine and the
-      // backend will fill in `summary` once the first message is sent.
       if (sessionId) {
         try {
+          const { renameSession } = await import("../api/sessions");
           await renameSession(sessionId, trimmed);
         } catch (e) {
-          // Re-throw so callers can surface the error; the local
-          // title is already updated optimistically.
           throw e;
         }
       }
@@ -346,48 +406,28 @@ export function useChatTabs(defaultAgentId: string | null = null) {
   );
 
   /**
-   * EP-0028: apply the backend's auto-generated summary to the tab,
-   * but ONLY if the user hasn't manually renamed it. Called by the
-   * ChatPanel after the first user message of a fresh session.
+   * Apply the backend's auto-generated summary to the tab, but ONLY
+   * if the user hasn't manually renamed it.
    */
-  const updateTabSummary = useCallback(
-    (id: string, summary: string) => {
-      const trimmed = summary.trim();
-      if (!trimmed) return;
-      setTabs((prev) =>
-        prev.map((t) => {
-          if (t.id !== id) return t;
-          if (t.manuallyRenamed) return t;
-          return { ...t, title: trimmed };
-        }),
-      );
-    },
-    [],
-  );
+  const updateTabSummary = useCallback((id: string, summary: string) => {
+    const trimmed = summary.trim();
+    if (!trimmed) return;
+    setTabs((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        if (t.manuallyRenamed) return t;
+        return { ...t, title: trimmed };
+      }),
+    );
+  }, []);
 
   /**
-   * Apply a partial patch to the tab with the given id.
-   *
-   * The patch can be either a plain object (simple cases) or a
-   * function that receives the current tab and returns the patch
-   * to merge. The function form is required when the caller
-   * computes a field based on the *latest* tab state — e.g. inside
-   * a streaming callback that runs many updates in a row, where a
-   * captured `activeTab` would be stale and could cause messages
-   * to disappear.
-   *
-   * Example (streaming chunk handler):
-   *   updateTab(activeTab.id, (prev) => ({
-   *     messages: prev.messages.map((m) =>
-   *       m.id === assistantId ? { ...m, content: streamed } : m
-   *     ),
-   * }));
+   * Apply a partial patch to the tab with the given id. See the
+   * streaming-chunk usage in ChatPanel for why the function form
+   * matters.
    */
   const updateTab = useCallback(
-    (
-      id: string,
-      patch: Partial<ChatTab> | ((prev: ChatTab) => Partial<ChatTab>),
-    ) => {
+    (id: string, patch: Partial<ChatTab> | ((prev: ChatTab) => Partial<ChatTab>)) => {
       setTabs((prev) =>
         prev.map((t) => {
           if (t.id !== id) return t;
@@ -399,6 +439,33 @@ export function useChatTabs(defaultAgentId: string | null = null) {
     [],
   );
 
+  const updateSessionSummary = useCallback(async () => {
+    // Force-refresh the tab list from the daemon (e.g. after the
+    // first user message of a fresh session so the title picks up
+    // the backend's auto-summary).
+    try {
+      const res = await apiGet<{ sessions: SessionRow[] }>("/v1/sessions");
+      setTabs((prev) => {
+        const byId = new Map(res.sessions.map((s) => [s.session_id, s]));
+        return prev.map((t) => {
+          if (!t.sessionId) return t;
+          const row = byId.get(t.sessionId);
+          if (!row) return t;
+          return {
+            ...t,
+            title: t.manuallyRenamed ? t.title : (row.summary ?? t.title),
+            sessionModel:
+              row.provider_id && row.model
+                ? { provider_id: row.provider_id, model: row.model }
+                : t.sessionModel,
+          };
+        });
+      });
+    } catch (e) {
+      console.error("useChatTabs: refresh failed", e);
+    }
+  }, []);
+
   return {
     tabs,
     activeTab,
@@ -406,9 +473,21 @@ export function useChatTabs(defaultAgentId: string | null = null) {
     createTab,
     createTabFromSession,
     closeTab,
+    closeSession,
     selectTab,
     renameTab,
     updateTabSummary,
     updateTab,
+    updateSessionSummary,
   };
+}
+
+/** Build a ws:// or wss:// URL with the JWT passed as `?token=`. */
+function buildWsUrl(path: string, token: string): string {
+  const base = (import.meta.env?.VITE_API_BASE as string | undefined) ?? "";
+  const isAbsolute = /^https?:\/\//i.test(base);
+  const scheme = isAbsolute
+    ? base.replace(/^http/i, "ws")
+    : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`;
+  return `${scheme}${path}?token=${encodeURIComponent(token)}`;
 }

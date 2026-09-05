@@ -580,6 +580,11 @@ impl LlmProviderConfig {
 pub struct LlmConfig {
     #[serde(default = "default_llm_provider_id")]
     pub default_provider: String,
+    /// Explicit default model id (e.g. `"mistral-medium-latest"`).
+    /// When set, overrides the chosen provider's `effective_model()`.
+    /// `None` (missing) → use provider's configured default model.
+    #[serde(default)]
+    pub default_model: Option<String>,
     #[serde(default)]
     pub providers: Vec<LlmProviderConfig>,
 }
@@ -608,6 +613,7 @@ impl LlmConfig {
         let default_provider = pick_default_provider(&providers);
         Self {
             default_provider,
+            default_model: None,
             providers,
         }
     }
@@ -643,6 +649,7 @@ impl Default for LlmConfig {
         let model = std::env::var("MINIMAX_MODEL").unwrap_or_else(|_| "MiniMax-M3".to_string());
         Self {
             default_provider: default_llm_provider_id(),
+            default_model: None,
             providers: vec![LlmProviderConfig {
                 id: default_llm_provider_id(),
                 kind: LlmProviderKind::Minimax,

@@ -14,6 +14,7 @@ use tracing::info;
 use tokio::sync::{broadcast, mpsc};
 use uuid::Uuid;
 
+use crate::auth::UserContext;
 use crate::config::{EphemeralAgentSpec, PersistentAgentSpec, SessionAgentSpec};
 use crate::events::Event;
 use crate::plugins::PluginStatus;
@@ -896,6 +897,7 @@ pub struct SessionCreated {
 
 pub async fn create_session(
     State(state): State<Arc<AppState>>,
+    user: UserContext,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<SessionCreated>, (StatusCode, String)> {
     let agent_id = body
@@ -964,13 +966,26 @@ pub async fn create_session(
         agent_id: agent_id.clone(),
     });
 
-    // Persist session. Failures here are non-fatal (HTTP still succeeds) —
-    // the session lives in-memory and events stream to subscribers regardless.
-    if let Err(e) = state.lifecycle.session.start_session(session_id, &agent_id).await {
-        tracing::warn!(session_id = %session_id, error = %e, "session persist failed");
+    // Persist session with the authenticated user as owner so the
+    // session shows up in every device the user is logged into.
+    // `start_session_for_user` also clears `ended_at` (via
+    // INSERT OR REPLACE) so a re-opened session is truly active.
+    let user_id = user.user_id.to_string();
+    if let Err(e) = state
+        .lifecycle
+        .session
+        .start_session_for_user(session_id, &agent_id, &user_id)
+        .await
+    {
+        tracing::warn!(
+            session_id = %session_id,
+            user_id = %user_id,
+            error = %e,
+            "session persist failed (non-fatal)"
+        );
     }
-    // Tag the session with the client_id (web / sidebar-*) so each
-    // client only sees its own sessions when listing.
+    // Telemetry tag — kept for diagnostic views (which device opened
+    // the session). No longer used for list partitioning.
     if let Some(ref cid) = client_id {
         if let Err(e) = state.lifecycle.session.set_client_id(session_id, Some(cid)).await {
             tracing::warn!(session_id = %session_id, error = %e, "client_id set failed");
@@ -1036,9 +1051,22 @@ pub struct MessageReq {
 #[tracing::instrument(skip_all, fields(session_id = %session_id, agent_id = tracing::field::Empty))]
 pub async fn post_message(
     State(state): State<Arc<AppState>>,
+    user: UserContext,
     Path(session_id): Path<Uuid>,
     Json(body): Json<MessageReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Owner check.
+    let owner = state
+        .lifecycle
+        .session
+        .get_session_user(session_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    match owner {
+        Some(uid) if uid == user.user_id.to_string() => {}
+        _ => return Err((StatusCode::NOT_FOUND, "session not found".to_string())),
+    }
+
     // Persist user message. Non-fatal if it fails. User messages never
     // carry thinking (EP-0026-rev-fix), so the column stays NULL.
     if let Err(e) = state.lifecycle
@@ -1295,9 +1323,17 @@ pub struct RawChatReq {
 
 pub async fn post_message_stream(
     State(state): State<Arc<AppState>>,
+    user: UserContext,
     Path(session_id): Path<Uuid>,
     Json(body): Json<MessageReq>,
 ) -> Response {
+    // Owner check. 404 if the session isn't owned by the calling user.
+    let owner = state.lifecycle.session.get_session_user(session_id).await;
+    let owner_ok = matches!(owner, Ok(Some(ref uid)) if uid == &user.user_id.to_string());
+    if !owner_ok {
+        return session_not_found_response();
+    }
+
     // EP-0012 P-005: bounded channel (64) prevents memory leak if the
     // SSE client is slow / disconnected. The forwarder blocks when
     // full; the dispatcher detects backpressure and exits.
@@ -1652,8 +1688,27 @@ fn sse_response(mut rx: mpsc::Receiver<serde_json::Value>) -> Response {
 
 pub async fn cancel_session(
     State(state): State<Arc<AppState>>,
+    user: UserContext,
     Path(session_id): Path<Uuid>,
-) -> Json<serde_json::Value> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Owner check: refuse to operate on sessions the caller doesn't
+    // own. Same 404-not-leak convention as list/messages.
+    let owner = state
+        .lifecycle
+        .session
+        .get_session_user(session_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    match owner {
+        Some(uid) if uid == user.user_id.to_string() => {}
+        _ => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                "session not found".to_string(),
+            ));
+        }
+    }
+
     // Trigger cooperative cancellation
     let was_active = state.lifecycle.tasks.cancel(session_id).await;
     state.lifecycle.approvals.cancel_session(session_id).await;
@@ -1668,19 +1723,35 @@ pub async fn cancel_session(
         session_id,
         summary: Some("cancelled".to_string()),
     });
-    Json(json!({
+    Ok(Json(json!({
         "cancelled": session_id,
         "was_active": was_active,
         "agent_stopped": agent_stopped,
-    }))
+    })))
 }
 
 /// GET /v1/sessions/:id — session detail (metadata + agent status + msg count).
 pub async fn get_session(
     State(state): State<Arc<AppState>>,
+    user: UserContext,
     Path(session_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let sessions = state.lifecycle
+    // Owner check via the user_id index — single lookup, no list scan.
+    let owner = state
+        .lifecycle
+        .session
+        .get_session_user(session_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    match owner {
+        Some(uid) if uid == user.user_id.to_string() => {}
+        _ => return Err((StatusCode::NOT_FOUND, "session not found".to_string())),
+    }
+
+    // We have the owner check, but for the actual metadata we still
+    // need the session row. Cheap query (indexed by session_id PK).
+    let sessions = state
+        .lifecycle
         .session
         .list_sessions(1000)
         .await
@@ -1723,8 +1794,26 @@ pub async fn get_session(
 /// as ended. Idempotent: a second call returns 404 on the session.
 pub async fn delete_session(
     State(state): State<Arc<AppState>>,
+    user: UserContext,
     Path(session_id): Path<Uuid>,
-) -> Json<serde_json::Value> {
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Owner check (same convention as cancel_session).
+    let owner = state
+        .lifecycle
+        .session
+        .get_session_user(session_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    match owner {
+        Some(uid) if uid == user.user_id.to_string() => {}
+        _ => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                "session not found".to_string(),
+            ));
+        }
+    }
+
     let was_active = state.lifecycle.tasks.cancel(session_id).await;
     state.lifecycle.approvals.cancel_session(session_id).await;
     let agent_stopped = state.lifecycle.session_agents.stop(session_id).await.is_ok();
@@ -1739,11 +1828,42 @@ pub async fn delete_session(
         session_id,
         summary: Some("deleted".to_string()),
     });
-    Json(json!({
+    Ok(Json(json!({
         "deleted": session_id,
         "was_active": was_active,
         "agent_stopped": agent_stopped,
-    }))
+    })))
+}
+
+/// POST /v1/sessions/:id/reactivate — reopen a previously closed
+/// session (sets `ended_at` back to NULL). Returns 404 if the
+/// session doesn't exist OR isn't owned by the caller; returns
+/// `{"reactivated": true}` on success. The subprocess isn't
+/// spawned here — it spawns lazily on the next message via the
+/// dispatch path (so a stale subprocess isn't left running if the
+/// user reopens a session without sending anything).
+pub async fn reactivate_session(
+    State(state): State<Arc<AppState>>,
+    user: UserContext,
+    Path(session_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let reactivated = state
+        .lifecycle
+        .session
+        .reactivate_session(session_id, &user.user_id.to_string())
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if !reactivated {
+        return Err((
+            StatusCode::NOT_FOUND,
+            "session not found".to_string(),
+        ));
+    }
+    state.emit(Event::SessionStarted {
+        session_id,
+        agent_id: String::new(), // unknown without an extra lookup; clients fetch full session via /v1/sessions/:id
+    });
+    Ok(Json(json!({ "reactivated": session_id })))
 }
 
 /// GET /v1/sessions/:id/agent — process details for the session's bound agent.
@@ -1935,9 +2055,31 @@ pub struct SetSessionModelReq {
 /// applies to both new and existing sessions.
 pub async fn set_session_model(
     State(state): State<Arc<AppState>>,
+    user: UserContext,
     Path(session_id): Path<Uuid>,
     Json(body): Json<SetSessionModelReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Owner check. Same 404 convention as cancel/delete.
+    let owner = state
+        .lifecycle
+        .session
+        .get_session_user(session_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?;
+    match owner {
+        Some(uid) if uid == user.user_id.to_string() => {}
+        _ => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "session not found"})),
+            ));
+        }
+    }
     // F5.1 runtime fix: the provider may live in llmd's SQLite
     // (created via the CRUD endpoints) rather than the daemon's
     // YAML config. Best-effort check: ask llmd first, fall back
@@ -2374,6 +2516,11 @@ pub async fn stop_local_provider(
 #[derive(Deserialize)]
 pub struct SetActiveProviderReq {
     pub provider_id: String,
+    /// Explicit default model id (e.g. `"mistral-medium-latest"`).
+    /// When present, persisted as the daemon-wide default and
+    /// auto-populated on newly-created sessions.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// PUT /v1/llm/providers/active — DEPRECATED (EP-0017-02 R4).
@@ -2389,11 +2536,24 @@ pub async fn set_active_llm_provider(
     State(state): State<Arc<AppState>>,
     Json(body): Json<SetActiveProviderReq>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::warn!(
-        provider_id = %body.provider_id,
-        "PUT /v1/llm/providers/active is deprecated — use PUT /v1/sessions/:id/model for per-session selection"
-    );
-    let provider = state.config.llm.get_provider(&body.provider_id);
+    // Sets the daemon-wide default provider/model. The frontend
+    // mostly uses PUT /v1/sessions/:id/model for per-session
+    // selection now, but this endpoint is still the source of truth
+    // for "the active default" reported by /v1/llm/providers and
+    // used by newly-created sessions.
+    //
+    // Look up the provider in the engine store (where runtime CRUD
+    // providers live) — `state.config.llm` only has the YAML-loaded
+    // initial set, so checking there misses anything added later.
+    let provider = match state.engine.list_providers().await {
+        Ok(list) => list.into_iter().find(|p| p.id == body.provider_id),
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("list_providers: {e}")})),
+            ));
+        }
+    };
     let Some(p) = provider else {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -2401,24 +2561,15 @@ pub async fn set_active_llm_provider(
         ));
     };
 
-    let api_key = match &p.api_key_env {
-        Some(env_name) => match std::env::var(env_name) {
-            Ok(v) => Some(v),
-            Err(_) => {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "provider not configured (api_key_env not set)"})),
-                ));
-            }
-        },
-        None => None,
-    };
+    // When the client doesn't send a model, fall back to the
+    // provider's `effective_model()` (its YAML/CRUD-configured
+    // default). This keeps `set_active_provider` backwards-compat
+    // with clients that only send `{provider_id}`.
+    let model = body
+        .model
+        .clone()
+        .unwrap_or_else(|| p.effective_model());
 
-    let base_url = p.effective_base_url();
-    let model = p.effective_model();
-
-    // F4.4c: push the active (provider_id, model) to llmd via HTTP.
-    let _ = (api_key, base_url); // not needed for set_active_provider
     state
         .engine
         .set_active_provider(p.id.clone(), model.clone())
@@ -2427,8 +2578,7 @@ pub async fn set_active_llm_provider(
 
     Ok(Json(json!({
         "active": body.provider_id,
-        "deprecated": true,
-        "message": "use PUT /v1/sessions/:id/model for per-session selection",
+        "model": model,
     })))
 }
 
@@ -3465,6 +3615,17 @@ pub async fn delete_env_var(
 ///
 /// Auth: same Bearer token as other /v1 routes (handled by
 /// `AuthLayer` in router/mod.rs).
+fn session_not_found_response() -> Response {
+    axum::http::Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            r#"{"error":"session not found"}"#,
+        ))
+        .expect("static response build")
+}
+
+
 pub async fn serve_file(
     State(_state): State<Arc<AppState>>,
     Path(raw_path): Path<PathBuf>,

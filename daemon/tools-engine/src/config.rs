@@ -111,6 +111,11 @@ pub struct LlmConfig {
     /// Provider id used when an agent specifies no provider.
     #[serde(default = "default_default_provider")]
     pub default_provider: String,
+    /// Explicit default model id (e.g. `"mistral-medium-latest"`).
+    /// When set, overrides the chosen provider's `effective_model()`.
+    /// `None` (missing) → use provider's configured default model.
+    #[serde(default)]
+    pub default_model: Option<String>,
     #[serde(default)]
     pub providers: Vec<LlmProviderConfig>,
 }

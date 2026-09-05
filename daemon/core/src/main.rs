@@ -216,11 +216,13 @@ async fn serve(
     let engine_llm_config = engine.load_llm_config().await.unwrap_or_else(|_| {
         tools_engine::LlmConfig {
             default_provider: "minimax".to_string(),
+            default_model: None,
             providers: vec![],
         }
     });
     let llm_config = neurox::config::LlmConfig {
         default_provider: engine_llm_config.default_provider,
+        default_model: engine_llm_config.default_model,
         providers: engine_llm_config
             .providers
             .into_iter()

@@ -1,29 +1,54 @@
-use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{ConnectInfo, State, WebSocketUpgrade};
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{ConnectInfo, Query, State};
+use axum::http::header::AUTHORIZATION;
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use crate::approval::ApprovalDecision;
+use crate::events::Event;
 use crate::router::http::ClientInfo;
 use crate::router::AppState;
 
+#[derive(Debug, Deserialize, Default)]
+pub struct WsAuthQuery {
+    /// JWT passed as `?token=…` for WS upgrades (browsers can't set
+    /// custom headers in the WS handshake). Authorization header is
+    /// also accepted when present.
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
 /// WebSocket endpoint for streaming events from the core.
 /// One-way: core → client (events as text frames).
+///
+/// Authentication: the upgrade request must carry a valid Bearer JWT
+/// (Authorization header or `?token=…` query string — browsers don't
+/// allow custom headers in the WS handshake). The authenticated
+/// `user_id` is then used to filter every emitted event so each
+/// device only sees events from sessions owned by its user.
 pub async fn ws_events(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
+    Query(auth): Query<WsAuthQuery>,
 ) -> impl IntoResponse {
     let user_agent = headers
         .get("user-agent")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    ws.on_upgrade(move |socket| handle_event_socket(socket, state, addr, user_agent))
+    let auth_header = headers
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    ws.on_upgrade(move |socket| {
+        handle_event_socket(socket, state, addr, user_agent, auth_header, auth.token)
+    })
 }
 
 async fn handle_event_socket(
@@ -31,7 +56,40 @@ async fn handle_event_socket(
     state: Arc<AppState>,
     addr: SocketAddr,
     user_agent: Option<String>,
+    auth_header: Option<String>,
+    query_token: Option<String>,
 ) {
+    // Extract Bearer token from header OR `?token=` query string.
+    let token = extract_bearer_from_header(auth_header.as_deref()).or(query_token);
+    let Some(token) = token else {
+        let _ = socket.close().await;
+        return;
+    };
+
+    // Verify the JWT directly (we can't use the axum extractor here
+    // because the upgrade already happened). The same secret is
+    // shared with `JwtAuthLayer` so this is the canonical way to
+    // validate.
+    let claims = match state
+        .auth
+        .auth
+        .as_ref()
+        .and_then(|a| crate::auth::middleware::verify_jwt_with(&a.secret, &token).ok())
+    {
+        Some(c) => c,
+        None => {
+            let _ = socket.close().await;
+            return;
+        }
+    };
+    let user_id = match uuid::Uuid::parse_str(&claims.sub) {
+        Ok(u) => u,
+        Err(_) => {
+            let _ = socket.close().await;
+            return;
+        }
+    };
+
     let client_id = state.events.clients.register(ClientInfo {
         id: String::new(),
         kind: "ws_events".into(),
@@ -47,9 +105,15 @@ async fn handle_event_socket(
 
     let (mut sender, _receiver) = socket.split();
     let mut rx = state.subscribe();
+    // `state` is an Arc — clone for the spawned task so we can still
+    // unregister the client from the registry after the task ends.
+    let state_for_task = Arc::clone(&state);
 
     let send_task = tokio::spawn(async move {
         while let Ok(event) = rx.recv().await {
+            if !event_owned_by(&event, &user_id, &state_for_task).await {
+                continue;
+            }
             let payload = serde_json::to_string(&event).unwrap_or_default();
             if sender.send(Message::Text(payload)).await.is_err() {
                 break;
@@ -59,6 +123,57 @@ async fn handle_event_socket(
     let _ = send_task.await;
     state.events.clients.unregister(&client_id);
 }
+
+/// Decide whether an event belongs to the WS subscriber's user.
+/// Three buckets:
+///   1. Per-session events (Content, Thinking, Tool*, SessionStarted,
+///      SessionEnded, Done, Metrics, MessageAppended, …): look up
+///      `session.user_id` and compare.
+///   2. Approval events: scope by the request's `session_id`.
+///   3. Global events (McpRegistered/Unregistered): emit to everyone.
+async fn event_owned_by(
+    event: &Event,
+    user_id: &uuid::Uuid,
+    state: &Arc<AppState>,
+) -> bool {
+    let session_id = match event {
+        Event::SessionStarted { session_id, .. }
+        | Event::SessionEnded { session_id, .. }
+        | Event::Thinking { session_id, .. }
+        | Event::Content { session_id, .. }
+        | Event::ToolCall { session_id, .. }
+        | Event::ToolResult { session_id, .. }
+        | Event::AgentSpawned { session_id, .. }
+        | Event::AgentFinished { session_id, .. }
+        | Event::Metrics { session_id, .. }
+        | Event::Done { session_id, .. }
+        | Event::CompactionFailed { session_id, .. } => Some(*session_id),
+        Event::ApprovalRequest { request } => Some(request.session_id),
+        Event::ApprovalResolved { session_id, .. } => Some(*session_id),
+        Event::Error { session_id, .. } => *session_id,
+        Event::McpRegistered { .. } | Event::McpUnregistered { .. } => {
+            return true;
+        }
+    };
+    let Some(sid) = session_id else {
+        return true;
+    };
+    match state.lifecycle.session.get_session_user(sid).await {
+        Ok(Some(owner)) => owner == user_id.to_string(),
+        _ => false,
+    }
+}
+
+fn extract_bearer_from_header(s: Option<&str>) -> Option<String> {
+    s.and_then(|h| h.strip_prefix("Bearer "))
+        .map(|t| t.to_string())
+}
+
+// Unused helper kept to avoid an unused-import warning if extracted
+// helpers are removed. Reserved for future `?token=…` parsing if the
+// Query extractor signature changes.
+#[allow(dead_code)]
+fn _unused_query_collector(_q: &HashMap<String, String>) {}
 
 /// Bidirectional WS endpoint: client sends commands, core responds.
 #[derive(Debug, Deserialize)]

@@ -364,7 +364,7 @@ export function ChatPanel(_: ChatPanelProps = {}) {
   // tab header stay in sync. If a tab for this session already
   // exists, `createTabFromSession` just focuses it.
   const loadSession = useCallback(async (id: string, summary: string | null) => {
-    const tab = createTabFromSession(id, summary);
+    const tab = await createTabFromSession(id, summary);
     try {
       const res = await getSessionMessages(id);
       const loaded: Message[] = (res.messages ?? []).map((m, i) => ({
@@ -590,6 +590,8 @@ useLayoutEffect(() => {
             updateTab(activeTab.id, { sessionAgent: id });
           }
         }}
+        showHistory={showHistory}
+        onToggleHistory={() => setShowHistory(!showHistory)}
         voiceOverlayOpen={voiceOverlayOpen}
         onOpenVoiceCall={() => setVoiceOverlayOpen(true)}
         isFullscreen={isFullscreen}

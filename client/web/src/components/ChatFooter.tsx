@@ -8,6 +8,7 @@ import { ModelSelector, type ModelSelection } from "./ModelSelector";
 import { AgentSelector } from "./AgentSelector";
 import { MicButton } from "./MicButton";
 import {
+  IconHistory,
   IconVoice,
   IconFullscreen,
   IconSend,
@@ -22,6 +23,8 @@ export interface ChatFooterProps {
   onChangeModel: (m: ModelSelection) => void;
   currentAgent: string;
   onChangeAgent: (id: string) => void;
+  showHistory: boolean;
+  onToggleHistory: () => void;
   voiceOverlayOpen: boolean;
   onOpenVoiceCall: () => void;
   isFullscreen: boolean;
@@ -47,6 +50,8 @@ export function ChatFooter({
   onChangeModel,
   currentAgent,
   onChangeAgent,
+  showHistory,
+  onToggleHistory,
   voiceOverlayOpen,
   onOpenVoiceCall,
   isFullscreen,
@@ -75,6 +80,17 @@ export function ChatFooter({
           )}
           <div className="chat__bar-actions">
             <AgentSelector currentAgent={currentAgent} onChange={onChangeAgent} />
+            <button
+              type="button"
+              className={`chat__bar-actions__btn${showHistory ? " chat__bar-actions__btn--active" : ""}`}
+              onClick={onToggleHistory}
+              title="Toggle history"
+              aria-label="Toggle history"
+              aria-pressed={showHistory}
+              data-testid="chat-history-toggle"
+            >
+              <IconHistory />
+            </button>
             <button
               type="button"
               className={`chat__bar-actions__btn${voiceOverlayOpen ? " chat__bar-actions__btn--active" : ""}`}

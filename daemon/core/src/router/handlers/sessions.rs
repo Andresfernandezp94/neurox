@@ -16,26 +16,36 @@ use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::auth::UserContext;
 use crate::router::state::AppState;
 
 #[derive(Deserialize, Default)]
 pub struct ListSessionsQuery {
-    /// Optional client_id filter. When provided, the response only
-    /// includes sessions whose `client_id` matches. Sessions with
-    /// `client_id == NULL` are never returned in that mode.
+    /// Optional client_id filter. **Deprecated** for the main UI:
+    /// sessions are now shared per-user (see `?include_inactive`). Kept
+    /// for the diagnostics view so admins can still see a single
+    /// device's sessions.
     #[serde(default)]
     pub client_id: Option<String>,
+    /// `true` → also return closed sessions (`ended_at IS NOT NULL`).
+    /// Default `false` → only active sessions (`ended_at IS NULL`) —
+    /// these are the ones that show as tabs.
+    #[serde(default)]
+    pub include_inactive: bool,
 }
 
-/// GET /v1/sessions — list recent sessions.
-///
-/// With `?client_id=web` (or `?client_id=sidebar-1`), the response is
-/// partitioned to that client only. With no query param, all sessions
-/// are returned (legacy behavior; admins / debug).
+/// GET /v1/sessions — list recent sessions owned by the authenticated
+/// user. Active by default (closed sessions show up in a separate
+/// history view, not as tabs). Pass `?include_inactive=true` to see
+/// closed ones too.
 pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
+    user: UserContext,
     Query(q): Query<ListSessionsQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Per-user filter is the only supported path for the main UI.
+    // The deprecated client_id path is preserved for back-compat with
+    // older clients (sidebar sessions list, debug views).
     let sessions = if let Some(cid) = q.client_id.as_deref() {
         state
             .lifecycle
@@ -47,7 +57,7 @@ pub async fn list_sessions(
         state
             .lifecycle
             .session
-            .list_sessions(50)
+            .list_sessions_by_user(&user.user_id.to_string(), q.include_inactive, 50)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     };
@@ -64,6 +74,7 @@ pub async fn list_sessions(
                 "provider_id": s.provider_id,
                 "model": s.model,
                 "client_id": s.client_id,
+                "user_id": s.user_id,
             })
         })
         .collect();
@@ -72,22 +83,26 @@ pub async fn list_sessions(
 }
 
 /// GET /v1/sessions/:id/messages — load all messages for a session.
+/// Owner-only: 404 if the session doesn't exist OR belongs to a
+/// different user (the two cases are indistinguishable from the
+/// outside so we don't leak existence).
 pub async fn get_session_messages(
     State(state): State<Arc<AppState>>,
+    user: UserContext,
     Path(session_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    // EP-0030 strict-404: verify session exists before returning its
-    // messages. Without this check, GET messages on a non-existent
-    // session returned `{"messages": []}` with status 200, hiding the
-    // error from clients.
-    let sessions = state
+    // Owner check: refuse to serve messages for sessions the caller
+    // doesn't own. Done as a single lookup so we don't pull the full
+    // session list (cheap, hits the user_id index).
+    let owner = state
         .lifecycle
         .session
-        .list_sessions(1000)
+        .get_session_user(session_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    if !sessions.iter().any(|s| s.session_id == session_id.to_string()) {
-        return Err((StatusCode::NOT_FOUND, "session not found".to_string()));
+    match owner {
+        Some(uid) if uid == user.user_id.to_string() => {}
+        _ => return Err((StatusCode::NOT_FOUND, "session not found".to_string())),
     }
 
     let messages = state

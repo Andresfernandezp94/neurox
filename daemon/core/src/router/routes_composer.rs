@@ -54,6 +54,10 @@ pub fn router(state: AppState) -> axum::Router {
             get(http::get_session).delete(http::delete_session),
         )
         .route(
+            "/v1/sessions/:id/reactivate",
+            post(http::reactivate_session),
+        )
+        .route(
             "/v1/sessions/:id/agent",
             get(http::get_session_agent),
         )

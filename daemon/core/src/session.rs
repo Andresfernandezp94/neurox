@@ -30,9 +30,17 @@ pub struct SessionRecord {
     /// EP-0016: sampling temperature per session (0.0–2.0). `None` = daemon default.
     pub temperature: Option<f64>,
     /// Stable client id that opened the session (e.g. "web",
-    /// "sidebar-<instance>"). Used to partition session lists so
-    /// each client only sees sessions it owns.
+    /// "sidebar-<instance>"). Used for telemetry / WebSocket routing
+    /// hints. **Not** used for session list partitioning anymore —
+    /// sessions are shared across devices via `user_id`.
     pub client_id: Option<String>,
+    /// User id (UUID) that owns the session. Sessions are shared
+    /// across every device logged in as this user, so tabs sync
+    /// realtime via the `/v1/events` WebSocket (which is filtered
+    /// by user_id). `None` only for legacy rows persisted before the
+    /// per-user migration — those won't appear in `list_sessions`
+    /// until someone re-opens them (they're still reachable by id).
+    pub user_id: Option<String>,
 }
 
 type SessionRow = (
@@ -48,6 +56,7 @@ type SessionRow = (
     Option<String>,   // 9: tool_mode
     Option<f64>,      // 10: temperature
     Option<String>,   // 11: client_id
+    Option<String>,   // 12: user_id
 );
 type MessageRow = (i64, String, String, String, Option<String>, String);
 
@@ -110,9 +119,24 @@ impl SessionStore {
         Self::ensure_column(&pool, "sessions", "tool_mode").await?;
         // EP-0016: per-session sampling temperature. NULL = use daemon default.
         Self::ensure_column(&pool, "sessions", "temperature").await?;
-        // Per-session client_id (web/sidebar/etc.) for partitioning
-        // session lists by client. NULL = legacy / no client tag.
+        // Per-session client_id (web/sidebar/etc.) for telemetry / WS
+        // routing hints. No longer used for list partitioning.
         Self::ensure_column(&pool, "sessions", "client_id").await?;
+        // Per-user owner (UUID). Sessions are shared across every
+        // device logged in as the same user; the `/v1/events` WS
+        // filters by user_id so each device only sees its own.
+        // NULL = legacy row persisted before the migration.
+        Self::ensure_column(&pool, "sessions", "user_id").await?;
+        // Index on user_id for `list_sessions_by_user` (the hot path
+        // for tab syncing across devices). Without this, every tab
+        // refresh does a full table scan.
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS sessions_user_id_idx \
+             ON sessions(user_id)",
+        )
+        .execute(&pool)
+        .await
+        .ok();
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS messages (
@@ -196,6 +220,11 @@ impl SessionStore {
                 ("sessions", "client_id") => {
                     "ALTER TABLE sessions ADD COLUMN client_id TEXT"
                 }
+                // Per-user owner of the session (UUID string). Sessions
+                // are shared across every device logged in as this user.
+                ("sessions", "user_id") => {
+                    "ALTER TABLE sessions ADD COLUMN user_id TEXT"
+                }
                 // EP-0026-rev-fix: thinking persisted per assistant message.
                 ("messages", "thinking") => {
                     "ALTER TABLE messages ADD COLUMN thinking TEXT"
@@ -215,6 +244,31 @@ impl SessionStore {
         .bind(session_id.to_string())
         .bind(agent_id)
         .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Start a session owned by a specific user. Use this from
+    /// handlers that have an authenticated `UserContext` (the
+    /// user_id is what gates the per-user WS feed and the
+    /// list_sessions filter).
+    pub async fn start_session_for_user(
+        &self,
+        session_id: Uuid,
+        agent_id: &str,
+        user_id: &str,
+    ) -> anyhow::Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT OR REPLACE INTO sessions \
+             (session_id, agent_id, started_at, user_id) \
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(session_id.to_string())
+        .bind(agent_id)
+        .bind(now)
+        .bind(user_id)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -310,7 +364,7 @@ impl SessionStore {
 
     pub async fn list_sessions(&self, limit: u32) -> anyhow::Result<Vec<SessionRecord>> {
                 let rows: Vec<SessionRow> = sqlx::query_as(
-            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id
+            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id
              FROM sessions ORDER BY started_at DESC LIMIT ?",
         )
         .bind(i64::from(limit))
@@ -320,7 +374,7 @@ impl SessionStore {
         Ok(rows
             .into_iter()
             .map(
-                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id)| {
+                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id)| {
                     SessionRecord {
                         session_id: sid,
                         agent_id: agent,
@@ -334,6 +388,7 @@ impl SessionStore {
                         tool_mode,
                         temperature,
                         client_id,
+                        user_id,
                     }
                 },
             )
@@ -343,14 +398,16 @@ impl SessionStore {
     /// List sessions filtered by `client_id`. Sessions with
     /// `client_id == NULL` are treated as legacy and are NOT
     /// returned here — they're only visible via `list_sessions()`.
-    /// This is what each client uses to see its own sessions.
+    /// **Deprecated for the main UI path** (sessions are now
+    /// partitioned by user, not client). Kept for the diagnostics
+    /// `GET /v1/services` view + back-compat with older clients.
     pub async fn list_sessions_by_client(
         &self,
         client_id: &str,
         limit: u32,
     ) -> anyhow::Result<Vec<SessionRecord>> {
         let rows: Vec<SessionRow> = sqlx::query_as(
-            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id
+            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id
              FROM sessions WHERE client_id = ? ORDER BY started_at DESC LIMIT ?",
         )
         .bind(client_id)
@@ -360,7 +417,7 @@ impl SessionStore {
         Ok(rows
             .into_iter()
             .map(
-                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id)| {
+                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id)| {
                     SessionRecord {
                         session_id: sid,
                         agent_id: agent,
@@ -374,10 +431,100 @@ impl SessionStore {
                         tool_mode,
                         temperature,
                         client_id,
+                        user_id,
                     }
                 },
             )
             .collect())
+    }
+
+    /// List sessions owned by `user_id` (the primary UI path).
+    /// Sessions with `user_id IS NULL` are legacy rows from before
+    /// the per-user migration — they're not returned here (no owner
+    /// = no visibility); the user can still resume them by id via
+    /// `reactivate_session` after they re-authenticate.
+    ///
+    /// `include_inactive = false` (default) hides closed sessions —
+    /// those should show in a separate "history" view, not as tabs.
+    pub async fn list_sessions_by_user(
+        &self,
+        user_id: &str,
+        include_inactive: bool,
+        limit: u32,
+    ) -> anyhow::Result<Vec<SessionRecord>> {
+        let sql = if include_inactive {
+            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id
+             FROM sessions WHERE user_id = ? ORDER BY started_at DESC LIMIT ?"
+        } else {
+            // Active tabs only: ended_at IS NULL.
+            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id
+             FROM sessions WHERE user_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT ?"
+        };
+        let rows: Vec<SessionRow> = sqlx::query_as(sql)
+            .bind(user_id)
+            .bind(i64::from(limit))
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id)| {
+                    SessionRecord {
+                        session_id: sid,
+                        agent_id: agent,
+                        started_at: started,
+                        ended_at: ended,
+                        summary,
+                        provider_id,
+                        model,
+                        tokens_used,
+                        ui_mode,
+                        tool_mode,
+                        temperature,
+                        client_id,
+                        user_id,
+                    }
+                },
+            )
+            .collect())
+    }
+
+    /// Look up the user_id that owns a session (for WS event
+    /// filtering). Returns `None` if the session doesn't exist or
+    /// has no owner (legacy rows).
+    pub async fn get_session_user(
+        &self,
+        session_id: Uuid,
+    ) -> anyhow::Result<Option<String>> {
+        let row: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT user_id FROM sessions WHERE session_id = ?",
+        )
+        .bind(session_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.flatten())
+    }
+
+    /// Reactivate (reopen) a previously closed session for the given
+    /// user. Sets `ended_at` back to `NULL` so it shows in the
+    /// active tabs again. Returns `true` if the session was
+    /// reactivated, `false` if it doesn't exist or isn't owned by
+    /// `user_id` (no error — caller decides what to do with the
+    /// 404 case at the HTTP layer).
+    pub async fn reactivate_session(
+        &self,
+        session_id: Uuid,
+        user_id: &str,
+    ) -> anyhow::Result<bool> {
+        let result = sqlx::query(
+            "UPDATE sessions SET ended_at = NULL \
+             WHERE session_id = ? AND user_id = ?",
+        )
+        .bind(session_id.to_string())
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     /// Set the LLM provider+model for a session (per-session selection, EP-0017).

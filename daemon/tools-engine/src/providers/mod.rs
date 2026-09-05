@@ -6,4 +6,5 @@ pub mod model_config_store;
 pub mod model_downloader;
 pub mod models_discovery;
 pub mod provider_store;
+pub mod settings;
 pub mod store;

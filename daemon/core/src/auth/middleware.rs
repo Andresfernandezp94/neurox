@@ -7,16 +7,28 @@
 //   - `UserContext` + role-check helpers (`require_admin`, `require_min_role`)
 //     for handlers.
 
+use axum::extract::FromRequestParts;
 use axum::extract::Request;
-use axum::http::{header::AUTHORIZATION, StatusCode};
+use axum::http::header::AUTHORIZATION;
+use axum::http::request::Parts;
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use futures::future::BoxFuture;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
-use super::tokens::{verify_token, JwtSecret};
+use super::tokens::{verify_token, JwtError, JwtSecret};
 pub use super::users::Role;
+
+/// Verify a JWT against the shared daemon secret. Returns the parsed
+/// claims or an error. Used by the WS handler to authenticate the
+/// upgrade (which happens after the axum middleware has already
+/// returned the connection to the handler — too late to use the
+/// `UserContext` extractor).
+pub fn verify_jwt_with(secret: &JwtSecret, token: &str) -> Result<super::tokens::Claims, JwtError> {
+    verify_token(secret, token)
+}
 
 #[derive(Debug, Clone)]
 pub struct UserContext {
@@ -185,6 +197,27 @@ pub fn require_min_role(req: &Request, min: Role) -> Result<UserContext, Respons
         Ok(user)
     } else {
         Err(forbidden_response(min.as_str()))
+    }
+}
+
+/// Axum extractor that pulls `UserContext` out of request extensions.
+/// `JwtAuthLayer` injects it for every authenticated request; this
+/// extractor just hands it back to handlers as an extractor argument.
+/// Public paths (login, /health) won't have one — the extractor
+/// rejects them with 401 the same way the old helper functions did.
+#[async_trait::async_trait]
+impl<S> FromRequestParts<S> for UserContext
+where
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<UserContext>()
+            .cloned()
+            .ok_or_else(unauthorized_response)
     }
 }
 

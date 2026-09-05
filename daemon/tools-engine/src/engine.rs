@@ -63,6 +63,12 @@ pub struct Engine {
     /// etc.) borrows `Arc<reqwest::Client>` from here instead of
     /// building its own.
     pub http_client: Arc<reqwest::Client>,
+    /// Explicit default provider id (when set, overrides the
+    /// alphabetical-first provider in `first_provider`). Writable via
+    /// `set_default_provider` (called by the daemon from
+    /// `core_config.llm.default_provider` at startup, or by the
+    /// `PUT /v1/llm/providers/active` endpoint at runtime).
+    default_provider: Arc<RwLock<Option<String>>>,
 }
 
 impl Engine {
@@ -94,6 +100,9 @@ impl Engine {
         crate::providers::model_config_store::ensure_table(&db)
             .await
             .map_err(|e| anyhow::anyhow!("model_configs migration: {e}"))?;
+        crate::providers::settings::ensure_table(&db)
+            .await
+            .map_err(|e| anyhow::anyhow!("settings migration: {e}"))?;
 
         let pool = Arc::new(db);
         let providers = Arc::new(ProviderStore::new(pool.clone()));
@@ -102,6 +111,15 @@ impl Engine {
         let tools = Arc::new(ToolRegistry::with_state_path(state_path));
         let _ = tools.load_state(); // best-effort
         register_defaults(&tools, workspace_root.clone(), sandbox.clone());
+
+        // Pre-load the explicit default provider from the persisted
+        // settings table (if any). Falls back to None → engine picks
+        // alphabetical-first provider.
+        let default_provider = match crate::providers::settings::load_default(&pool).await {
+            Ok(id) => id,
+            Err(_) => None,
+        };
+        let default_provider = Arc::new(RwLock::new(default_provider));
 
         let http_client = Arc::new(
             crate::http_client::build(&crate::http_client::HttpClientConfig::default())
@@ -117,6 +135,7 @@ impl Engine {
             db: pool.as_ref().clone(),
             started_at: Instant::now(),
             http_client,
+            default_provider,
         }))
     }
 
@@ -163,6 +182,7 @@ impl Engine {
             db: pool.as_ref().clone(),
             started_at: Instant::now(),
             http_client,
+            default_provider: Arc::new(RwLock::new(None)),
         }))
     }
 
@@ -198,14 +218,51 @@ impl Engine {
     /// `LocalServiceOrchestrator` and the agent subprocess's bootstrap.
     pub async fn load_llm_config(&self) -> Result<crate::config::LlmConfig, String> {
         let providers = self.providers.list().await?;
-        let default_provider = providers
-            .first()
-            .map(|p| p.id.clone())
+        let explicit_default = self.default_provider.read().await.clone();
+        let default_provider = explicit_default
+            .or_else(|| providers.first().map(|p| p.id.clone()))
             .unwrap_or_else(|| "minimax".to_string());
+        // Persisted default model override (optional). When set,
+        // overrides `effective_model()` for the active provider.
+        let default_model =
+            crate::providers::settings::load_default_model(&self.db).await.ok().flatten();
         Ok(crate::config::LlmConfig {
             default_provider,
+            default_model,
             providers,
         })
+    }
+
+    /// Set the explicit default provider id (called by the daemon at
+    /// startup from `core_config.llm.default_provider`, or by the
+    /// `PUT /v1/llm/providers/active` endpoint at runtime). When `Some`,
+    /// `first_provider()` honors this over the alphabetical first
+    /// provider. When `None` (default), falls back to the first
+    /// provider in the store (legacy behavior).
+    pub async fn set_default_provider(&self, id: Option<String>) -> Result<(), String> {
+        // Validate the id exists if provided so a typo doesn't leave
+        // the engine in a state where everything errors out.
+        if let Some(ref candidate) = id {
+            let providers = self.providers.list().await?;
+            if !providers.iter().any(|p| &p.id == candidate) {
+                return Err(format!("unknown provider: {candidate}"));
+            }
+        }
+        crate::providers::settings::save_default(&self.db, id.as_deref())
+            .await
+            .map_err(|e| format!("settings save: {e}"))?;
+        let mut guard = self.default_provider.write().await;
+        *guard = id;
+        Ok(())
+    }
+
+    /// Set the explicit default model id (e.g. `mistral-medium-latest`).
+    /// Persisted in `engine_settings.default_model`. When `None`, the
+    /// chosen provider's `effective_model()` is used.
+    pub async fn set_default_model(&self, model: Option<String>) -> Result<(), String> {
+        crate::providers::settings::save_default_model(&self.db, model.as_deref())
+            .await
+            .map_err(|e| format!("settings save: {e}"))
     }
 
     /// Borrow the providers store (for the daemon's REST handlers that
@@ -322,18 +379,48 @@ impl Engine {
     /// instead.
     pub async fn first_provider(&self) -> Result<Option<LlmProviderConfig>, String> {
         let mut all = self.providers.list().await?;
-        Ok(if all.is_empty() { None } else { Some(all.remove(0)) })
+        if all.is_empty() {
+            return Ok(None);
+        }
+        // Honour the explicit default provider (set via
+        // `set_default_provider` or loaded from `engine_settings`).
+        let explicit = self.default_provider.read().await.clone();
+        if let Some(id) = explicit {
+            if let Some(idx) = all.iter().position(|p| p.id == id) {
+                return Ok(Some(all.remove(idx)));
+            }
+            // Explicit id no longer exists in the store (provider was
+            // deleted) — fall back to the first provider.
+            tracing::warn!(
+                default_provider = %id,
+                "explicit default provider not in store; falling back to first"
+            );
+        }
+        Ok(Some(all.remove(0)))
     }
 
     /// Active provider/model as a `{provider_id, model}` JSON object.
     /// Mirrors the shape the old `llmd_client.active_provider()`
     /// returned for the `/v1/providers/active` endpoint.
+    ///
+    /// `default_model` (if set via `set_default_model` or persisted
+    /// in `engine_settings.default_model`) overrides the provider's
+    /// `effective_model()` — that's how the daemon-wide "default
+    /// model" flows to `/v1/llm/providers` and into newly-created
+    /// sessions.
     pub async fn active_provider(&self) -> serde_json::Value {
+        let explicit_model = match crate::providers::settings::load_default_model(&self.db).await {
+            Ok(m) => m,
+            Err(_) => None,
+        };
         match self.first_provider().await {
-            Ok(Some(p)) => serde_json::json!({
-                "provider_id": p.id,
-                "model": p.effective_model(),
-            }),
+            Ok(Some(p)) => {
+                let model = explicit_model.unwrap_or_else(|| p.effective_model());
+                serde_json::json!({
+                    "provider_id": p.id,
+                    "model": model,
+                })
+            }
             _ => serde_json::json!({
                 "provider_id": serde_json::Value::Null,
                 "model": serde_json::Value::Null,
@@ -344,13 +431,17 @@ impl Engine {
     /// Set the active provider/model pair. The daemon persists this in
     /// its own state (per-session selection); the engine doesn't own
     /// it yet. This stub just records the call so `/v1/providers/active`
-    /// doesn't 500. The follow-up EP-2026-08-19 moves activation
-    /// persistence into the engine (same SQLite).
+    /// Persist the daemon-wide default provider/model. Both fields
+    /// are honored by `first_provider` (explicit id wins over
+    /// alphabetical first) and `active_provider` (explicit model
+    /// wins over the provider's `effective_model()`).
     pub async fn set_active_provider(
         &self,
-        _provider_id: String,
-        _model: String,
+        provider_id: String,
+        model: String,
     ) -> Result<(), String> {
+        self.set_default_provider(Some(provider_id.clone())).await?;
+        self.set_default_model(Some(model)).await?;
         Ok(())
     }
 
