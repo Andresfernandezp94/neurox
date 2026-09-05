@@ -18,12 +18,10 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
-  IconStatus,
   IconConfig,
   IconChat,
   IconPin,
   IconPinFilled,
-  IconIntegrations,
   IconClipboard,
   IconPower,
 } from "./Icons";
@@ -132,21 +130,14 @@ export function Sidebar({ view, onTabChange, hidden = false, forceCollapsed = fa
 
   const navGroups: NavGroup[] = [
     {
-      label: "Overview",
-      items: [
-        { id: "status", label: t("sidebar.status"), icon: IconStatus },
-      ],
-    },
-    {
-      label: "Intelligence",
-      items: [
-        { id: "workspace", label: t("sidebar.workspace"), icon: IconIntegrations },
-      ],
-    },
-    {
       label: "Conversation",
       items: [
         { id: "chat", label: t("sidebar.chat"), icon: IconChat },
+      ],
+    },
+    {
+      label: "History",
+      items: [
         { id: "sessions", label: t("panels.sessions.title"), icon: IconClipboard },
       ],
     },

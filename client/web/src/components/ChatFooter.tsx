@@ -8,8 +8,6 @@ import { ModelSelector, type ModelSelection } from "./ModelSelector";
 import { AgentSelector } from "./AgentSelector";
 import { MicButton } from "./MicButton";
 import {
-  IconHistory,
-  IconSidebar,
   IconVoice,
   IconFullscreen,
   IconSend,
@@ -24,10 +22,6 @@ export interface ChatFooterProps {
   onChangeModel: (m: ModelSelection) => void;
   currentAgent: string;
   onChangeAgent: (id: string) => void;
-  showHistory: boolean;
-  onToggleHistory: () => void;
-  onToggleSidebar?: () => void;
-  isSidebarHidden?: boolean;
   voiceOverlayOpen: boolean;
   onOpenVoiceCall: () => void;
   isFullscreen: boolean;
@@ -53,10 +47,6 @@ export function ChatFooter({
   onChangeModel,
   currentAgent,
   onChangeAgent,
-  showHistory,
-  onToggleHistory,
-  onToggleSidebar,
-  isSidebarHidden,
   voiceOverlayOpen,
   onOpenVoiceCall,
   isFullscreen,
@@ -85,30 +75,6 @@ export function ChatFooter({
           )}
           <div className="chat__bar-actions">
             <AgentSelector currentAgent={currentAgent} onChange={onChangeAgent} />
-            <button
-              type="button"
-              className={`chat__bar-actions__btn${showHistory ? " chat__bar-actions__btn--active" : ""}`}
-              onClick={onToggleHistory}
-              title="Toggle history"
-              aria-label="Toggle history"
-              aria-pressed={showHistory}
-              data-testid="chat-history-toggle"
-            >
-              <IconHistory />
-            </button>
-            {onToggleSidebar && (
-              <button
-                type="button"
-                className={`chat__bar-actions__btn${!isSidebarHidden ? " chat__bar-actions__btn--active" : ""}`}
-                onClick={onToggleSidebar}
-                title="Toggle sidebar"
-                aria-label="Toggle sidebar"
-                aria-pressed={!isSidebarHidden}
-                data-testid="chat-sidebar-toggle"
-              >
-                <IconSidebar />
-              </button>
-            )}
             <button
               type="button"
               className={`chat__bar-actions__btn${voiceOverlayOpen ? " chat__bar-actions__btn--active" : ""}`}

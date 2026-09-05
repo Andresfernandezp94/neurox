@@ -65,7 +65,7 @@ function AppInner() {
   // EP-2026-08-15: sincroniza `--app-h` con `window.visualViewport.height`
   useVisualViewportHeight();
 
-  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [sidebarHidden] = useState(false);
 
   // Esperar a que /health termine antes de decidir. Sin esto, en el
   // estado inicial `health === null` → `authRequired` es false → se
@@ -96,10 +96,7 @@ function AppInner() {
         )}
         {activeTab === "chat" && (
           <PanelFrame testId="chat-panel">
-            <ChatPanel
-              onToggleSidebar={() => setSidebarHidden((h) => !h)}
-              isSidebarHidden={sidebarHidden}
-            />
+            <ChatPanel />
           </PanelFrame>
         )}
         {activeTab === "config" && (

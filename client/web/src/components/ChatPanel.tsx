@@ -34,15 +34,9 @@ function computeMetrics(durationMs: number, text: string): MessageMetrics {
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-export interface ChatPanelProps {
-  /** EP-0026-UX: toggle sidebar global (App.tsx mantiene el state). */
-  onToggleSidebar?: () => void;
-  /** EP-2026-08-15: estado actual del sidebar. Boton toggle se muestra
-   *  "active" (color accent) cuando el sidebar esta oculto. */
-  isSidebarHidden?: boolean;
-}
+export interface ChatPanelProps {}
 
-export function ChatPanel({ onToggleSidebar, isSidebarHidden }: ChatPanelProps = {}) {
+export function ChatPanel(_: ChatPanelProps = {}) {
   // EP-0024: el agent de la sesión se selecciona por tab (mismo patrón
   // que el modelo). `useDefaultAgentId` lee de `state.agents` (poblado
   // por `/v1/agents` en mount). Si el daemon está caído o todavía no
@@ -244,7 +238,6 @@ export function ChatPanel({ onToggleSidebar, isSidebarHidden }: ChatPanelProps =
       // via its container in the JSX below. Either ancestor counts.
       if (
         target.closest(".chat-history") ||
-        target.closest('[data-testid="chat-history-toggle"]') ||
         target.closest(".session-list")
       ) {
         return;
@@ -595,10 +588,6 @@ useLayoutEffect(() => {
             updateTab(activeTab.id, { sessionAgent: id });
           }
         }}
-        showHistory={showHistory}
-        onToggleHistory={() => setShowHistory(!showHistory)}
-        onToggleSidebar={onToggleSidebar}
-        isSidebarHidden={isSidebarHidden ?? false}
         voiceOverlayOpen={voiceOverlayOpen}
         onOpenVoiceCall={() => setVoiceOverlayOpen(true)}
         isFullscreen={isFullscreen}

@@ -108,11 +108,6 @@
   background: var(--bg);
   backdrop-filter: var(--chrome-blur, blur(20px) saturate(140%));
   -webkit-backdrop-filter: var(--chrome-blur, blur(20px) saturate(140%));
-  border: 1px solid rgba(0, 0, 0, 0.4);
-  border-radius: 0.625rem;
-  box-shadow:
-    0 0 12px rgba(0, 0, 0, 0.28),
-    0 2px 14px rgba(0, 0, 0, 0.35);
 }
 
 /* EP-0026-UX: en mobile (≤1024px) el footer debe ir edge-to-edge

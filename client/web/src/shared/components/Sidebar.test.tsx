@@ -28,14 +28,12 @@ describe("Sidebar", () => {
     onTabChange.mockClear();
   });
 
-  it("renders all 5 navigation items", () => {
-    renderWithProviders(<Sidebar view="status" onTabChange={onTabChange} />);
+  it("renders all 3 navigation items", () => {
+    renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
 
     const ids: NavId[] = [
-      "status",
       "chat",
       "sessions",
-      "workspace",
       "config",
     ];
     for (const id of ids) {
@@ -53,8 +51,6 @@ describe("Sidebar", () => {
     ).map((el) => el.dataset.testid);
 
     expect(order).toEqual([
-      "sidebar-nav-status",
-      "sidebar-nav-workspace",
       "sidebar-nav-chat",
       "sidebar-nav-sessions",
       "sidebar-nav-config",
@@ -62,13 +58,13 @@ describe("Sidebar", () => {
   });
 
   it("calls onTabChange with the correct id when an item is clicked", () => {
-    renderWithProviders(<Sidebar view="status" onTabChange={onTabChange} />);
+    renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
 
     fireEvent.click(screen.getByTestId("sidebar-nav-chat"));
     expect(onTabChange).toHaveBeenCalledWith("chat");
 
-    fireEvent.click(screen.getByTestId("sidebar-nav-workspace"));
-    expect(onTabChange).toHaveBeenCalledWith("workspace");
+    fireEvent.click(screen.getByTestId("sidebar-nav-sessions"));
+    expect(onTabChange).toHaveBeenCalledWith("sessions");
   });
 
   it("marks the active item with the 'active' class", () => {
@@ -81,13 +77,11 @@ describe("Sidebar", () => {
     expect(chatBtn.className).not.toContain("active");
   });
 
-  it("accepts all valid NavId values", () => {
+  it("accepts all valid NavId values (visible ones get the active class)", () => {
     const validIds: NavId[] = [
-      "status",
       "chat",
-      "config",
       "sessions",
-      "workspace",
+      "config",
     ];
 
     for (const id of validIds) {
