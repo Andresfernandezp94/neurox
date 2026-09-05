@@ -167,8 +167,15 @@ impl AgentProtocol for JsonRpcStdio {
             }
 
             let trimmed = response_line.trim();
+            // EP-2026-09-05: empty lines happen intermittently — the
+            // agent's stdout isn't perfectly clean between writes
+            // (the LLM error path occasionally emits a stray newline).
+            // Skip them and keep reading instead of bailing; if the
+            // stream is truly dead, the cancellation token or
+            // broken pipe below will catch it.
             if trimmed.is_empty() {
-                anyhow::bail!("empty line from agent during stream");
+                tracing::debug!("empty line from agent during stream; skipping");
+                continue;
             }
 
             let msg: Value = serde_json::from_str(trimmed)?;

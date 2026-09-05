@@ -1433,6 +1433,7 @@ pub async fn post_message_stream(
     let tx_for_forward = tx.clone();
     let request_id_for_forward = request_id.clone();
     let client_id_for_forward = client_id.clone();
+    let broadcast_state = state.clone();
     tokio::spawn(async move {
         loop {
             match event_rx.recv().await {
@@ -1449,6 +1450,13 @@ pub async fn post_message_stream(
                     {
                         break;
                     }
+                    // EP-2026-09-05 cross-device: also broadcast on the
+                    // global event bus so OTHER devices (subscribed
+                    // via /v1/events WS) see the chunk in realtime.
+                    broadcast_state.emit(Event::Content {
+                        session_id,
+                        text,
+                    });
                 }
                 Ok(Event::Thinking { session_id, text }) if session_id == session_for_task => {
                     if tx_for_forward
@@ -1463,6 +1471,10 @@ pub async fn post_message_stream(
                     {
                         break;
                     }
+                    broadcast_state.emit(Event::Thinking {
+                        session_id,
+                        text,
+                    });
                 }
                 Ok(Event::ToolCall {
                     session_id,
@@ -1484,6 +1496,12 @@ pub async fn post_message_stream(
                     {
                         break;
                     }
+                    broadcast_state.emit(Event::ToolCall {
+                        session_id,
+                        tool,
+                        args,
+                        iteration,
+                    });
                 }
                 Ok(Event::ToolResult {
                     session_id,
@@ -1505,6 +1523,12 @@ pub async fn post_message_stream(
                     {
                         break;
                     }
+                    broadcast_state.emit(Event::ToolResult {
+                        session_id,
+                        tool,
+                        result,
+                        iteration,
+                    });
                 }
                 Ok(Event::ApprovalRequest { request })
                     if request.session_id == session_for_task =>

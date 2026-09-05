@@ -489,7 +489,12 @@ useLayoutEffect(() => {
     setError(null);
 
     const sessionId = activeTab.sessionId;
-    const userMsg: Message = { id: Date.now(), session_id: sessionId, role: "user", content: text, ts: new Date().toISOString() };
+    // EP-2026-09-05 cross-device: the user message is added by the WS
+    // MessageAppended event on EVERY device (including this one —
+    // it's the single source of truth). Adding it here too would
+    // duplicate the bubble on the sending device because the temp
+    // local id (Date.now()) can't be deduped against the daemon's
+    // autoincrement row id.
     const assistantId = Date.now() + 1;
     const assistantMsg: Message = { id: assistantId, session_id: sessionId, role: "assistant", content: "", ts: new Date().toISOString(), timeline: [] };
     // EP-0024: use the updater form of updateTab so each patch is
@@ -497,7 +502,7 @@ useLayoutEffect(() => {
     // message becomes the key the stream hook's `onState` callback
     // uses to mirror the chunked streamState back onto it.
     updateTab(activeTab.id, (prev) => ({
-      messages: [...prev.messages, userMsg, assistantMsg],
+      messages: [...prev.messages, assistantMsg],
     }));
 
     // EP-2026-08-15: stash id + tabId en refs así `onState` del hook
