@@ -25,6 +25,7 @@ import { getWebClientId } from "../shared/clientId";
 import {
   applyStreamChunk as applyChunkToMessage,
   initAccumulator,
+  reconcileTimelineWithFinal,
   type StreamAccumulator,
 } from "../components/chat/streaming/applyChunk";
 import { parseStreamChunk, type StreamChunk } from "../components/chat/streaming/chunk";
@@ -289,10 +290,13 @@ export function useChatTabs(defaultAgentId: string | null = null) {
           if (tab.messages.some((m) => m.id === message_id)) return prev;
 
           // Assistant + we streamed locally → REPLACE the shell's id
-          // with the canonical one. Keep the accumulated content (the
-          // backend's content is the same — `content` here is the
-          // ground truth, so overwrite in case the shell missed late
-          // chunks due to a race).
+          // with the canonical one AND reconcile its timeline with the
+          // backend's complete `content`/`thinking`. The streamed
+          // timeline can be missing the OPENING chunks if this device
+          // attached to the WS after the turn had already started
+          // (common on the receiving device). Since the row renders
+          // from `timeline`, we rebuild it from the ground truth so
+          // the reply is always complete — no missing first sentence.
           if (role === "assistant" && localShellId != null) {
             const shellIdx = tab.messages.findIndex(
               (m) => m.id === localShellId,
@@ -306,6 +310,11 @@ export function useChatTabs(defaultAgentId: string | null = null) {
                 ts,
                 content,
                 thinking: thinking ?? existing.thinking,
+                timeline: reconcileTimelineWithFinal(
+                  existing.timeline ?? [],
+                  content,
+                  thinking ?? existing.thinking,
+                ),
               };
               return prev.map((t) =>
                 t.id === tab.id ? { ...t, messages: updated } : t,
@@ -340,6 +349,9 @@ export function useChatTabs(defaultAgentId: string | null = null) {
 
           // No dedup target — append (other device, or page
           // reloaded mid-send and there's no local optimistic).
+          // For an assistant row, rebuild a timeline from the final
+          // text so it renders complete even if this device never
+          // streamed it (pure receiver that missed the whole turn).
           return prev.map((t) =>
             t.id === tab.id
               ? {
@@ -353,6 +365,15 @@ export function useChatTabs(defaultAgentId: string | null = null) {
                       content,
                       thinking: thinking ?? undefined,
                       ts,
+                      ...(role === "assistant"
+                        ? {
+                            timeline: reconcileTimelineWithFinal(
+                              [],
+                              content,
+                              thinking ?? undefined,
+                            ),
+                          }
+                        : {}),
                     },
                   ],
                 }
@@ -509,13 +530,32 @@ export function useChatTabs(defaultAgentId: string | null = null) {
       } catch {
         /* swallow — we'll still create the tab; the user can retry */
       }
+      // Restore the session's LAST-USED config (agent + provider/model)
+      // so reopening a past conversation continues with the same setup
+      // instead of resetting to the daemon default. The daemon persists
+      // `agent_id` / `provider_id` / `model` per session (set on every
+      // message send), so we read them back from `/v1/sessions`.
+      let restoredAgent: string | null = null;
+      let restoredModel: ModelSelection | null = null;
+      try {
+        const res = await apiGet<{ sessions: SessionRow[] }>("/v1/sessions");
+        const row = res.sessions.find((s) => s.session_id === sessionId);
+        if (row) {
+          if (row.agent_id) restoredAgent = row.agent_id;
+          if (row.provider_id && row.model) {
+            restoredModel = { provider_id: row.provider_id, model: row.model };
+          }
+        }
+      } catch {
+        /* non-fatal — fall back to defaults below */
+      }
       const id = uuid();
       const tab: ChatTab = {
         id,
         title: summary && summary.trim().length > 0 ? summary : "Chat",
         sessionId,
-        sessionModel: null,
-        sessionAgent: defaultAgentId ?? NO_AGENT_SENTINEL,
+        sessionModel: restoredModel,
+        sessionAgent: restoredAgent ?? defaultAgentId ?? NO_AGENT_SENTINEL,
         messages: [],
         createdAt: Date.now(),
         manuallyRenamed: true,

@@ -9,6 +9,7 @@ import type { Message } from "../../../types";
 import {
   applyStreamChunk,
   initAccumulator,
+  reconcileTimelineWithFinal,
   type StreamAccumulator,
 } from "./applyChunk";
 
@@ -177,5 +178,59 @@ describe("applyStreamChunk — symmetry with SSE path", () => {
     expect(seq.final.thinking).toBe(s.thinking);
     expect(seq.final.timeline).toEqual(s.timeline);
     expect(seq.final.toolLog).toEqual(s.toolLog);
+  });
+});
+
+
+describe("reconcileTimelineWithFinal — recover missing opening chunks", () => {
+  it("rebuilds a plain-text timeline from the backend's full content (fills the gap)", () => {
+    // The receiver attached late and only streamed "de texto:" — the
+    // opening "¡Claro que sí! … " was lost. The final MessageAppended
+    // carries the complete content; the timeline must reflect it.
+    const streamed = [{ type: "content" as const, text: "de texto:" }];
+    const full = "¡Claro que sí! 📄 Leer archivos … de texto:";
+    const out = reconcileTimelineWithFinal(streamed, full, undefined);
+    expect(out).toEqual([{ type: "content", text: full }]);
+  });
+
+  it("includes thinking before content when present", () => {
+    const out = reconcileTimelineWithFinal(
+      [{ type: "content", text: "partial" }],
+      "full reply",
+      "my reasoning",
+    );
+    expect(out).toEqual([
+      { type: "thinking", text: "my reasoning" },
+      { type: "content", text: "full reply" },
+    ]);
+  });
+
+  it("preserves tool entries and fixes the final content text", () => {
+    const streamed = [
+      { type: "tool" as const, tool: "read", iteration: 0, result: "ok" },
+      { type: "content" as const, text: "arcial reply" }, // opening lost
+    ];
+    const out = reconcileTimelineWithFinal(streamed, "full reply", undefined);
+    expect(out).toEqual([
+      { type: "tool", tool: "read", iteration: 0, result: "ok" },
+      { type: "content", text: "full reply" },
+    ]);
+  });
+
+  it("appends a content entry when a tool timeline has none yet", () => {
+    const streamed = [
+      { type: "tool" as const, tool: "read", iteration: 0, result: "ok" },
+    ];
+    const out = reconcileTimelineWithFinal(streamed, "reply", undefined);
+    expect(out).toEqual([
+      { type: "tool", tool: "read", iteration: 0, result: "ok" },
+      { type: "content", text: "reply" },
+    ]);
+  });
+
+  it("falls back to the streamed timeline when the backend sent no text", () => {
+    const streamed = [{ type: "content" as const, text: "x" }];
+    const out = reconcileTimelineWithFinal(streamed, "", undefined);
+    expect(out).toEqual(streamed);
   });
 });

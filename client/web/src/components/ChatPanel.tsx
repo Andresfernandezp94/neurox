@@ -364,10 +364,16 @@ export function ChatPanel(_: ChatPanelProps = {}) {
     try {
       const resp = await listSessions();
       const summary = resp.sessions.find((s) => s.session_id === sid);
+      // Only APPLY a model when the backend reports one. Do NOT reset
+      // to null otherwise: the tab may already carry the correct model
+      // (restored by `createTabFromSession` from the session's
+      // persisted config, or set by the user). A later lookup that
+      // misses the row — stale list, different client_id filter, a
+      // just-reactivated session not yet listed — must not wipe it.
+      // That "else → null" was what made the model flash in and then
+      // reset to the "select model" placeholder.
       if (summary?.provider_id && summary?.model) {
         updateTab(tabId, { sessionModel: { provider_id: summary.provider_id, model: summary.model } });
-      } else {
-        updateTab(tabId, { sessionModel: null });
       }
       // Apply the backend's summary as the tab title if the user
       // hasn't renamed it manually.
