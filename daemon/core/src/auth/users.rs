@@ -93,7 +93,7 @@ impl fmt::Display for UserStoreError {
             UserStoreError::UsernameTaken => f.write_str("username already exists"),
             UserStoreError::InvalidPassword => f.write_str("invalid password"),
             UserStoreError::InvalidUsername => {
-                f.write_str("username must be 3-64 chars, alphanumeric + _-")
+                f.write_str("username must be 3-64 chars, alphanumeric + _-.")
             }
             UserStoreError::PasswordTooShort => {
                 f.write_str("password must be at least 12 characters")
@@ -300,7 +300,7 @@ fn validate_username(username: &str) -> Result<(), UserStoreError> {
     }
     if !username
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
     {
         return Err(UserStoreError::InvalidUsername);
     }

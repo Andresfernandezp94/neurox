@@ -351,10 +351,14 @@
   background: var(--bg-elevated);
 }
 
-.login-screen__input-wrap:focus-within {
+.login-screen__input-wrap:focus-within,
+.login-screen__input-wrap:has(input:not(:placeholder-shown)) {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
   background: var(--bg-elevated);
+}
+
+.login-screen__input-wrap:focus-within {
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .login-screen__input-icon {
@@ -374,16 +378,19 @@
   height: 1rem;
 }
 
-.login-screen__input-wrap:focus-within .login-screen__input-icon {
+.login-screen__input-wrap:focus-within .login-screen__input-icon,
+.login-screen__input-wrap:has(input:not(:placeholder-shown)) .login-screen__input-icon {
   color: var(--accent);
 }
 
-/* Cuando el input tiene texto (placeholder oculto), los contenedores de
- * los iconos (prefijo y toggle) toman el mismo color de fondo que el
- * input en estado de foco. */
+/* Cuando el input tiene texto (placeholder oculto) o está enfocado, los
+ * contenedores de los iconos (prefijo y toggle) toman el mismo color de
+ * fondo que el input en estado de foco. */
+.login-screen__input-wrap:focus-within .login-screen__input-icon,
 .login-screen__input-wrap:has(input:not(:placeholder-shown)) .login-screen__input-icon,
+.login-screen__input-wrap:focus-within .login-screen__toggle-password,
 .login-screen__input-wrap:has(input:not(:placeholder-shown)) .login-screen__toggle-password {
-  background-color: #1a1a1a;
+  background-color: var(--bg-elevated);
 }
 
 .login-screen__input {
