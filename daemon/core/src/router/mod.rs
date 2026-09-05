@@ -10,7 +10,6 @@ use crate::events::Event;
 use crate::protocols::{AgentRequest, AgentResponse};
 use tools_engine::tools::ToolCall;
 
-pub mod auth;
 pub mod handlers;
 pub mod http;
 pub mod middleware;

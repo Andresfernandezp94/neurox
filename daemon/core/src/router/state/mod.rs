@@ -6,7 +6,7 @@
 //! - `LifecycleLayer`   — registry, supervisor, spawner, tasks,
 //!                         approvals, session_agents
 //! - `EventsLayer`      — event_tx, clients
-//! - `AuthLayer`        — auth, api_token, orchestrator
+//! - `AuthLayer`        — auth + orchestrator
 //! - `WorkspaceLayer`   — workspace_root, sandbox, llm_catalog_cache
 //! - `Engine`           — tools-engine (separate crate; treated as a layer)
 //! - `Config`           — `Arc<CoreConfig>` (kept as a direct field)
