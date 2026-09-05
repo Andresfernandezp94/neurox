@@ -312,7 +312,11 @@ describe("useChatTabs — single-source chunk apply (ordered by seq)", () => {
     const tab = result.current.tabs.find((t) => t.id === draftId)!;
     expect(tab.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
     const assistant = tab.messages.find((m) => m.role === "assistant")!;
-    expect(assistant.id).toBeGreaterThan(0);
+    // The shell id lives in the reserved high range so it can never be
+    // confused with a canonical backend message_id (small autoincrement)
+    // or a hydration id — this is what prevents the DOUBLE assistant row
+    // on the receiving device when MessageAppended replaces the shell.
+    expect(assistant.id).toBeGreaterThanOrEqual(1_000_000_000);
     expect(assistant.thinking).toBe("thinking...");
   });
 

@@ -52,6 +52,19 @@ function uuid(): string {
   return "tab-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+// Local assistant SHELL ids live in a high, reserved range so they can
+// NEVER collide with the backend's canonical `message_id` (a small DB
+// autoincrement) or hydration ids (`i + 1`). This makes shell detection
+// (`isLocalShellId`) and dedup-by-id unambiguous — the root cause of
+// the duplicated assistant row on the receiving device.
+const SHELL_ID_BASE = 1_000_000_000;
+
+/** True if `id` is a client-side streaming shell (not a canonical
+ *  backend message id and not a hydration id). */
+function isLocalShellId(id: number): boolean {
+  return id >= SHELL_ID_BASE;
+}
+
 /** Subset of SessionSummary that drives the tab UI. */
 interface SessionRow {
   session_id: string;
@@ -84,6 +97,15 @@ export function useChatTabs(defaultAgentId: string | null = null) {
   // (e.g. SSE + WS paths racing on cross-device) never collide, and
   // the shell id is distinguishable from the user message's negative
   // temp id (`-Date.now()` set by ChatPanel.handleSend).
+  //
+  // BUGFIX (double assistant row on the receiver): shell ids MUST NOT
+  // collide with the backend's canonical `message_id` (a small DB
+  // autoincrement) NOR with hydration ids (`i + 1` from
+  // getSessionMessages). Both used the same 1,2,3… space, so the
+  // dedup-by-id (`messages.some(m => m.id === message_id)`) and the
+  // shell-replacement lookup became ambiguous, producing a duplicated
+  // assistant message. We put SHELL ids in a high, reserved range so
+  // `isLocalShellId(id)` is unambiguous everywhere.
   const shellIdCounterRef = useRef<number>(0);
   // Per-session transient StreamAccumulator. The reducer needs
   // `lastNonContentEvent` / `lastToolName` across consecutive chunks to
@@ -289,18 +311,36 @@ export function useChatTabs(defaultAgentId: string | null = null) {
           // Already have the canonical row → no-op.
           if (tab.messages.some((m) => m.id === message_id)) return prev;
 
-          // Assistant + we streamed locally → REPLACE the shell's id
-          // with the canonical one AND reconcile its timeline with the
-          // backend's complete `content`/`thinking`. The streamed
-          // timeline can be missing the OPENING chunks if this device
-          // attached to the WS after the turn had already started
-          // (common on the receiving device). Since the row renders
-          // from `timeline`, we rebuild it from the ground truth so
-          // the reply is always complete — no missing first sentence.
-          if (role === "assistant" && localShellId != null) {
-            const shellIdx = tab.messages.findIndex(
-              (m) => m.id === localShellId,
-            );
+          // Assistant → REPLACE the streaming shell with the canonical
+          // message AND reconcile its timeline with the backend's
+          // complete `content`/`thinking`.
+          //
+          // Finding the shell robustly (this is what fixes the DOUBLE
+          // assistant row on the receiver):
+          //   1. The tracked shell id captured before the per-turn
+          //      clear (`localShellId`).
+          //   2. FALLBACK: any local shell row (id in the reserved
+          //      SHELL_ID_BASE range) for this session. The tracking
+          //      ref can be gone (cleared, or the shell was created on
+          //      a chunk whose seq we later reset), but the shell ROW
+          //      is still in the transcript. Without this fallback the
+          //      code fell through to "append", leaving BOTH the shell
+          //      and the canonical row — the duplicate the user saw.
+          if (role === "assistant") {
+            let shellIdx = -1;
+            if (localShellId != null) {
+              shellIdx = tab.messages.findIndex((m) => m.id === localShellId);
+            }
+            if (shellIdx < 0) {
+              // Last assistant row that is still a local shell.
+              for (let i = tab.messages.length - 1; i >= 0; i--) {
+                const m = tab.messages[i]!;
+                if (m.role === "assistant" && isLocalShellId(m.id)) {
+                  shellIdx = i;
+                  break;
+                }
+              }
+            }
             if (shellIdx >= 0) {
               const updated = [...tab.messages];
               const existing = updated[shellIdx]!;
@@ -849,7 +889,7 @@ export function useChatTabs(defaultAgentId: string | null = null) {
           // version used `Date.now() + Math.random()` which could
           // collide when two shells were created in the same ms (e.g.
           // SSE and WS paths racing on cross-device).
-          const newId = ++shellIdCounterRef.current;
+          const newId = SHELL_ID_BASE + ++shellIdCounterRef.current;
           const shell: Message = {
             id: newId,
             session_id: sessionId,
