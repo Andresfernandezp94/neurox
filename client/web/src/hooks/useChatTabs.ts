@@ -290,6 +290,19 @@ export function useChatTabs(defaultAgentId: string | null = null) {
         const ts = (evt.ts as string) ?? new Date().toISOString();
         const thinking = evt.thinking as string | undefined;
         if (message_id == null) return;
+
+        // A NEW user message marks the start of a new turn. Reset the
+        // per-session seq watermark here so the upcoming assistant
+        // chunks are accepted even if the daemon restarted its
+        // in-memory per-session `seq` counter (e.g. the daemon process
+        // was restarted mid-session). Within a turn the watermark still
+        // rejects re-deliveries; it's only rearmed at turn boundaries,
+        // and the boundary is the user prompt that ALWAYS precedes the
+        // assistant stream — so this can't drop legitimate chunks.
+        if (role === "user") {
+          lastSeqRef.current.delete(sid);
+        }
+
         // Capture the local shell id BEFORE we clear stream state.
         // `streamMessageIdsRef` is wiped by `clearTurnStreamState`
         // for the assistant role below, so the lookup has to happen
