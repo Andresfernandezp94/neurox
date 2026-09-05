@@ -31,7 +31,7 @@ vi.mock("./store/StoreContext", () => {
         sessions: [],
         approvals: [],
         events: [],
-        loaded: { agents: false, sessions: false, approvals: false },
+        loaded: { agents: false, sessions: false, approvals: false, health: true },
       },
       dispatch: () => {},
       snapshot: vi.fn(),

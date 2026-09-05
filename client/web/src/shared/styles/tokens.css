@@ -32,9 +32,9 @@ svg {
   --accent: #efb05e;
   --accent-soft: rgba(239, 176, 94, 0.12);
   --accent-border: rgba(239, 176, 94, 0.22);
-  --text-primary: #fff;
-  --text-secondary: #cccccc;
-  --text-muted: #858585;
+  --text-primary: #efd4a6;
+  --text-secondary: #c0a87f;
+  --text-muted: #95856a;
   --text-dim: #9cdcfe;
   --border: rgba(255, 255, 255, 0.08);
   --border-hover: rgba(255, 255, 255, 0.15);

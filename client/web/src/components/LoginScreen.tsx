@@ -86,11 +86,8 @@ export function LoginScreen(): React.JSX.Element {
 
   return (
     <div className="login-screen">
-      {/* Background: 3 orbes de gradiente con blur, animaciones suaves */}
+      {/* Background: grid sutil */}
       <div className="login-screen__bg" aria-hidden="true">
-        <div className="login-screen__orb login-screen__orb--accent" />
-        <div className="login-screen__orb login-screen__orb--tools" />
-        <div className="login-screen__orb login-screen__orb--danger" />
         <div className="login-screen__grid" />
       </div>
 
@@ -101,25 +98,28 @@ export function LoginScreen(): React.JSX.Element {
         title="Cambiar tema"
         aria-label="Cambiar tema"
       >
-        {mode === "light" ? "☾" : "☀"}
+        {mode === "light" ? (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" />
+            <line x1="12" y1="2" x2="12" y2="4" />
+            <line x1="12" y1="20" x2="12" y2="22" />
+            <line x1="4.93" y1="4.93" x2="6.34" y2="6.34" />
+            <line x1="17.66" y1="17.66" x2="19.07" y2="19.07" />
+            <line x1="2" y1="12" x2="4" y2="12" />
+            <line x1="20" y1="12" x2="22" y2="12" />
+            <line x1="4.93" y1="19.07" x2="6.34" y2="17.66" />
+            <line x1="17.66" y1="6.34" x2="19.07" y2="4.93" />
+          </svg>
+        )}
       </button>
 
       <div className="login-screen__container">
-        {/* HERO — branding + features. Se oculta en mobile. */}
+        {/* HERO — features. Se oculta en mobile. */}
         <aside className="login-screen__hero" aria-hidden="true">
-          <div className="login-screen__hero-brand">
-            <div className="login-screen__hero-logo">
-              <AppLogo className="login-screen__hero-logo-svg" />
-            </div>
-            <h1 className="login-screen__hero-title">
-              <span className="login-screen__hero-title-main">neurox</span>
-              <span className="login-screen__hero-title-tag">pro</span>
-            </h1>
-            <p className="login-screen__hero-tagline">
-              Orquestador de agentes IA, headless y Linux-first.
-            </p>
-          </div>
-
           <ul className="login-screen__hero-features">
             <li className="login-screen__hero-feature">
               <span className="login-screen__hero-feature-icon login-screen__hero-feature-icon--accent">
@@ -156,27 +156,21 @@ export function LoginScreen(): React.JSX.Element {
               </div>
             </li>
           </ul>
-
-          <div className="login-screen__hero-footer">
-            <span className="login-screen__hero-chip">v0.4.0</span>
-            <span className="login-screen__hero-divider">·</span>
-            <span className="login-screen__hero-meta">Linux · Docker · MCP</span>
-          </div>
         </aside>
 
         {/* FORM — card con glassmorphism y los inputs */}
         <section
           className={`login-screen__form${success ? " login-screen__form--success" : ""}`}
         >
-          <div className="login-screen__form-header">
-            <div className="login-screen__form-badge">
-              <span className="login-screen__form-badge-dot" />
-              Panel de control
+          <div className="login-screen__hero-brand">
+            <div className="login-screen__hero-brand-row">
+              <div className="login-screen__hero-logo">
+                <AppLogo className="login-screen__hero-logo-svg" />
+              </div>
+              <h1 className="login-screen__hero-title">
+                <span className="login-screen__hero-title-main">neurox</span>
+              </h1>
             </div>
-            <h2 className="login-screen__form-title">Bienvenido de vuelta</h2>
-            <p className="login-screen__form-subtitle">
-              Ingresa tus credenciales para administrar tu orquestador.
-            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="login-screen__form-body" noValidate>
@@ -297,26 +291,6 @@ export function LoginScreen(): React.JSX.Element {
               </span>
             </button>
           </form>
-
-          <div className="login-screen__form-footer">
-            <div className="login-screen__form-meta">
-              <span className="login-screen__form-meta-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
-              </span>
-              <span>
-                <code>JWT</code> en <code>sessionStorage</code>, refresh automático.
-              </span>
-            </div>
-            <div className="login-screen__form-links">
-              <span>¿Problemas para ingresar?</span>
-              <a href="https://github.com/Andresfernandezp94/neurox" target="_blank" rel="noreferrer">
-                docs
-              </a>
-            </div>
-          </div>
         </section>
       </div>
     </div>

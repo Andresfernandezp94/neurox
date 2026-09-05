@@ -57,6 +57,7 @@ function AppInner() {
 
   const { state } = useStore();
   const health = state.connection.health;
+  const healthLoaded = state.loaded.health;
   const { token } = useAuth();
 
   useTheme();
@@ -65,6 +66,14 @@ function AppInner() {
   useVisualViewportHeight();
 
   const [sidebarHidden, setSidebarHidden] = useState(false);
+
+  // Esperar a que /health termine antes de decidir. Sin esto, en el
+  // estado inicial `health === null` → `authRequired` es false → se
+  // renderiza la app completa durante un frame, luego salta al login
+  // cuando llega la respuesta (FOUC de UI autenticada).
+  if (!healthLoaded) {
+    return null;
+  }
 
   const authRequired = health?.auth_required === true;
   if (authRequired && !token) {

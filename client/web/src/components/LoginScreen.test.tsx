@@ -122,11 +122,6 @@ describe("LoginScreen", () => {
     expect(password.type).toBe("password");
   });
 
-  it("renders footer explaining where the token lives", () => {
-    render(<LoginScreen />);
-    expect(screen.getByText(/sessionStorage/i)).toBeTruthy();
-  });
-
   it("Enter on username focuses password", () => {
     render(<LoginScreen />);
     const username = screen.getByTestId("login-username");
