@@ -190,7 +190,7 @@ export function LoginScreen(): React.JSX.Element {
                   id="login-username"
                   type="text"
                   autoComplete="username"
-                  placeholder="admin"
+                  placeholder="user"
                   value={username}
                   onChange={(e) => {
                     setUsername(e.target.value);
@@ -220,7 +220,7 @@ export function LoginScreen(): React.JSX.Element {
                   id="login-password"
                   type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
-                  placeholder="••••••••"
+                  placeholder="password"
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value);

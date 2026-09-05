@@ -95,8 +95,8 @@ enum UsersCmd {
     /// Reset a user's password to a random 16-char value. Prints the
     /// new password to stdout. Use this when the admin is locked out.
     ResetPassword {
-        /// Username to reset. If omitted, defaults to "admin".
-        #[arg(long, default_value = "admin")]
+        /// Username to reset. If omitted, defaults to "andres.fernandez".
+        #[arg(long, default_value = "andres.fernandez")]
         username: String,
     },
 }
@@ -365,13 +365,20 @@ async fn serve(
                 .map_err(|e| anyhow::anyhow!("failed to load JWT secret: {e}"))?,
         );
 
-        // First-run bootstrap: if the store is empty, create an admin with
-        // a random password and print it to stderr.
+        // First-run bootstrap: if the store is empty, create the admin user.
+        // Password source (priority order):
+        //   1. NEUROX_ADMIN_PASSWORD env var (fixed, no rotation)
+        //   2. random 16-char password (printed once to stderr)
+        // Set NEUROX_ADMIN_PASSWORD in ~/.config/neurox/env (or your systemd
+        // unit) so the password is stable across reinstalls and never auto-rotates.
         if user_store.is_empty() {
             use neurox::auth::users::{hash_password, Role};
-            let admin_pwd = generate_random_password(16);
+            let (admin_pwd, from_env) = match std::env::var("NEUROX_ADMIN_PASSWORD") {
+                Ok(pwd) if !pwd.is_empty() => (pwd, true),
+                _ => (generate_random_password(16), false),
+            };
             user_store
-                .create("admin", &admin_pwd, Role::Admin)
+                .create("andres.fernandez", &admin_pwd, Role::Admin)
             .map_err(|e| anyhow::anyhow!("failed to bootstrap admin: {e}"))?;
             // Hash then verify so the password hash is computed but the
             // cleartext never goes into logs / metrics.
@@ -380,10 +387,15 @@ async fn serve(
             eprintln!("═══════════════════════════════════════════════════════════════");
             eprintln!("  [auth] FIRST-RUN bootstrap");
             eprintln!("  Created initial admin user. Credentials:");
-            eprintln!("    username: admin");
-            eprintln!("    password: {admin_pwd}");
-            eprintln!("  ⚠️  Save this password now. It will NOT be shown again.");
-            eprintln!("  Change it immediately: PATCH /v1/users/me/password");
+            eprintln!("    username: andres.fernandez");
+            if from_env {
+                eprintln!("    password: (from NEUROX_ADMIN_PASSWORD env var)");
+            } else {
+                eprintln!("    password: {admin_pwd}");
+                eprintln!("  ⚠️  Save this password now. It will NOT be shown again.");
+            }
+            eprintln!("  Rotate via: PATCH /v1/users/me/password");
+            eprintln!("  Or set NEUROX_ADMIN_PASSWORD to pin it on first run.");
             eprintln!("═══════════════════════════════════════════════════════════════");
             eprintln!();
         }

@@ -8,7 +8,7 @@ import { useI18n } from "./useI18n";
 describe("useI18n", () => {
   it("returns translation for existing key", () => {
     const { result } = renderHook(() => useI18n());
-    expect(result.current.t("app.title")).toBe("admin");
+    expect(result.current.t("app.title")).toBe("andres.fernandez");
     expect(result.current.t("sidebar.status")).toBe("Status");
   });
 

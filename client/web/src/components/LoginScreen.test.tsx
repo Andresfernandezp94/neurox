@@ -45,7 +45,7 @@ describe("LoginScreen", () => {
     const password = screen.getByTestId("login-password");
     const submit = screen.getByTestId("login-submit");
 
-    fireEvent.change(username, { target: { value: "admin" } });
+    fireEvent.change(username, { target: { value: "andres.fernandez" } });
     expect(submit).toBeDisabled();
 
     fireEvent.change(password, { target: { value: "secret123" } });
@@ -57,7 +57,7 @@ describe("LoginScreen", () => {
       token: "jwt-abc",
       user: {
         id: "u-1",
-        username: "admin",
+        username: "andres.fernandez",
         role: "Admin",
         created_at: "2026-08-11T00:00:00Z",
         last_login_at: null,
@@ -66,7 +66,7 @@ describe("LoginScreen", () => {
 
     render(<LoginScreen />);
     fireEvent.change(screen.getByTestId("login-username"), {
-      target: { value: "admin" },
+      target: { value: "andres.fernandez" },
     });
     fireEvent.change(screen.getByTestId("login-password"), {
       target: { value: "secret" },
@@ -74,13 +74,13 @@ describe("LoginScreen", () => {
     fireEvent.click(screen.getByTestId("login-submit"));
 
     await waitFor(() => {
-      expect(authApi.login).toHaveBeenCalledWith("admin", "secret");
+      expect(authApi.login).toHaveBeenCalledWith("andres.fernandez", "secret");
     });
     await waitFor(
       () => {
         expect(setSessionMock).toHaveBeenCalledWith(
           "jwt-abc",
-          expect.objectContaining({ username: "admin" }),
+          expect.objectContaining({ username: "andres.fernandez" }),
         );
       },
       { timeout: 1000 },
@@ -94,7 +94,7 @@ describe("LoginScreen", () => {
 
     render(<LoginScreen />);
     fireEvent.change(screen.getByTestId("login-username"), {
-      target: { value: "admin" },
+      target: { value: "andres.fernandez" },
     });
     fireEvent.change(screen.getByTestId("login-password"), {
       target: { value: "wrong" },
@@ -125,7 +125,7 @@ describe("LoginScreen", () => {
   it("Enter on username focuses password", () => {
     render(<LoginScreen />);
     const username = screen.getByTestId("login-username");
-    fireEvent.change(username, { target: { value: "admin" } });
+    fireEvent.change(username, { target: { value: "andres.fernandez" } });
     fireEvent.keyDown(username, { key: "Enter" });
     expect(document.activeElement).toBe(screen.getByTestId("login-password"));
   });
