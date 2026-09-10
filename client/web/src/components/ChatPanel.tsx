@@ -73,52 +73,48 @@ export function ChatPanel(_: ChatPanelProps = {}) {
   // en la barra de tools del chat. Independiente del MicButton inline —
   // son dos affordances distintas para el mismo MCP.
   const [voiceOverlayOpen, setVoiceOverlayOpen] = useState(false);
-  // EP-0026-UX: fullscreen toggle via Fullscreen API. Sincroniza con
-  // `fullscreenchange` para que Esc u otro disparador externo se refleje
-  // en el state.
-  const fullscreenContainerRef = useRef<HTMLDivElement | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(
-    typeof document !== "undefined" && !!document.fullscreenElement,
-  );
+  // EP-0026-UX: "Fullscreen real con sidebar" — el botón de maximizar
+  // usa la Fullscreen API sobre el shell `.app` (sidebar + chat). Así el
+  // chat ocupa todo el viewport como antes, PERO la sidebar queda visible
+  // (vive dentro del elemento fullscreen). En browsers sin la API (p.ej.
+  // iOS Safari) cae a la clase CSS `chat-layout--focus` (mismo resultado
+  // visual, sin Fullscreen API).
+  const chatLayoutRef = useRef<HTMLDivElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  // Fallback CSS-only (browsers sin Fullscreen API).
+  const [isFocusMode, setIsFocusMode] = useState(false);
+
+  // Mantener isFullscreen sincronizado con la API (Esc u otro trigger).
   useEffect(() => {
-    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    const handler = () => setIsFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener("fullscreenchange", handler);
     return () => document.removeEventListener("fullscreenchange", handler);
   }, []);
 
-  // EP-2026-08-15: fallback de scroll para fullscreen + teclado en Android.
-  // En modo fullscreen algunos browsers no disparan `visualViewport.resize`
-  // cuando se abre el teclado, así que el shell no se reajusta y el footer
-  // queda "atrapado" en su posición original. Este effect observa el focus
-  // del textarea y dispara un scrollIntoView del footer cuando se gana
-  // focus. Smooth (no jump), block-end para alinear con el bottom.
-  useEffect(() => {
-    const chatRoot = fullscreenContainerRef.current;
-    if (!chatRoot) return;
-    const textarea = chatRoot.querySelector<HTMLTextAreaElement>(".chat__textarea");
-    const footer = chatRoot.querySelector<HTMLElement>(".chat__footer");
-    if (!textarea || !footer) return;
-
-    const onFocus = () => {
-      // Pequeño defer para que el teclado ya esté abierto cuando scrolleamos.
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          footer.scrollIntoView({ behavior: "smooth", block: "end" });
-        }),
-      );
-    };
-    textarea.addEventListener("focus", onFocus);
-    return () => textarea.removeEventListener("focus", onFocus);
-  }, []);
-  const handleToggleFullscreen = useCallback(() => {
-    const el = fullscreenContainerRef.current;
-    if (!el) return;
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
-    } else if (el.requestFullscreen) {
-      el.requestFullscreen().catch(() => {});
+  const handleToggleExpanded = useCallback(() => {
+    // Camino principal: fullscreen del shell `.app` — la sidebar vive
+    // dentro del elemento fullscreen (lado a lado con el chat), así que
+    // el fullscreen real llena el viewport sin ocultar la navegación.
+    const shell = document.querySelector<HTMLElement>(".app");
+    if (shell?.requestFullscreen) {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      } else {
+        shell.requestFullscreen().catch(() => {});
+      }
+      return;
     }
+    // Fallback: expandir el chat vía clase CSS (sin Fullscreen API).
+    setIsFocusMode((prev) => !prev);
   }, []);
+
+  // Sync fallback class on chat-layout root
+  useEffect(() => {
+    const el = chatLayoutRef.current;
+    if (el) {
+      el.classList.toggle("chat-layout--focus", isFocusMode);
+    }
+  }, [isFocusMode]);
   // EP-2026-08-15: el transcript se ancla arriba (scrollTop = 0)
   // cuando llega contenido nuevo — los mensajes crecen hacia abajo
   // pero el viewport NO sigue el último mensaje. El usuario puede
@@ -630,7 +626,7 @@ useLayoutEffect(() => {
   // moved to the top of the component (right after the refs) so they
   // are in scope when the `searchTotal` useMemo runs. Keeping a
   return (
-    <div className="chat-layout" ref={fullscreenContainerRef}>
+    <div className="chat-layout" ref={chatLayoutRef}>
       <ChatHeader
         tabs={tabs}
         activeId={activeId}
@@ -681,8 +677,8 @@ useLayoutEffect(() => {
         onToggleHistory={() => setShowHistory(!showHistory)}
         voiceOverlayOpen={voiceOverlayOpen}
         onOpenVoiceCall={() => setVoiceOverlayOpen(true)}
-        isFullscreen={isFullscreen}
-        onToggleFullscreen={handleToggleFullscreen}
+        isExpanded={isFullscreen || isFocusMode}
+        onToggleExpanded={handleToggleExpanded}
         defaultAgent={defaultAgent}
         input={input}
         onInputChange={setInput}

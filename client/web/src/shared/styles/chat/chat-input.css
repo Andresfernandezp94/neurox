@@ -37,16 +37,66 @@
   min-width: 0;
 }
 
-/* EP-2026-08-15: si el chat está fullscreen, ocupa el área visible
-   real (descuenta teclado virtual en mobile). Usamos --app-h
-   (sincronizado por el hook useVisualViewportHeight) con fallback
-   100dvh. Sin esto, en mobile con teclado el shell se queda "atrapado"
-   en el layout viewport en lugar de subir con el visual viewport. */
-.chat-layout:fullscreen,
+/* EP-2026-08-15: legacy browser fullscreen styles (kept for reference).
+   Replaced by CSS-based focus mode (chat-layout--focus). */
+/* .chat-layout:fullscreen,
 .chat-layout:-webkit-full-screen {
   width: 100vw;
   height: var(--app-h, 100dvh);
   background: var(--bg);
+} */
+
+/* ============================================================
+ * Fullscreen real con sidebar (EP-0026-UX).
+ *
+ * El botón de maximizar usa la Fullscreen API sobre el shell `.app`
+ * (sidebar + chat). El chat ocupa todo el viewport como en el
+ * fullscreen viejo, pero el sidebar queda visible porque vive DENTRO
+ * del elemento fullscreen. Refuerzo el tamaño para que el shell llene
+ * el viewport físico completo (la hoja de estilos UA del browser ya lo
+ * estira, esto es belt-and-suspenders).
+ * ============================================================ */
+
+.app:fullscreen,
+.app:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  background: var(--bg);
+}
+
+/* ============================================================
+ * Fallback CSS-only (browsers sin Fullscreen API, p.ej. iOS Safari).
+ * Mismo objetivo visual (chat llenando todo el área disponible con el
+ * sidebar visible) vía la clase en `.chat-layout`. NOTA: al resolver
+ * la altura contra `.app-main` (que ya descuenta sidebar + header),
+ * usamos `height: 100%` — NUNCA `100dvh`, que desbordaba y empujaba
+ * el footer fuera de la vista en viewports angostos.
+ * ============================================================ */
+
+.chat-layout--focus {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* In fallback mode, the chat timeline takes all available space */
+.chat-layout--focus .chat__transcript {
+  flex: 1 1 auto;
+  min-height: 0; /* critical for flex scrolling */
+  overflow-y: auto;
+}
+
+/* Focus in some vertical space by decluttering the info bars */
+.chat-layout--focus .chat__bar--context,
+.chat-layout--focus .chat__bar--workspace {
+  display: none;
+}
+
+/* Keep tools bar + footer input pinned at the bottom */
+.chat-layout--focus .chat__bar--tools,
+.chat-layout--focus .chat__footer {
+  flex-shrink: 0;
 }
 
 .chat__footer-input {

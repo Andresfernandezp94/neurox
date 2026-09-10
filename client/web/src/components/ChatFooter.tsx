@@ -10,7 +10,8 @@ import { MicButton } from "./MicButton";
 import {
   IconHistory,
   IconVoice,
-  IconFullscreen,
+  IconMaximize,
+  IconMinimize,
   IconSend,
   IconClose,
 } from "../shared/components/Icons";
@@ -27,8 +28,13 @@ export interface ChatFooterProps {
   onToggleHistory: () => void;
   voiceOverlayOpen: boolean;
   onOpenVoiceCall: () => void;
-  isFullscreen: boolean;
-  onToggleFullscreen: () => void;
+  /**
+   * True cuando el chat está "expandido": fullscreen real del shell
+   * (Fullscreen API sobre `.app`) o fallback CSS (chat-layout--focus)
+   * en browsers sin la API.
+   */
+  isExpanded: boolean;
+  onToggleExpanded: () => void;
 
   // context bar
   defaultAgent: DefaultAgentResponse | null;
@@ -54,8 +60,8 @@ export function ChatFooter({
   onToggleHistory,
   voiceOverlayOpen,
   onOpenVoiceCall,
-  isFullscreen,
-  onToggleFullscreen,
+  isExpanded,
+  onToggleExpanded,
   defaultAgent,
   input,
   onInputChange,
@@ -105,14 +111,14 @@ export function ChatFooter({
             </button>
             <button
               type="button"
-              className={`chat__bar-actions__btn${isFullscreen ? " chat__bar-actions__btn--active" : ""}`}
-              onClick={onToggleFullscreen}
-              title="Toggle fullscreen"
-              aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-              aria-pressed={isFullscreen}
+              className={`chat__bar-actions__btn${isExpanded ? " chat__bar-actions__btn--active" : ""}`}
+              onClick={onToggleExpanded}
+              title={isExpanded ? "Exit fullscreen" : "Enter fullscreen"}
+              aria-label={isExpanded ? "Exit fullscreen" : "Enter fullscreen"}
+              aria-pressed={isExpanded}
               data-testid="chat-fullscreen-toggle"
             >
-              <IconFullscreen />
+              {isExpanded ? <IconMinimize /> : <IconMaximize />}
             </button>
           </div>
         </div>
