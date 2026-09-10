@@ -259,7 +259,12 @@ body[data-sidebar-hidden="true"] .app-main {
   }
 }
 
-/* EP-0024: tabs internas (patrón reutilizable para paneles absorbed). */
+/* EP-0024: tabs internas (patrón reutilizable para paneles absorbed).
+ * EP-2026-09: sticky top — la barra de tabs queda fija arriba mientras el
+ * contenido del tab scrollea. Necesita background opaco para tapar el
+ * contenido que pasa por debajo. Funciona porque el scroll container es
+ * .app-main y los ancestros directos (PanelFrame / .stack) no tienen
+ * overflow: hidden. */
 .status-panel__tabs,
 .agents-panel__tabs,
 .providers-panel__tabs,
@@ -269,6 +274,10 @@ body[data-sidebar-hidden="true"] .app-main {
   gap: 0.25rem;
   border-bottom: 1px solid var(--border);
   margin-bottom: 1rem;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 10;
 }
 
 .status-panel__tab,
