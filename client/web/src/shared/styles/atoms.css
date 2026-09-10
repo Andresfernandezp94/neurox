@@ -2789,6 +2789,12 @@
   line-height: 1.5rem;
   color: #fff;
 }
+/* Filenames long (GGUF) dentro de la identidad no deben empujar las
+   acciones fuera de la card: se parten en la palabra. */
+.provider-card__identity .provider-card__title {
+  min-width: 0;
+  word-break: break-word;
+}
 .provider-logo {
   width: 1.5rem;
   height: 1.5rem;

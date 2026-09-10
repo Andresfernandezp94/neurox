@@ -59,6 +59,7 @@
   "panels.config.readonly": "(solo lectura)",
   "config.tab.general": "General",
   "config.tab.mcp": "MCP",
+  "config.tab.local": "Local",
   "config.tab.environments": "Environments",
   "config.tab.users": "Users",
 

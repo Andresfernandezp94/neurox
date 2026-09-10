@@ -1,6 +1,7 @@
 // ModelsTab — Local GGUF + Hugging Face search + Configure modal. EP-0020-02.
 // EP-0024: absorbido como tab interna dentro de ProvidersPanel.
-// Antes era un panel separado (ModelsPanel); ahora se importa como ModelsTab.
+// 2026-09: mismo look and feel que Providers (lista de .provider-card) +
+// control Start/Stop del servicio local (ollama serve) via /start /stop.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card } from "../shared/components/molecules/Card";
@@ -12,8 +13,10 @@ import { Label } from "../shared/components/atoms/Label";
 import { ErrorBanner } from "../shared/components/molecules/ErrorBanner";
 import { EmptyState } from "../shared/components/molecules/EmptyState";
 import { SearchBar } from "../shared/components/molecules/SearchBar";
-import { CollapsibleSection } from "../shared/components/molecules/CollapsibleSection";
+import { Badge } from "../shared/components/atoms/Badge";
+import { ProviderLogo } from "../shared/components/ProviderLogo";
 import { FamilyLogo } from "../shared/components/FamilyLogo";
+import { IconCheck, IconEdit, IconPause, IconPlay } from "../shared/components/Icons";
 import {
   getLocalModels,
   searchHfModels,
@@ -27,6 +30,9 @@ import {
 import {
   getProviders,
   updateProvider,
+  startProvider,
+  stopProvider,
+  type LlmProviderStatus,
 } from "../api/llm";
 
 function formatSize(bytes: number): string {
@@ -46,9 +52,10 @@ export function ModelsTab() {
   const [searching, setSearching] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [editing, setEditing] = useState<LocalModel | null>(null);
-  // EP-0025: selector runtime del modelo a cargar. `activeLocalPath` es
-  // el `local_model_path` actual del provider local (típicamente "local-llama").
-  // `setting` deshabilita el botón mientras se aplica la update.
+  // Servicio local (ollama serve): provider con local_command. Start/Stop.
+  const [service, setService] = useState<LlmProviderStatus | null>(null);
+  const [svcBusy, setSvcBusy] = useState(false);
+  // EP-0025: selector runtime del modelo a cargar.
   const [activeLocalPath, setActiveLocalPath] = useState<string | null>(null);
   const [setting, setSetting] = useState<string | null>(null);
 
@@ -66,30 +73,53 @@ export function ModelsTab() {
     }
   }, []);
 
-  // EP-0025: descubrir el modelo activo actual del provider local. Si no
-  // hay provider con `local_command` configurado, `activeLocalPath` queda
-  // en null y la UI muestra todos los modelos como "no activos".
-  const loadActiveModel = useCallback(async () => {
-    try {
-      const data = await getProviders();
-      const localProvider = data.providers.find((p) => p.local_command);
-      setActiveLocalPath(localProvider?.local_model_path ?? null);
-    } catch {
-      setActiveLocalPath(null);
+  // EP-0025: descubrir el modelo activo actual del provider local y el
+  // servicio local. Orden de preferencia: 1) provider con local_command
+  // (orquestado por el daemon), 2) provider con service_state, 3) provider
+  // en loopback o de tipo ollama/local (aún sin local_command → la card
+  // igual se muestra, con la pista de que falta orquestar).
+  const isLocalProvider = useCallback((p: LlmProviderStatus) => {
+    if (p.local_command) return true;
+    if (p.service_state != null) return true;
+    const host = p.base_url.toLowerCase();
+    if (
+      host.includes("127.0.0.1") ||
+      host.includes("localhost") ||
+      host.includes("0.0.0.0")
+    ) {
+      return true;
     }
+    const id = p.id.toLowerCase();
+    const kind = p.kind.toLowerCase();
+    return id.startsWith("local") || kind === "ollama" || kind.includes("local");
   }, []);
 
+  const loadProviders = useCallback(async () => {
+    try {
+      const data = await getProviders();
+      const sorted = [...data.providers]
+        .filter(isLocalProvider)
+        .sort((a, b) => {
+          const rank = (p: LlmProviderStatus) =>
+            p.local_command ? 0 : p.service_state != null ? 1 : 2;
+          return rank(a) - rank(b);
+        });
+      const localProvider = sorted[0] ?? null;
+      setService(localProvider);
+      setActiveLocalPath(localProvider?.local_model_path ?? null);
+    } catch {
+      setService(null);
+      setActiveLocalPath(null);
+    }
+  }, [isLocalProvider]);
+
   // EP-0025: aplicar el path seleccionado al provider local. NO recarga
-  // el modelo en runtime (eso requiere Stop+Start). El usuario debe
-  // ir a la tab "providers" y arrancar el servicio.
+  // el modelo en runtime (eso requiere Stop+Start).
   const handleSetActive = useCallback(
     async (filename: string, path: string) => {
       setSetting(filename);
       setError(null);
       try {
-        // Hardcoded al provider "local-llama" (hoy es el único con
-        // local_command configurado). En el futuro se puede generalizar
-        // a "elegir provider destino".
         await updateProvider("local-llama", { local_model_path: path });
         setActiveLocalPath(path);
       } catch (e) {
@@ -101,14 +131,37 @@ export function ModelsTab() {
     [],
   );
 
+  // EP-0018-04: encender/apagar el servicio local (ollama serve) desde
+  // el frontend. Patch optimista + refetch en background.
+  const handleToggleService = useCallback(async () => {
+    if (!service) return;
+    const action =
+      service.service_state === "running" || service.service_state === "ready"
+        ? "stop"
+        : "start";
+    setSvcBusy(true);
+    setError(null);
+    try {
+      const resp =
+        action === "start" ? await startProvider(service.id) : await stopProvider(service.id);
+      setService((prev) =>
+        prev ? { ...prev, service_state: resp.service_state } : prev,
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSvcBusy(false);
+      void loadProviders();
+    }
+  }, [service, loadProviders]);
+
   useEffect(() => {
     void load();
   }, [load]);
 
-  // EP-0025: cargar el modelo activo al mount.
   useEffect(() => {
-    void loadActiveModel();
-  }, [loadActiveModel]);
+    void loadProviders();
+  }, [loadProviders]);
 
   const doSearch = useCallback(async (override?: string) => {
     const query = (override ?? search).trim();
@@ -125,10 +178,7 @@ export function ModelsTab() {
     }
   }, [search]);
 
-  // EP-0025: debounced search-as-you-type. After 400ms of inactivity on
-  // the `search` input, fire doSearch automatically. The cleanup cancels
-  // the pending timer if the user keeps typing, so we only run the
-  // last one. Empty query clears the list immediately.
+  // EP-0025: debounced search-as-you-type.
   useEffect(() => {
     if (!search.trim()) {
       setHf([]);
@@ -141,24 +191,13 @@ export function ModelsTab() {
     return () => clearTimeout(handle);
   }, [search, doSearch]);
 
-  // EP-0025: prefetch al mount. Carga "gguf" como query default para
-  // que la lista esté populada y los filtros funcionen sin tener que
-  // tipear primero. "gguf" devuelve los 30 modelos GGUF más populares,
-  // lo que da cobertura amplia para los family filters.
+  // EP-0025: prefetch al mount — "gguf" devuelve los populares.
   useEffect(() => {
     setSearch("gguf");
     void doSearch("gguf");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // EP-0025: familias hardcoded de Hugging Face. Las cards funcionan como
-  // filtros OR sobre la lista de resultados del search. Click toggle:
-  //   - si el filtro está activo → lo quita
-  //   - si NO está activo → lo agrega
-  // La lista filtrada se computa con `filteredHf`. Si no hay filtros
-  // activos, la lista muestra todos los resultados del search.
-  // Cada familia mapea a un query que el endpoint `/v1/llm/models/hf`
-  // acepta (devuelve los 30 modelos más relevantes).
   const HF_FAMILIES = [
     { id: "qwen", name: "Qwen", query: "qwen", hint: "Alibaba" },
     { id: "llama", name: "Llama", query: "llama", hint: "Meta" },
@@ -182,9 +221,6 @@ export function ModelsTab() {
     });
   }, []);
 
-  // EP-0025: intersección OR. Un modelo aparece si su id contiene
-  // CUALQUIERA de los filtros activos (case-insensitive). Si no hay
-  // filtros activos, la lista es la búsqueda completa.
   const filteredHf = useMemo(() => {
     if (activeFilters.size === 0) return hf;
     const filters = Array.from(activeFilters);
@@ -207,235 +243,286 @@ export function ModelsTab() {
     }
   }, [load]);
 
-  return (
-    <Stack gap="md" data-testid="providers-models-tab">
-      {/* EP-0025: header consistente con SandboxTab (mismo panel__header /
-          panel__title / panel__subtitle) para look and feel unificado. */}
-      <header className="sandbox-panel__header">
-        <div>
-          <h3 className="sandbox-panel__title">Models</h3>
-          <p className="sandbox-panel__subtitle">
-            Manage local GGUF models and download new ones from Hugging Face.
-            Select a model below, then press Start in the provider card to load it.
-          </p>
-        </div>
-      </header>
+  // Logo de familia para el filename local (ej. qwen2.5-...gguf → Qwen).
+  const familyOf = useCallback((filename: string): string | null => {
+    const lower = filename.toLowerCase();
+    const fam = HF_FAMILIES.find((f) => lower.startsWith(f.id));
+    return fam ? fam.id : null;
+  }, []);
 
+  const svcState = service?.service_state ?? "stopped";
+  const svcRunning = svcState === "running" || svcState === "ready";
+  const svcStarting = svcState === "starting";
+
+  return (
+    <div className="providers-list" data-testid="providers-models-tab">
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
-      <Card className="sandbox-panel__card">
-        {/* ─── Local models ─── */}
-        <CollapsibleSection
-          title="Local"
-          badge={
-            <span
-              className={
-                local.length > 0
-                  ? "collapsible__badge collapsible__badge--accent"
-                  : "collapsible__badge"
-              }
-            >
-              {local.length}
-            </span>
-          }
-          hint={dir ? `dir: ${dir}` : "GGUF files in MODELS_DIR"}
-          defaultOpen={true}
-          data-testid="models-local-section"
+      {/* ─── Servicio local (ollama serve) ─── */}
+      {service ? (
+        <Card
+          className={`provider-card ${service.active || svcRunning ? "provider-card--active" : ""}`}
         >
-          {loading && <p className="muted">Loading local models…</p>}
-          {!loading && local.length === 0 && (
-            <EmptyState>
-              <EmptyState.Title>No local models</EmptyState.Title>
-              <EmptyState.Hint>
-                The MODELS_DIR is empty. Download a model from Hugging Face.
-              </EmptyState.Hint>
-            </EmptyState>
+          <header className="provider-card__header">
+            <div className="provider-card__identity">
+              <ProviderLogo
+                id={service.id}
+                kind={service.kind}
+                className="provider-logo"
+              />
+              <span className="provider-card__title">{service.id}</span>
+            </div>
+            <div className="provider-card__actions">
+              <span
+                className={`provider-card__dot provider-card__dot--${svcRunning || svcStarting ? "active" : "inactive"}`}
+                title={svcState}
+              />
+              <span className="provider-card__divider-v" />
+              <button
+                type="button"
+                disabled={svcBusy || svcStarting}
+                className={`provider-action ${svcRunning ? "provider-action--delete" : "provider-action--save"}`}
+                title={svcRunning ? "Stop local service" : "Start local service"}
+                data-testid="local-svc-toggle"
+                onClick={handleToggleService}
+              >
+                {svcRunning ? <IconPause /> : <IconPlay />}
+              </button>
+            </div>
+          </header>
+          <hr className="provider-card__divider" />
+
+          <Row gap="sm" align="center">
+            <div className="provider-meta">
+              {service.kind} &nbsp;•&nbsp; {service.model}
+            </div>
+            <span className="muted text-sm" style={{ marginLeft: "auto" }}>
+              {svcState}
+            </span>
+          </Row>
+          <div className="provider-endpoint">{service.base_url}</div>
+          {service.local_command ? (
+            <div className="muted text-sm">
+              run: <code>{service.local_command}</code>
+            </div>
+          ) : (
+            <div className="muted text-sm">
+              not orchestrated by the daemon yet: set a{" "}
+              <code>local_command</code> on this provider (Providers tab) so
+              Start/Stop can control the service.
+            </div>
           )}
-          {local.map((m) => {
-            const isActive = m.path === activeLocalPath;
+        </Card>
+      ) : (
+        <p className="muted text-sm">
+          No local service configured: no provider has a local_command to
+          start/stop. Configure one under the Providers tab.
+        </p>
+      )}
+
+      <h3 className="provider-card__title">Models</h3>
+      <p className="muted text-sm">
+        GGUF models in MODELS_DIR are served by the local ollama service. Use
+        the card above to start/stop it, then pick which model loads on start.
+      </p>
+
+      {/* ─── Local GGUF models ─── */}
+      <h4 className="muted">
+        Local GGUF models ({local.length})
+        {dir ? (
+          <span className="text-sm">{` — dir: ${dir}`}</span>
+        ) : null}
+      </h4>
+      {loading && <p className="muted">Loading local models…</p>}
+      {!loading && local.length === 0 && (
+        <EmptyState>
+          <EmptyState.Title>No local models</EmptyState.Title>
+          <EmptyState.Hint>
+            The MODELS_DIR is empty. Download a model from Hugging Face.
+          </EmptyState.Hint>
+        </EmptyState>
+      )}
+      {local.map((m) => {
+        const isActive = m.path === activeLocalPath;
+        const fam = familyOf(m.filename);
+        return (
+          <Card
+            key={m.filename}
+            className={`provider-card ${isActive ? "provider-card--active" : ""}`}
+          >
+            <header className="provider-card__header">
+              <div className="provider-card__identity">
+                {fam ? (
+                  <FamilyLogo id={fam} className="provider-logo" />
+                ) : (
+                  <ProviderLogo id={m.filename} kind="local" className="provider-logo" />
+                )}
+                <span className="provider-card__title">{m.filename}</span>
+              </div>
+              <div className="provider-card__actions">
+                <span
+                  className={`provider-card__dot provider-card__dot--${isActive ? "active" : "inactive"}`}
+                  title={isActive ? "active model" : "inactive"}
+                  data-testid="model-active-dot"
+                />
+                <span className="provider-card__divider-v" />
+                {!isActive && (
+                  <button
+                    type="button"
+                    disabled={setting === m.filename}
+                    className="provider-action provider-action--save"
+                    title="Set as active model"
+                    data-testid="set-active-button"
+                    onClick={() => handleSetActive(m.filename, m.path)}
+                  >
+                    {setting === m.filename ? <span>…</span> : <IconCheck />}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="provider-action"
+                  title="Configure model"
+                  onClick={() => setEditing(m)}
+                >
+                  <IconEdit />
+                </button>
+              </div>
+            </header>
+            <hr className="provider-card__divider" />
+
+            <Row gap="sm" align="center">
+              <div className="provider-meta">{formatSize(m.size_bytes)}</div>
+              {isActive && (
+                <Badge className="badge--active" data-testid="model-active-badge">
+                  ACTIVE
+                </Badge>
+              )}
+            </Row>
+            <div className="provider-endpoint">{m.path}</div>
+          </Card>
+        );
+      })}
+
+      {/* ─── Hugging Face search ─── */}
+      <h4 className="muted">Download from Hugging Face</h4>
+      <Card className="provider-card">
+        <div
+          className="models-panel__family-grid"
+          data-testid="models-family-grid"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+            gap: 8,
+          }}
+        >
+          {HF_FAMILIES.map((f) => {
+            const isActive = activeFilters.has(f.id);
             return (
-              <Card key={m.filename} className="models-panel__local-card">
-                <Row justify="between" align="center">
-                  <Row gap="md">
-                    <strong className="models-panel__filename">{m.filename}</strong>
-                    <span className="muted">{formatSize(m.size_bytes)}</span>
-                    {/* EP-0025: badge del modelo activo. */}
-                    {isActive && (
-                      <span className="badge badge--ok" data-testid="model-active-badge">
-                        Active
-                      </span>
-                    )}
-                  </Row>
-                  <Row gap="sm">
-                    {/* EP-0025: botón para setear este modelo como el que se
-                        cargará al hacer Start del provider local. */}
-                    {!isActive && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        disabled={setting === m.filename}
-                        onClick={() => handleSetActive(m.filename, m.path)}
-                        data-testid="set-active-button"
-                      >
-                        {setting === m.filename ? "Setting…" : "Set as active"}
-                      </Button>
-                    )}
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setEditing(m)}
-                    >
-                      Configure
-                    </Button>
-                  </Row>
-                </Row>
+              <Card
+                key={f.id}
+                className="models-panel__family-card"
+                data-testid={`models-family-${f.id}`}
+                data-active={isActive ? "true" : undefined}
+                onClick={() => toggleFilter(f.id)}
+                style={{
+                  background: "var(--bg)",
+                  border: isActive
+                    ? "2px solid var(--accent, #6366f1)"
+                    : "1px solid var(--border-color, transparent)",
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <FamilyLogo id={f.id} className="models-panel__family-logo" />
+                  <div>
+                    <div className="models-panel__family-name">{f.name}</div>
+                    <div className="muted models-panel__family-hint">{f.hint}</div>
+                  </div>
+                </div>
               </Card>
             );
           })}
-        </CollapsibleSection>
+        </div>
 
-        {/* ─── Hugging Face search ─── */}
-        <CollapsibleSection
-          title="Hugging Face search"
-          badge={
-            <span className="collapsible__badge">
-              {hf.length > 0 ? hf.length : "—"}
+        <Row gap="sm" align="center">
+          <div style={{ flex: 1 }}>
+            <SearchBar
+              placeholder="Search Hugging Face (e.g. qwen2.5)"
+              value={search}
+              onChange={setSearch}
+            />
+          </div>
+          {searching && (
+            <span className="badge badge--muted" data-testid="hf-searching-badge">
+              searching…
             </span>
-          }
-          hint="Search GGUF models and download them to MODELS_DIR"
-          defaultOpen={false}
-          data-testid="models-hf-section"
-        >
-          {/* EP-0025: cards de families como filtros OR clickeables. Click
-              toggle: aparecen/desaparecen de `activeFilters`. La card
-              activa se distingue con border accent. */}
+          )}
+          {!searching && search.trim() && hf.length > 0 && (
+            <span className="badge badge--accent" data-testid="hf-results-badge">
+              {activeFilters.size > 0
+                ? `${filteredHf.length}/${hf.length} filtered`
+                : `${hf.length} result${hf.length === 1 ? "" : "s"}`}
+            </span>
+          )}
+        </Row>
+
+        {searching && <p className="muted">Searching…</p>}
+        {!searching && hf.length === 0 && search && (
+          <EmptyState>
+            <EmptyState.Title>No results</EmptyState.Title>
+            <EmptyState.Hint>Try a different query.</EmptyState.Hint>
+          </EmptyState>
+        )}
+        {filteredHf.length > 0 && (
           <div
-            className="models-panel__family-grid"
-            data-testid="models-family-grid"
+            className="models-panel__hf-list"
+            data-testid="models-hf-list"
             style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+              maxHeight: 360,
+              overflowY: "auto",
+              overflowX: "hidden",
+              display: "flex",
+              flexDirection: "column",
               gap: 8,
+              padding: 4,
+              border: "1px solid var(--border-color, #3a3a3a)",
+              borderRadius: 8,
             }}
           >
-            {HF_FAMILIES.map((f) => {
-              const isActive = activeFilters.has(f.id);
-              return (
-                <Card
-                  key={f.id}
-                  className="models-panel__family-card"
-                  data-testid={`models-family-${f.id}`}
-                  data-active={isActive ? "true" : undefined}
-                  onClick={() => toggleFilter(f.id)}
-                  style={{
-                    background: "var(--bg)",
-                    border: isActive
-                      ? "2px solid var(--accent, #6366f1)"
-                      : "1px solid var(--border-color, transparent)",
-                    cursor: "pointer",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <FamilyLogo id={f.id} className="models-panel__family-logo" />
-                    <div>
-                      <div className="models-panel__family-name">{f.name}</div>
-                      <div className="muted models-panel__family-hint">{f.hint}</div>
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-          {/* EP-0025: search-as-you-type (debounced 400ms). No Search button
-              needed — typing alone updates the list. The pill on the right
-              shows live status (idle / searching / N results, M filtered). */}
-          <Row gap="sm" align="center">
-            <div style={{ flex: 1 }}>
-              <SearchBar
-                placeholder="Search Hugging Face (e.g. qwen2.5)"
-                value={search}
-                onChange={setSearch}
-              />
-            </div>
-            {searching && (
-              <span className="badge badge--muted" data-testid="hf-searching-badge">
-                searching…
-              </span>
-            )}
-            {!searching && search.trim() && hf.length > 0 && (
-              <span className="badge badge--accent" data-testid="hf-results-badge">
-                {activeFilters.size > 0
-                  ? `${filteredHf.length}/${hf.length} filtered`
-                  : `${hf.length} result${hf.length === 1 ? "" : "s"}`}
-              </span>
-            )}
-          </Row>
-
-          {searching && <p className="muted">Searching…</p>}
-          {!searching && hf.length === 0 && search && (
-            <EmptyState>
-              <EmptyState.Title>No results</EmptyState.Title>
-              <EmptyState.Hint>Try a different query.</EmptyState.Hint>
-            </EmptyState>
-          )}
-          {/* EP-0025: scrollable list capped to ~3 visible cards. The wrapper
-              shows vertical scroll only when results exceed the visible area;
-              horizontal scroll is disabled so long model ids don't push the
-              layout sideways. Uses `filteredHf` (post-filter) so the family
-              cards above act as OR filters over the search results. */}
-          {filteredHf.length > 0 && (
-            <div
-              className="models-panel__hf-list"
-              data-testid="models-hf-list"
-              style={{
-                maxHeight: 360,
-                overflowY: "auto",
-                overflowX: "hidden",
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-                padding: 4,
-                border: "1px solid var(--border-color, #3a3a3a)",
-                borderRadius: 8,
-              }}
-            >
-              {filteredHf.map((m) => (
-                <Card key={m.id} className="models-panel__hf-card">
-                  <Row justify="between" align="center">
-                    <Row gap="md">
-                      <strong className="models-panel__display-name">
-                        {m.display_name || m.id}
-                      </strong>
-                      <span className="muted">{m.downloads.toLocaleString()} ↓</span>
-                      {m.gated && (
-                        <span className="badge badge--warn">gated</span>
-                      )}
-                    </Row>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      disabled={downloading === m.id}
-                      onClick={() => handleDownload(m.id)}
-                    >
-                      {downloading === m.id ? "…" : "Download"}
-                    </Button>
+            {filteredHf.map((m) => (
+              <Card key={m.id} className="models-panel__hf-card">
+                <Row justify="between" align="center">
+                  <Row gap="md">
+                    <strong className="strong">{m.display_name || m.id}</strong>
+                    <span className="muted text-sm">{m.downloads.toLocaleString()} ↓</span>
+                    {m.gated && (
+                      <span className="badge badge--warn">gated</span>
+                    )}
                   </Row>
-                  <div className="muted models-panel__hf-id">
-                    <code>{m.id}</code>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
-          {!searching && hf.length > 0 && filteredHf.length === 0 && (
-            <EmptyState>
-              <EmptyState.Title>No matches with current filters</EmptyState.Title>
-              <EmptyState.Hint>
-                Click an active family card above to remove the filter.
-              </EmptyState.Hint>
-            </EmptyState>
-          )}
-        </CollapsibleSection>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={downloading === m.id}
+                    onClick={() => handleDownload(m.id)}
+                  >
+                    {downloading === m.id ? "…" : "Download"}
+                  </Button>
+                </Row>
+                <div className="muted text-sm">
+                  <code>{m.id}</code>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+        {!searching && hf.length > 0 && filteredHf.length === 0 && (
+          <EmptyState>
+            <EmptyState.Title>No matches with current filters</EmptyState.Title>
+            <EmptyState.Hint>
+              Click an active family card above to remove the filter.
+            </EmptyState.Hint>
+          </EmptyState>
+        )}
       </Card>
 
       {editing && (
@@ -448,7 +535,7 @@ export function ModelsTab() {
           }}
         />
       )}
-    </Stack>
+    </div>
   );
 }
 

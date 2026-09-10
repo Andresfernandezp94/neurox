@@ -236,23 +236,26 @@ body[data-sidebar-hidden="true"] .app-main {
 }
 
 /* EP-0026-UX: en mobile el sidebar es bottom-bar de ~3.5rem.
- * Compensamos con padding-bottom para que el contenido no quede tapado.
- *
- * El cálculo dinámico del teclado virtual (`--keyboard-height`) se
- * descartó porque en varios navegadores el `resize` no dispara al
- * cerrar el teclado, dejando el valor "pegado" en un número grande
- * y creando un hueco enorme entre el footer y el sidebar. Si el
- * usuario quiere reintroducir el ajuste por teclado, se hace desde
- * el hook `useMobileKeyboard` con un enfoque basado en polling de
- * `visualViewport.height` (con cleanup garantizado). */
+ * El contenido de cada tab debe llegar MÁXIMO hasta donde empieza la
+ * sidebar (borde superior de la bottom-bar), sin quedar tapado por ella.
+ * Para eso el shell se achica en mobile: en lugar de cubrir todo el
+ * viewport, .app mide `--app-h - 3.5rem` y la bottom-bar (fixed, bottom:0)
+ * queda justo debajo — el área scrollable de cada tab termina exactamente
+ * en el borde superior de la barra. No usamos padding-bottom en el scroller
+ * porque en varios navegadores el contenido sigue extendiéndose por debajo
+ * de la barra (el scroll llega pero la última parte queda tapada). */
 @media (max-width: 1024px) {
-  .app-main {
+  .app {
     /* EP-0024: en mobile el sidebar es bottom-bar (no lateral),
-     * así que el main ocupa todo el ancho. Padding-bottom empuja
-     * el contenido por encima de la bottom-bar fija (3.5rem). */
+     * así que el main ocupa todo el ancho y el shell solo el alto
+     * visible por encima de la bottom-bar. */
+    height: calc(var(--app-h, 100dvh) - 3.5rem);
+  }
+
+  .app-main {
     margin-left: 0 !important;
     max-width: 100vw !important;
-    padding-bottom: 3.5rem;
+    padding-bottom: 0;
   }
 }
 

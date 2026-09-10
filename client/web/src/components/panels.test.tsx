@@ -236,6 +236,23 @@ describe('ConfigViewer', () => {
     const tab = screen.getByTestId('config-tab-providers');
     expect(tab).toHaveAttribute('aria-selected', 'true');
   });
+
+  // EP-0026-UX: la tab "Local" monta el ModelsTab (modelos GGUF locales
+  // servidos por Ollama/llama + búsqueda/descarga Hugging Face).
+  it('renders the Local tab between Providers and Environments', () => {
+    renderWithStore(<ConfigViewer />);
+    const tabs = screen.getAllByRole('tab');
+    const labels = tabs.map((t) => t.textContent).filter(Boolean);
+    expect(labels[0]).toBe('Providers');
+    expect(labels[1]).toBe('Local');
+    expect(labels[2]).toBe('Environments');
+  });
+
+  it('shows the models view when switching to Local', async () => {
+    renderWithStore(<ConfigViewer />);
+    fireEvent.click(screen.getByTestId('config-tab-local'));
+    expect(await screen.findByText('Models')).toBeInTheDocument();
+  });
 });
 
 // ─── EP-0020-02: 6 new panels — EP-0024: todos absorbidos como tabs en ConfigViewer ─────
