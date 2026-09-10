@@ -35,6 +35,30 @@ pub fn max_tool_iterations() -> u32 {
         .unwrap_or(10)
 }
 
+/// Max wall-clock time to wait for a SINGLE session-agent stream round
+/// trip (one `process` / `tool_result` JSON-RPC call to the subprocess)
+/// before giving up and closing the turn.
+///
+/// EP-2026-09-05 (stuck-turn fix): the session-agent path had NO
+/// timeout. If the subprocess stalled mid-LLM-call (e.g. the upstream
+/// stream trickles keep-alive bytes without ever finishing, so the
+/// subprocess never writes its final JSON-RPC `result` line), the
+/// daemon blocked forever on `read_line`, never emitted `Event::Done`,
+/// and the SSE never sent `[DONE]` — the turn stayed "streaming"
+/// indefinitely (input frozen with a cancel button). This bounds the
+/// wait so a hung round trip surfaces as an error and closes the turn.
+///
+/// Configurable via `NEUROX_SESSION_STREAM_TIMEOUT_SECS`; defaults to
+/// 180s (generous — a long tool-augmented reply can legitimately take
+/// a couple of minutes, but not forever).
+pub fn session_stream_timeout_secs() -> u64 {
+    std::env::var("NEUROX_SESSION_STREAM_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|&n: &u64| n > 0)
+        .unwrap_or(180)
+}
+
 /// Agent IDs that are built into the daemon (no subprocess) and
 /// therefore not present in the registry. These still appear in
 /// `GET /v1/agents` listings and accept session creation.
@@ -319,7 +343,45 @@ impl AppState {
             method: method.to_string(),
             params,
         };
-        let result = agent.protocol.stream(req, cancel, tx.clone()).await;
+        // EP-2026-09-05 (stuck-turn fix): bound the round trip. Without
+        // this, a stalled subprocess (LLM stream that never completes)
+        // blocks `protocol.stream` -> `read_line` forever, so the turn
+        // never closes. On timeout we cancel the token (aborts the
+        // subprocess-side wait), surface an Error + Done on the bus so
+        // BOTH transports close the turn (SSE `[DONE]`, WS stream-end),
+        // and return Err so the caller's tool-loop unwinds.
+        let timeout = std::time::Duration::from_secs(session_stream_timeout_secs());
+        let stream_fut = agent.protocol.stream(req, cancel.clone(), tx.clone());
+        let result = match tokio::time::timeout(timeout, stream_fut).await {
+            Ok(r) => r,
+            Err(_elapsed) => {
+                warn!(
+                    session_id = %session_id,
+                    timeout_secs = timeout.as_secs(),
+                    "session-agent stream timed out; closing turn"
+                );
+                // Abort the subprocess-side wait so the pipe is freed.
+                cancel.cancel();
+                // Close the turn for every subscriber. These go through
+                // the forwarder below (still draining `rx`) and then the
+                // global bus.
+                let _ = self.events.event_tx.send(Event::Error {
+                    session_id: Some(session_id),
+                    message: format!(
+                        "El agente no respondió a tiempo ({}s). El turno se cerró.",
+                        timeout.as_secs()
+                    ),
+                });
+                let _ = self.events.event_tx.send(Event::Done {
+                    session_id,
+                    text: String::new(),
+                });
+                Err(anyhow::anyhow!(
+                    "session-agent stream timed out after {}s",
+                    timeout.as_secs()
+                ))
+            }
+        };
         drop(tx);
         let _ = forward.await;
         result
