@@ -93,8 +93,9 @@ export function Sidebar({ view, onTabChange, hidden = false, forceCollapsed = fa
   // Collapsible state: pinned (persistent) overrides todo lo demás.
   // Si pinned=true, la sidebar siempre está expandida — incluso en
   // vistas con forceCollapsed (config) o en mobile.
+  // En mobile (bottom-bar), forceCollapsed no aplica: el layout es horizontal.
   const [_hovered, setHovered] = useState<boolean>(false);
-  const collapsed = !pinned && (forceCollapsed ? true : isMobile() ? false : !_hovered);
+  const collapsed = !pinned && (isMobile() ? false : forceCollapsed ? true : !_hovered);
   const asideRef = useRef<HTMLElement>(null);
 
   // EP-0026-UX: si entramos a mobile, forzamos pinned=false (la sidebar
