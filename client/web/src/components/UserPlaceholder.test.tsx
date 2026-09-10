@@ -1,38 +1,20 @@
-// Tests para UserPlaceholder (EP-0025 — fullscreen toggle en el dropdown).
+// Tests para UserPlaceholder — avatar + nombre + rol + footer opcional.
 //
-// Cobertura:
-// - El item "Pantalla completa" no se renderiza en desktop
-// - Sí se renderiza en mobile (cuando la API es compatible)
-// - Click en el item llama a toggle() del hook
-// - El label/icon cambia cuando isFullscreen es true
-// - Theme toggle sigue funcionando (no rompemos nada)
+// EP-0025: el item de "Pantalla completa" vivía en un dropdown que fue
+// retirado del componente (el fullscreen ahora está en el chat footer).
+// Los testids `user-menu*` ya no existen; los tests cubren el card.
 
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
+import { render, screen, cleanup } from "@testing-library/react";
 
-// Mocks de hooks contextuales.
 const authMock = vi.fn();
 vi.mock("../hooks/useAuth", () => ({
   useAuth: () => authMock(),
 }));
 
-const themeMock = vi.fn();
-vi.mock("../shared/hooks/useTheme", () => ({
-  useTheme: () => themeMock(),
-}));
-
-const fsMock = vi.fn();
-vi.mock("../shared/hooks/useFullscreen", () => ({
-  useFullscreen: () => fsMock(),
-}));
-
-vi.mock("../api/auth", () => ({
-  logout: vi.fn().mockResolvedValue(undefined),
-}));
-
 import { UserPlaceholder } from "./UserPlaceholder";
 
-describe("UserPlaceholder — fullscreen item (EP-0025)", () => {
+describe("UserPlaceholder", () => {
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
@@ -40,118 +22,37 @@ describe("UserPlaceholder — fullscreen item (EP-0025)", () => {
       user: { username: "andres", role: "admin" },
       clear: vi.fn(),
     });
-    themeMock.mockReturnValue({ mode: "dark", setMode: vi.fn() });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("no muestra el item de pantalla completa en desktop (available=false)", () => {
-    fsMock.mockReturnValue({
-      isSupported: true,
-      isFullscreen: false,
-      isMobile: false,
-      pref: "off",
-      available: false,
-      enter: vi.fn(),
-      exit: vi.fn(),
-      toggle: vi.fn().mockResolvedValue(undefined),
-    });
-
+  it("renderiza avatar + nombre + rol del usuario", () => {
     render(<UserPlaceholder />);
-    fireEvent.click(screen.getByTestId("user-avatar"));
-
-    expect(screen.queryByTestId("user-menu-fullscreen")).toBeNull();
-    // Theme sigue presente.
-    expect(screen.getByTestId("user-menu-theme")).toBeTruthy();
+    expect(screen.getByTestId("user-avatar")).toBeInTheDocument();
+    expect(screen.getByTestId("user-info")).toBeInTheDocument();
+    expect(screen.getByText("andres")).toBeInTheDocument();
+    expect(screen.getByText("admin")).toBeInTheDocument();
   });
 
-  it("muestra el item en mobile cuando la API está disponible", () => {
-    fsMock.mockReturnValue({
-      isSupported: true,
-      isFullscreen: false,
-      isMobile: true,
-      pref: "off",
-      available: true,
-      enter: vi.fn(),
-      exit: vi.fn(),
-      toggle: vi.fn().mockResolvedValue(undefined),
-    });
-
-    render(<UserPlaceholder />);
-    fireEvent.click(screen.getByTestId("user-avatar"));
-
-    const item = screen.getByTestId("user-menu-fullscreen");
-    expect(item).toBeTruthy();
-    expect(item.textContent).toContain("Pantalla completa");
+  it("renderiza el footer que recibe como prop (ej: logout)", () => {
+    render(<UserPlaceholder footer={<button>logout</button>} />);
+    expect(
+      screen.getByRole("button", { name: "logout" }),
+    ).toBeInTheDocument();
   });
 
-  it("cambia el label a 'Salir de pantalla completa' cuando isFullscreen=true", () => {
-    fsMock.mockReturnValue({
-      isSupported: true,
-      isFullscreen: true,
-      isMobile: true,
-      pref: "on",
-      available: true,
-      enter: vi.fn(),
-      exit: vi.fn(),
-      toggle: vi.fn().mockResolvedValue(undefined),
-    });
-
-    render(<UserPlaceholder />);
-    fireEvent.click(screen.getByTestId("user-avatar"));
-
-    const item = screen.getByTestId("user-menu-fullscreen");
-    expect(item.textContent).toContain("Salir de pantalla completa");
+  it("aplica avatarClassName extra al user-card", () => {
+    const { container } = render(
+      <UserPlaceholder avatarClassName="conn-avatar conn-avatar--ok" />,
+    );
+    expect(container.querySelector(".conn-avatar--ok")).not.toBeNull();
   });
 
-  it("click en el item llama a toggle() y cierra el dropdown", async () => {
-    const toggleSpy = vi.fn().mockResolvedValue(undefined);
-    fsMock.mockReturnValue({
-      isSupported: true,
-      isFullscreen: false,
-      isMobile: true,
-      pref: "off",
-      available: true,
-      enter: vi.fn(),
-      exit: vi.fn(),
-      toggle: toggleSpy,
-    });
-
+  it("sin usuario cae a inicial U", () => {
+    authMock.mockReturnValue({ user: null, clear: vi.fn() });
     render(<UserPlaceholder />);
-    fireEvent.click(screen.getByTestId("user-avatar"));
-    expect(screen.getByTestId("user-menu")).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("user-menu-fullscreen"));
-    });
-
-    expect(toggleSpy).toHaveBeenCalledTimes(1);
-    // Después del click el dropdown se cierra.
-    await vi.waitFor(() => {
-      expect(screen.queryByTestId("user-menu")).toBeNull();
-    });
-  });
-
-  it("Theme toggle sigue funcionando (no rompemos el feature existente)", () => {
-    const setModeSpy = vi.fn();
-    themeMock.mockReturnValue({ mode: "light", setMode: setModeSpy });
-    fsMock.mockReturnValue({
-      isSupported: false,
-      isFullscreen: false,
-      isMobile: false,
-      pref: "off",
-      available: false,
-      enter: vi.fn(),
-      exit: vi.fn(),
-      toggle: vi.fn(),
-    });
-
-    render(<UserPlaceholder />);
-    fireEvent.click(screen.getByTestId("user-avatar"));
-    fireEvent.click(screen.getByTestId("user-menu-theme"));
-
-    expect(setModeSpy).toHaveBeenCalledWith("dark");
+    expect(screen.getByText("U")).toBeInTheDocument();
   });
 });

@@ -204,7 +204,7 @@ describe('ApprovalsPanel', () => {
     ]);
     expect(screen.getByText('shell')).toBeInTheDocument();
     expect(screen.getByText('Approve')).toBeInTheDocument();
-    expect(screen.getByText('Reject')).toBeInTheDocument();
+    expect(screen.getByText('Deny')).toBeInTheDocument();
   });
 });
 

@@ -100,8 +100,8 @@ describe('ProvidersPanel — local service toggle is hidden in the UI (EP-0018-0
   it('5.1: local provider ready → no Start/Stop buttons, no svc-state badge in header', async () => {
     mockGetProviders([localReady]);
     render(<ProvidersPanel />);
-    // 'local-llama' is rendered as 'Local' via displayNameFor, not as the id.
-    await screen.findByText('Local');
+    // 'local-llama' is rendered as the raw provider id (no displayNameFor).
+    await screen.findByText('local-llama');
     expect(screen.queryByRole('button', { name: /start local service/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /stop local service/i })).toBeNull();
     expect(screen.queryByTestId('svc-state-ready')).toBeNull();
@@ -159,9 +159,8 @@ describe('ProvidersPanel — local service toggle is hidden in the UI (EP-0018-0
   it('5.5b: clicking the provider card never invokes stopProvider from the UI', async () => {
     mockGetProviders([localReady]);
     render(<ProvidersPanel />);
-    // 'local-llama' is displayed as 'Local' via displayNameFor; match
-    // the rendered title, not the id.
-    await screen.findByText('Local');
+    // 'local-llama' is rendered as the raw provider id; match the id.
+    await screen.findByText('local-llama');
     const card = document.querySelector('.provider-card');
     expect(card).not.toBeNull();
     fireEvent.click(card!);

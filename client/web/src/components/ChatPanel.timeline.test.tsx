@@ -250,14 +250,12 @@ describe("ToolNode — full render (args/result toggles, EP-2026-08-19)", () => 
   beforeEach(() => {
     blobSeq = 0;
     if (!globalThis.URL.createObjectURL) {
-      // @ts-expect-error -- jsdom shim, only used in tests.
       globalThis.URL.createObjectURL = () => {
         blobSeq += 1;
         return `blob:test/${blobSeq}`;
       };
     }
     if (!globalThis.URL.revokeObjectURL) {
-      // @ts-expect-error -- jsdom shim, only used in tests.
       globalThis.URL.revokeObjectURL = () => {};
     }
   });

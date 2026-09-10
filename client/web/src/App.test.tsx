@@ -85,14 +85,16 @@ describe("App", () => {
 
   it("renders Sidebar with navigation items", () => {
     render(<App />);
-    expect(screen.getAllByText("Status").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByTestId("sidebar-nav-chat")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-nav-sessions")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-nav-config")).toBeInTheDocument();
   });
 
-  it("shows the AppHeader by default on desktop", () => {
-    // jsdom default matchMedia (test-setup.ts) returns matches=false
-    // → desktop viewport → header visible.
+  it("does not render a separate AppHeader anymore", () => {
+    // EP-0024/EP-0026-UX: el AppHeader fue absorbido por el shell y
+    // eliminado de App.tsx; la UI ya no lo renderiza.
     render(<App />);
-    expect(screen.getByTestId("app-header")).toBeInTheDocument();
+    expect(screen.queryByTestId("app-header")).not.toBeInTheDocument();
   });
 
   it("hides the AppHeader by default on a mobile viewport", () => {
