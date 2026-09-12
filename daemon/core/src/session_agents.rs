@@ -29,19 +29,54 @@ unsafe extern "C" {
     fn syscall(num: i64, ...) -> i64;
 }
 
+// SYS_kill per-arch: x86_64 = 62, aarch64 = 129, riscv64 = 129.
+// WARNING: 37 is SYS_alarm on x86_64 (NOT kill). Binding probe_pid to
+// alarm() made "is this process alive?" actually ask "did caller have
+// a pending timer?" — dead agents probed as alive and lingered.
+#[cfg(all(unix, target_arch = "x86_64"))]
+const SYS_KILL: i64 = 62;
+#[cfg(all(unix, target_arch = "aarch64"))]
+const SYS_KILL: i64 = 129;
+#[cfg(all(unix, target_arch = "riscv64"))]
+const SYS_KILL: i64 = 129;
+#[cfg(all(
+    unix,
+    not(any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "riscv64"
+    ))
+))]
+compile_error!("probe_pid needs the SYS_kill number for this architecture");
+
+// EINTR on Linux.
 #[cfg(unix)]
-const SYS_KILL: i64 = 37; // Linux x86_64. Same on arm64.
+const SYS_EINTR: i64 = 4;
 
 /// Probe a pid via `syscall(SYS_kill, pid, 0)`. Sending signal 0
 /// doesn't deliver anything but performs an existence/permission
 /// check — returns 0 if the process exists, -1 otherwise.
 ///
 /// Using `syscall` directly instead of libc::kill avoids any Rust
-/// symbol shadowing surprises.
+/// symbol shadowing surprises. The raw syscall does NOT retry on
+/// EINTR (unlike the libc wrapper), and under a busy process the
+/// SIGCHLD spam from concurrent child spawns can interrupt it — a
+/// false-negative would make dead-agent cleanup spin. Retry on EINTR.
 #[cfg(unix)]
 #[inline]
 unsafe fn probe_pid(pid: u32) -> bool {
-    syscall(SYS_KILL, pid as i64, 0i64) == 0
+    let p = pid as i64;
+    loop {
+        if syscall(SYS_KILL, p, 0i64) == 0 {
+            return true;
+        }
+        // errno is only meaningful when syscall returns -1; retry on
+        // EINTR, otherwise the process is gone (ESRCH/EPERM).
+        if std::io::Error::last_os_error().raw_os_error() == Some(SYS_EINTR as i32) {
+            continue;
+        }
+        return false;
+    }
 }
 use tokio::sync::RwLock;
 
@@ -726,7 +761,6 @@ impl SessionAgentPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     /// EP-2026-08-31: probe_pid must NOT return `true` for a pid
     /// whose process is gone. The previous libc::kill binding
@@ -735,19 +769,15 @@ mod tests {
     /// 30s. Regressing this re-introduces the original bug.
     #[test]
     fn probe_pid_returns_false_for_dead_process() {
-        // Spawn /bin/true, capture its pid, wait for it to exit.
-        let child = std::process::Command::new("/bin/true")
-            .spawn()
-            .expect("spawn /bin/true");
-        let pid = child.id();
-        // Give the kernel time to reap the zombie. On Linux the
-        // process is gone from the process table as soon as it
-        // exits, but we wait a moment to be safe.
-        std::thread::sleep(Duration::from_millis(100));
+        // A pid above the kernel's pid_max (default 4194304) can never
+        // be alive: kill(2) returns ESRCH immediately. Deterministic —
+        // the previous spawn-based variant raced kernel reaping / pid
+        // reuse under parallel test load, which made a DEAD pid probe
+        // as alive and flaked the suite.
+        let pid = i32::MAX as u32 - 1; // 2147483646: positive, above pid_max
         assert!(
             !unsafe { probe_pid(pid) },
-            "probe_pid({}) should return false after child exited",
-            pid
+            "probe_pid({pid}) should return false for an impossible pid"
         );
     }
 

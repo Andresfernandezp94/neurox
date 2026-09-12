@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 mod common;
 
 use neurox::approval::ApprovalManager;
+use neurox::auth::{issue_token, AuthState, JwtSecret, ReauthTokens, Role, UserStore};
 use neurox::config::{
     AgentsConfig, CoreConfig, LlmConfig, SandboxConfig, SessionAgentSpec, SessionAgentsConfig,
 };
@@ -39,6 +40,7 @@ use serde_json::Value;
 use tempfile::TempDir;
 use tokio::net::TcpListener;
 use tokio::time::sleep;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use uuid::Uuid;
 
 /// A trivial tool that the daemon can execute when the mock agent
@@ -105,6 +107,9 @@ struct TestRig {
     state: Arc<AppState>,
     _tmp: TempDir,
     client: reqwest::Client,
+    // EP-0007: the router enforces JWT auth on every /v1/sessions call
+    // (UserContext extractor). Tests mint one admin token per rig.
+    token: String,
     _server: tokio::task::JoinHandle<()>,
 }
 
@@ -173,6 +178,21 @@ impl TestRig {
             plugin_registry,
         ));
 
+        // The HTTP API enforces JWT auth (UserContext extractor 401s
+        // without an injected identity). `build_app_state` leaves auth
+        // off, so every /v1/sessions call would 401 — enable it here
+        // and mint an admin token for the test's HTTP client.
+        let user_store = Arc::new(UserStore::load(&tmp.path().join("users.json")).unwrap());
+        let secret = Arc::new(JwtSecret::generate());
+        let auth_state = AuthState {
+            user_store,
+            secret: secret.clone(),
+            expiry_hours: 1,
+            reauth_tokens: Arc::new(ReauthTokens::new()),
+        };
+        state.auth = state.auth.with_auth(auth_state);
+        let token = issue_token(&secret, Uuid::new_v4(), "tester", Role::Admin, 1).unwrap();
+
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = router(AppState::clone(&state));
@@ -189,6 +209,7 @@ impl TestRig {
             state: Arc::new(state),
             _tmp: tmp,
             client: reqwest::Client::new(),
+            token,
             _server: server,
         }
     }
@@ -197,6 +218,7 @@ impl TestRig {
         let r = self
             .client
             .post(format!("{}{}", self.base_url, path))
+            .bearer_auth(&self.token)
             .json(&body)
             .send()
             .await
@@ -213,6 +235,7 @@ impl TestRig {
         let r = self
             .client
             .get(format!("{}{}", self.base_url, path))
+            .bearer_auth(&self.token)
             .send()
             .await
             .expect("get")
@@ -225,6 +248,7 @@ impl TestRig {
         let r = self
             .client
             .delete(format!("{}{}", self.base_url, path))
+            .bearer_auth(&self.token)
             .send()
             .await
             .expect("delete")
@@ -414,8 +438,18 @@ async fn parallel_sessions_run_concurrently() {
 
     let started = Instant::now();
     let (r1, r2) = tokio::join!(
-        async { client.post(url1).json(&body1).send().await },
-        async { client.post(url2).json(&body2).send().await },
+        async { client
+            .post(url1)
+            .bearer_auth(&rig.token)
+            .json(&body1)
+            .send()
+            .await },
+        async { client
+            .post(url2)
+            .bearer_auth(&rig.token)
+            .json(&body2)
+            .send()
+            .await },
     );
     let elapsed = started.elapsed();
     r1.unwrap().error_for_status().unwrap();
@@ -509,6 +543,7 @@ async fn max_sessions_cap_is_enforced() {
     let r = rig
         .client
         .post(url)
+        .bearer_auth(&rig.token)
         .json(&json!({ "agent_id": "default" }))
         .send()
         .await
@@ -589,9 +624,12 @@ struct EventFilter {
 
 /// Connect to `/v1/events` and pre-subscribe (so the WS handler is
 /// already on the broadcast bus before any events fire).
-async fn subscribe_ws(base_url: &str, session_id: &str) -> (tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, EventFilter) {
+async fn subscribe_ws(base_url: &str, token: &str, session_id: &str) -> (tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, EventFilter) {
     let ws_url = base_url.replace("http://", "ws://") + "/v1/events";
-    let (ws, _resp) = tokio_tungstenite::connect_async(&ws_url)
+    let mut req = ws_url.into_client_request().expect("ws request");
+    req.headers_mut()
+        .insert("Authorization", format!("Bearer {token}").parse().unwrap());
+    let (ws, _resp) = tokio_tungstenite::connect_async(req)
         .await
         .expect("ws connect");
     // Short, deterministic delay so the server-side handler has
@@ -658,7 +696,7 @@ async fn ws_stream_content_events_with_session_id() {
     let s = rig.create_session("default").await;
     let sid = s["session_id"].as_str().unwrap().to_string();
 
-    let (mut ws, filter) = subscribe_ws(&rig.base_url, &sid).await;
+    let (mut ws, filter) = subscribe_ws(&rig.base_url, &rig.token, &sid).await;
 
     // Trigger the mock to emit 3 content_delta notifications.
     rig.post_json(
@@ -708,7 +746,7 @@ async fn ws_stream_thinking_events_with_session_id() {
     let s = rig.create_session("default").await;
     let sid = s["session_id"].as_str().unwrap().to_string();
 
-    let (mut ws, filter) = subscribe_ws(&rig.base_url, &sid).await;
+    let (mut ws, filter) = subscribe_ws(&rig.base_url, &rig.token, &sid).await;
 
     rig.post_json(
         &format!("/v1/sessions/{sid}/messages"),
@@ -755,7 +793,7 @@ async fn ws_stream_tool_call_and_result_events() {
     let s = rig.create_session("default").await;
     let sid = s["session_id"].as_str().unwrap().to_string();
 
-    let (mut ws, filter) = subscribe_ws(&rig.base_url, &sid).await;
+    let (mut ws, filter) = subscribe_ws(&rig.base_url, &rig.token, &sid).await;
 
     rig.post_json(
         &format!("/v1/sessions/{sid}/messages"),
@@ -816,7 +854,10 @@ async fn ws_events_are_session_scoped() {
     // either.
     let (mut ws, _deadline) = {
         let ws_url = rig.base_url.replace("http://", "ws://") + "/v1/events";
-        let (ws, _resp) = tokio_tungstenite::connect_async(&ws_url).await.unwrap();
+        let mut req = ws_url.into_client_request().expect("ws request");
+        req.headers_mut()
+            .insert("Authorization", format!("Bearer {}", rig.token).parse().unwrap());
+        let (ws, _resp) = tokio_tungstenite::connect_async(req).await.unwrap();
         sleep(Duration::from_millis(50)).await;
         // We don't use collect_until_done's filter — we collect ALL
         // events for either session and assert the split below.
@@ -948,8 +989,8 @@ fn sse_events_carry_request_and_client_id() {
     // Forwarder block should assign request_id and client_id from the
     // request body.
     assert!(
-        src.contains("let request_id = uuid::Uuid::new_v4().to_string()"),
-        "request_id must be generated per dispatch"
+        src.contains("unwrap_or_else(|| uuid::Uuid::new_v4().to_string())"),
+        "request_id must fall back to a daemon-generated UUID when the client omits it"
     );
     assert!(
         src.contains("\"request_id\": request_id_for_forward"),

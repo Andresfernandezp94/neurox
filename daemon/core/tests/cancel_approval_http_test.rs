@@ -6,18 +6,24 @@ use std::sync::Arc;
 use futures::StreamExt;
 mod common;
 
+use neurox::auth::{issue_token, AuthState, JwtSecret, ReauthTokens, Role, UserStore};
 use neurox::approval::{ApprovalDecision, ApprovalManager};
 use neurox::config::{
     AgentKind, AgentsConfig, CoreConfig, PersistentAgentSpec, RestartPolicy, SandboxConfig,
 };
+use neurox::plugins::PluginToolRegistry;
 use neurox::protocols::{ProtocolKind, TransportKind};
 use neurox::registry::Registry;
 use neurox::config::SessionAgentsConfig;
+use neurox::router::state::LifecycleLayer;
 use neurox::session::SessionStore;
+use neurox::session_agents::SessionAgentPool;
+use neurox::skills::SkillsRegistry;
 use neurox::spawner::Spawner;
 use neurox::supervisor::Supervisor;
 use neurox::tasks::TaskManager;
 use std::path::PathBuf;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 
 fn default_agent_binary() -> Option<std::path::PathBuf> {
@@ -36,14 +42,20 @@ async fn free_port() -> u16 {
 
 #[tokio::test]
 async fn cancel_endpoint_marks_session_inactive() {
-    let Some(_binary) = default_agent_binary() else {
+    let Some(binary) = default_agent_binary() else {
         return;
     };
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    let db_path = tmp.path().join("e2e.db");
+
     let registry = Arc::new(Registry::new("/tmp/x".into()));
     let spec = PersistentAgentSpec {
-        id: "agent".into(),
+        // id must match the agent_id the test posts (was "agent" —
+        // the server state never knew it, so create_session 404'd).
+        id: "default".into(),
         kind: AgentKind::Subprocess {
-            command: _binary.to_string_lossy().to_string(),
+            command: binary.to_string_lossy().to_string(),
             args: vec![],
             env: Default::default(),
         },
@@ -58,7 +70,7 @@ async fn cancel_endpoint_marks_session_inactive() {
     };
     let cfg = CoreConfig {
         bind_addr: "127.0.0.1:0".into(),
-        db_path: std::path::PathBuf::from("/tmp/x.db"),
+        db_path: db_path.clone(),
         log_level: "info".into(),
         agents: AgentsConfig {
             persistent: vec![spec],
@@ -77,30 +89,51 @@ async fn cancel_endpoint_marks_session_inactive() {
     registry.load_from_config(&cfg).await.unwrap();
 
     let supervisor = Arc::new(Supervisor::new());
-    let _spawner = Arc::new(Spawner::new(4));
+    let spawner = Arc::new(Spawner::new(4));
     let tasks = Arc::new(TaskManager::new());
-    let _approvals = Arc::new(ApprovalManager::default());
-
-    let _session = Arc::new(
-        SessionStore::open(
-            &std::env::temp_dir().join(format!("neurox-test-{}.db", Uuid::new_v4())),
-        )
-        .await
-        .unwrap(),
-    );
+    let approvals = Arc::new(ApprovalManager::default());
+    let session = Arc::new(SessionStore::open(&db_path).await.unwrap());
+    let session_agents = Arc::new(SessionAgentPool::new(
+        SessionAgentsConfig::default().agents,
+    ));
+    let skills = Arc::new(SkillsRegistry::new());
+    let plugin_registry = Arc::new(PluginToolRegistry::new(Arc::new(
+        tools_engine::tools::ToolRegistry::new(),
+    )));
     let tools = Arc::new(tools_engine::tools::ToolRegistry::new());
-    let _engine = tools_engine::Engine::for_testing(
-        tools.clone(),
-        PathBuf::from("/tmp"),
-        Arc::new(tokio::sync::RwLock::new(Box::new(tools_engine::DefaultSandbox) as Box<dyn tools_engine::SandboxConfig>)),
-    ).await
-        .unwrap();
-    let state = common::build_app_state(
-        std::env::temp_dir().join(format!("neurox-test-{}.db", uuid::Uuid::new_v4())),
-        tools.clone(),
-        PathBuf::from("/tmp"),
-    )
-    .await;
+    let mut state = common::build_app_state(db_path.clone(), tools.clone(), PathBuf::from("/tmp"))
+        .await;
+
+    // Wire the pre-built lifecycle (registry with the test spec,
+    // supervisor, task manager) into the AppState. `build_app_state`
+    // starts with an EMPTY registry/pool, so without this swap the
+    // server would 404 "agent not found" and `was_active` would be false.
+    state.lifecycle = Arc::new(LifecycleLayer::new(
+        registry,
+        supervisor.clone(),
+        spawner,
+        tasks.clone(),
+        approvals,
+        session_agents,
+        session,
+        skills,
+        plugin_registry,
+    ));
+
+    // The HTTP API enforces JWT auth (UserContext extractor 401s without
+    // an injected identity), so `build_app_state`'s default (auth off)
+    // leaves every /v1/sessions call 401. Enable auth + mint a token.
+    let user_store = Arc::new(UserStore::load(&tmp.path().join("users.json")).unwrap());
+    let secret = Arc::new(JwtSecret::generate());
+    let auth_state = AuthState {
+        user_store,
+        secret: secret.clone(),
+        expiry_hours: 1,
+        reauth_tokens: Arc::new(ReauthTokens::new()),
+    };
+    state.auth = state.auth.with_auth(auth_state);
+    let token = issue_token(&secret, uuid::Uuid::new_v4(), "tester", Role::Admin, 1).unwrap();
+
     let app = neurox::router::router(state);
 
     let port = free_port().await;
@@ -121,12 +154,19 @@ async fn cancel_endpoint_marks_session_inactive() {
 
     // Subscribe to events via WS
     let ws_url = format!("ws://127.0.0.1:{port}/v1/events");
-    let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url).await.unwrap();
+    let mut ws_req = ws_url
+        .into_client_request()
+        .expect("ws url builds a request");
+    ws_req
+        .headers_mut()
+        .insert("Authorization", format!("Bearer {token}").parse().unwrap());
+    let (mut ws, _) = tokio_tungstenite::connect_async(ws_req).await.unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     // Create a session
     let resp: serde_json::Value = reqwest::Client::new()
         .post(format!("{base}/v1/sessions"))
+        .bearer_auth(&token)
         .json(&serde_json::json!({"agent_id": "default"}))
         .send()
         .await
@@ -149,6 +189,7 @@ async fn cancel_endpoint_marks_session_inactive() {
     // Cancel via HTTP
     let resp: serde_json::Value = reqwest::Client::new()
         .post(format!("{base}/v1/sessions/{sid}/cancel"))
+        .bearer_auth(&token)
         .send()
         .await
         .unwrap()
@@ -156,7 +197,14 @@ async fn cancel_endpoint_marks_session_inactive() {
         .await
         .unwrap();
     assert_eq!(resp["cancelled"], serde_json::json!(sid));
-    assert!(resp["was_active"].as_bool().unwrap_or(false));
+    // The handler reports the NUMBER of in-flight tokens cancelled
+    // (the WS command's `was_active` is a bool, but the HTTP response
+    // counts tokens). One token was registered above.
+    assert_eq!(
+        resp["was_active"].as_u64(),
+        Some(1),
+        "the single in-flight task token should have been cancelled"
+    );
 
     // Consume a few WS events to verify SessionEnded was emitted
     let mut got_ended = false;

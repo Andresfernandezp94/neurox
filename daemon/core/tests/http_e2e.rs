@@ -9,6 +9,9 @@ use std::time::Duration;
 use futures::StreamExt;
 mod common;
 
+use neurox::auth::{
+    issue_token, AuthState, JwtSecret, ReauthTokens, Role, UserStore,
+};
 use neurox::config::{
     AgentKind, AgentsConfig, CoreConfig, PersistentAgentSpec, RestartPolicy, SandboxConfig,
 };
@@ -19,6 +22,7 @@ use neurox::session::SessionStore;
 use neurox::spawner::Spawner;
 use neurox::supervisor::Supervisor;
 use std::path::PathBuf;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
@@ -252,9 +256,15 @@ async fn websocket_streams_session_events() {
         return;
     };
 
-    let registry = std::sync::Arc::new(Registry::new("/tmp/x".into()));
+    // FIX (2026-09): este test nunca cableaba el agente al AppState del
+    // servidor — construía un Registry/Supervisor locales huérfanos y
+    // además posteaba agent_id "default" con un spec id "agent", así que
+    // POST /v1/sessions respondía 404 ("agent not found") y el unwrap de
+    // session_id reventaba. Ahora el spec es "default" (la id que pide el
+    // POST) y se registra en el registry del state del server, que
+    // build_app_state_auto crea vacío.
     let spec = PersistentAgentSpec {
-        id: "agent".to_string(),
+        id: "default".to_string(),
         kind: AgentKind::Subprocess {
             command: binary.to_string_lossy().to_string(),
             args: vec![],
@@ -274,7 +284,7 @@ async fn websocket_streams_session_events() {
         db_path: std::path::PathBuf::from("/tmp/x.db"),
         log_level: "info".into(),
         agents: AgentsConfig {
-            persistent: vec![spec.clone()],
+            persistent: vec![spec],
             ephemeral_templates: vec![],
         },
         tls: None,
@@ -287,30 +297,33 @@ async fn websocket_streams_session_events() {
         sandbox: SandboxConfig::default(),
         session_agents: SessionAgentsConfig::default(),
     };
-    registry.load_from_config(&cfg).await.unwrap();
 
-    let supervisor = std::sync::Arc::new(Supervisor::new());
-    supervisor.start_agent(spec).await.unwrap();
-    let _spawner = std::sync::Arc::new(Spawner::new(4));
-    let _session = Arc::new(
-        SessionStore::open(
-            &std::env::temp_dir().join(format!("neurox-test-{}.db", Uuid::new_v4())),
-        )
-        .await
-        .unwrap(),
-    );
     let tools = Arc::new(tools_engine::tools::ToolRegistry::new());
-    let _engine = tools_engine::Engine::for_testing(
-        tools.clone(),
-        PathBuf::from("/tmp"),
-        Arc::new(tokio::sync::RwLock::new(Box::new(tools_engine::DefaultSandbox) as Box<dyn tools_engine::SandboxConfig>)),
-    ).await
+    let mut state = common::build_app_state_auto(tools.clone(), PathBuf::from("/tmp")).await;
+    state
+        .lifecycle
+        .registry
+        .load_from_config(&cfg)
+        .await
         .unwrap();
-    let state = common::build_app_state_auto(
-        tools.clone(),
-        PathBuf::from("/tmp"),
-    )
-    .await;
+
+    // The HTTP API enforces JWT auth (the `UserContext` extractor 401s
+    // without an injected identity), regardless of `AuthLayer::default()`.
+    // Enable it here and mint a token for the WS + REST requests below.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let user_store = Arc::new(
+        UserStore::load(&tmp.path().join("users-e2e.json")).unwrap(),
+    );
+    let secret = Arc::new(JwtSecret::generate());
+    let auth_state = AuthState {
+        user_store,
+        secret: secret.clone(),
+        expiry_hours: 1,
+        reauth_tokens: Arc::new(ReauthTokens::new()),
+    };
+    state.auth = state.auth.with_auth(auth_state);
+    let token = issue_token(&secret, Uuid::new_v4(), "tester", Role::Admin, 1).unwrap();
+
     let app = neurox::router::router(state);
 
     let port = free_port().await;
@@ -331,12 +344,19 @@ async fn websocket_streams_session_events() {
 
     // open WS
     let ws_url = format!("ws://127.0.0.1:{port}/v1/events");
-    let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url).await.unwrap();
+    let mut ws_req = ws_url
+        .into_client_request()
+        .expect("ws url builds a request");
+    ws_req
+        .headers_mut()
+        .insert("Authorization", format!("Bearer {token}").parse().unwrap());
+    let (mut ws, _) = tokio_tungstenite::connect_async(ws_req).await.unwrap();
 
     // Trigger a session via HTTP
     let base = format!("http://127.0.0.1:{port}");
     let resp: serde_json::Value = reqwest::Client::new()
         .post(format!("{base}/v1/sessions"))
+        .bearer_auth(&token)
         .json(&serde_json::json!({"agent_id": "default"}))
         .send()
         .await
@@ -362,7 +382,6 @@ async fn websocket_streams_session_events() {
     }
 
     let _ = ws.close(None).await;
-    supervisor.shutdown_all().await;
     server.abort();
 }
 

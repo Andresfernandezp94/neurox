@@ -587,11 +587,11 @@ async fn handle_process(
                 .unwrap_or("");
             let same = s.current_provider_id.as_deref() == Some(provider_id)
                 && s.current_model.as_deref() == Some(model);
-            if !api_key.is_empty()
-                && !model.is_empty()
-                && !kind_str.is_empty()
-                && !same
-            {
+            // EP-2026-09-12: api_key must NOT gate the switch — local
+            // providers (llama-server/Ollama) have no key. The LlmClient
+            // maps an empty key to `None`, and the openai-compat backend
+            // omits the Authorization header in that case.
+            if !model.is_empty() && !kind_str.is_empty() && !same {
                 if let Some(kind) =
                     tools_engine::backend::LlmProviderKind::from_str(kind_str)
                 {

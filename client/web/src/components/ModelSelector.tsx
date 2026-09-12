@@ -12,6 +12,29 @@ import {
   type CatalogModel,
 } from "../api/llm";
 import { ProviderLogo } from "../shared/components/ProviderLogo";
+import { FamilyLogo } from "../shared/components/FamilyLogo";
+
+// Model families with local GGUF availability (matches the HF_FAMILIES
+// list in ModelsTab). Used to render the model's family logo instead of
+// the generic "local" icon when the model lives under local-llama.
+const MODEL_FAMILIES: ReadonlyArray<{ id: string; prefixes: readonly string[] }> = [
+  { id: "qwen", prefixes: ["qwen"] },
+  { id: "llama", prefixes: ["llama", "meta"] },
+  { id: "mistral", prefixes: ["mistral"] },
+  { id: "gemma", prefixes: ["gemma", "google"] },
+  { id: "deepseek", prefixes: ["deepseek"] },
+  { id: "phi", prefixes: ["phi", "microsoft"] },
+  { id: "whisper", prefixes: ["whisper", "openai"] },
+];
+
+/** Detect the HF family id from a model name (e.g. "Qwen3-4B…" → "qwen"). */
+function modelFamily(modelId: string): string | null {
+  const lower = modelId.toLowerCase();
+  const match = MODEL_FAMILIES.find((f) =>
+    f.prefixes.some((p) => lower.startsWith(p)),
+  );
+  return match ? match.id : null;
+}
 
 export interface ModelSelection {
   provider_id: string;
@@ -229,6 +252,10 @@ export function ModelSelector({
   );
 
   const activeModel = decodeValue(selected);
+  const activeFamily =
+    activeModel?.provider_id === "local-llama"
+      ? modelFamily(activeModel.model)
+      : null;
   // EP-2026-09-02: explicit placeholder copy. "select model" reads
   // like an instruction; using a verb instead of an ellipsis or a
   // muted "—" so the user knows they need to act.
@@ -247,13 +274,19 @@ export function ModelSelector({
         aria-expanded={open}
         data-testid="model-selector-trigger"
       >
-        {activeModel && (
-          <ProviderLogo
-            id={activeModel.provider_id}
-            kind={activeModel.provider_id === "local-llama" ? "openai_compat" : "openai_compat"}
-            className="model-selector__trigger-logo"
-          />
-        )}
+        {activeModel &&
+          (activeFamily ? (
+            <FamilyLogo
+              id={activeFamily}
+              className="model-selector__trigger-logo"
+            />
+          ) : (
+            <ProviderLogo
+              id={activeModel.provider_id}
+              kind="openai_compat"
+              className="model-selector__trigger-logo"
+            />
+          ))}
         <span className="model-selector__trigger-label">{activeLabel}</span>
         <span className={`model-selector__caret${open ? " model-selector__caret--open" : ""}`}>▾</span>
       </button>
@@ -329,6 +362,10 @@ export function ModelSelector({
                       const value = encodeValue(providerId, m.model_id);
                       const isActive = selected === value;
                       const display = formatModelName(m.model_id);
+                      const itemFamily =
+                        providerId === "local-llama"
+                          ? modelFamily(m.model_id)
+                          : null;
                       return (
                         <button
                           type="button"
@@ -340,11 +377,18 @@ export function ModelSelector({
                           data-testid={`model-selector-item-${value}`}
                           onClick={() => void handleSelect(value)}
                         >
-                          <ProviderLogo
-                            id={providerId}
-                            kind={m.kind}
-                            className="model-selector__item-logo"
-                          />
+                          {itemFamily ? (
+                            <FamilyLogo
+                              id={itemFamily}
+                              className="model-selector__item-logo"
+                            />
+                          ) : (
+                            <ProviderLogo
+                              id={providerId}
+                              kind={m.kind}
+                              className="model-selector__item-logo"
+                            />
+                          )}
                           <div className="model-selector__item-main">
                             <span className="model-selector__name">{display}</span>
                             <div className="model-selector__tags">

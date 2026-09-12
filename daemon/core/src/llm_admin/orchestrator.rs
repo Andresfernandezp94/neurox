@@ -954,16 +954,17 @@ mod tests {
         orch.start(&a.id).await.unwrap();
         orch.start(&b.id).await.unwrap();
         // Generous window: under cargo's default parallel test execution,
-        // probe + lifecycle contention can delay readiness.
+        // probe + lifecycle contention can delay readiness. 6s proven
+        // more reliable than 2.5s on loaded machines.
         let mut both_ready = false;
-        for _ in 0..50 {
+        for _ in 0..120 {
             tokio::time::sleep(Duration::from_millis(50)).await;
             if orch.is_ready(&a.id).await && orch.is_ready(&b.id).await {
                 both_ready = true;
                 break;
             }
         }
-        assert!(both_ready, "both services should become ready within 2.5s");
+        assert!(both_ready, "both services should become ready within 6s");
         orch.shutdown_all().await;
         assert_eq!(orch.list_statuses().await.len(), 2);
         for st in orch.list_statuses().await {

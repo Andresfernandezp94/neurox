@@ -136,10 +136,15 @@ impl LlmClient {
             tools_engine::http_client::build(&tools_engine::http_client::HttpClientConfig::default())
                 .expect("http client"),
         );
+        let key = if api_key.trim().is_empty() {
+            None
+        } else {
+            Some(api_key)
+        };
         let backend = tools_engine::backend::factory::build_backend(
             "agent".to_string(),
             kind,
-            Some(api_key),
+            key,
             base_url,
             model,
             http,

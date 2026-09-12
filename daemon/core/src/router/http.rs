@@ -961,13 +961,13 @@ pub async fn create_session(
         (executor, None)
     };
 
-    state.emit(Event::SessionStarted {
-        session_id,
-        agent_id: agent_id.clone(),
-    });
-
-    // Persist session with the authenticated user as owner so the
-    // session shows up in every device the user is logged into.
+    // Persist the session OWNER first, then broadcast SessionStarted.
+    // Ordering matters: the WS fan-out filters events by owner via
+    // `get_session_user` (SQLite). If we emitted first, the broadcast
+    // receiver could race the INSERT, see no owner, and silently drop
+    // the event — clients subscribed to /v1/events would miss the
+    // session entirely. Persisting before emitting makes the event
+    // deterministic.
     // `start_session_for_user` also clears `ended_at` (via
     // INSERT OR REPLACE) so a re-opened session is truly active.
     let user_id = user.user_id.to_string();
@@ -1009,6 +1009,13 @@ pub async fn create_session(
     } else {
         tracing::warn!(session_id = %session_id, "no active LLM provider/model — session model left empty");
     }
+
+    // Broadcast AFTER the (re)activation write so per-session events
+    // can be authoritatively attributed to the owner.
+    state.emit(Event::SessionStarted {
+        session_id,
+        agent_id: agent_id.clone(),
+    });
 
     Ok(Json(SessionCreated {
         session_id,
@@ -2442,10 +2449,23 @@ pub async fn list_llm_providers(State(state): State<Arc<AppState>>) -> Json<serd
         let base_url = p.base_url.clone();
         let api_key_env = p.api_key_env.clone();
         let configured = catalog_is_configured_field(api_key_env.as_deref());
-        // service_state: only for local providers. Stays null for now
-        // (the orchestrator lookup requires the LlmProviderConfig struct
-        // which we no longer have here).
-        let service_state = serde_json::Value::Null;
+        // EP-0018: expone los campos de orquestación local y el estado en
+        // vivo del servicio. `service_state` queda null para providers
+        // remotos; los locales reportan el estado del orchestrator
+        // ("stopped" si aún no fueron registrados con Start).
+        let has_local = p.local_command.is_some() || p.local_port.is_some();
+        let service_state: serde_json::Value = if has_local {
+            let slug = match state.auth.orchestrator.as_ref() {
+                Some(o) => match o.status(&id).await {
+                    Some(st) => service_state_slug(st.state).to_string(),
+                    None => "stopped".to_string(),
+                },
+                None => "stopped".to_string(),
+            };
+            serde_json::Value::String(slug)
+        } else {
+            serde_json::Value::Null
+        };
         providers.push(json!({
             "id": id,
             "kind": kind,
@@ -2455,6 +2475,10 @@ pub async fn list_llm_providers(State(state): State<Arc<AppState>>) -> Json<serd
             "configured": configured,
             "active": configured,
             "service_state": service_state,
+            "local_command": p.local_command,
+            "local_args": p.local_args,
+            "local_model_path": p.local_model_path,
+            "local_port": p.local_port,
         }));
     }
 
@@ -2488,10 +2512,16 @@ fn catalog_is_configured_field(api_key_env: Option<&str>) -> bool {
     // provider would report configured=true before the user ever
     // entered a key.
     match api_key_env {
-        Some(name) if !name.is_empty() => std::env::var(name)
+        // EP-2026-09-12: providers without api_key_env (local services
+        // like llama-server/Ollama) are always configured — aligned with
+        // `catalog::is_configured`. Before this, `local-llama`
+        // reported configured=false and the web's chat ModelSelector
+        // (which lists only configured providers) hid it entirely.
+        None => true,
+        Some(name) if name.is_empty() => false,
+        Some(name) => std::env::var(name)
             .map(|v| !v.trim().is_empty())
             .unwrap_or(false),
-        _ => false,
     }
 }
 
@@ -2524,30 +2554,61 @@ fn service_state_slug(state: crate::llm_admin::ServiceState) -> &'static str {
 /// Resolve the provider config for a start/stop request. Returns the
 /// configured provider, or an HTTP error mapping (404 if missing, 400 if
 /// it has no `local_command`).
-fn resolve_local_provider(
+///
+/// F5.1 migration: lee del engine store (SQLite) — la fuente de verdad
+/// donde CREATE/PUT/DELETE de providers escriben — no del YAML de
+/// `state.config.llm.providers` (que queda congelado al startup y no ve
+/// los providers creados en runtime vía el panel de administración).
+async fn resolve_local_provider(
     state: &AppState,
     provider_id: &str,
 ) -> Result<crate::config::LlmProviderConfig, (axum::http::StatusCode, String)> {
-    let cfg = state
-        .config
-        .llm
-        .providers
-        .iter()
-        .find(|p| p.id == provider_id)
-        .cloned()
-        .ok_or_else(|| {
+    let stored = state
+        .engine
+        .get_provider(provider_id)
+        .await
+        .map_err(|e| {
             (
-                axum::http::StatusCode::NOT_FOUND,
-                format!("provider '{provider_id}' not found"),
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("provider store error: {e}"),
             )
         })?;
-    if cfg.local_command.is_none() {
+    let tcfg = stored.ok_or_else(|| {
+        (
+            axum::http::StatusCode::NOT_FOUND,
+            format!("provider '{provider_id}' not found"),
+        )
+    })?;
+    if tcfg.local_command.is_none() {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
             format!("provider '{provider_id}' has no local service"),
         ));
     }
-    Ok(cfg)
+    Ok(to_core_provider(tcfg))
+}
+
+/// Map a provider row from the tools-engine store onto the core config
+/// struct used by the orchestrator (identical shapes, different crates).
+fn to_core_provider(t: tools_engine::LlmProviderConfig) -> crate::config::LlmProviderConfig {
+    crate::config::LlmProviderConfig {
+        id: t.id,
+        kind: match t.kind {
+            tools_engine::LlmProviderKind::Minimax => crate::config::LlmProviderKind::Minimax,
+            tools_engine::LlmProviderKind::OpenaiCompat => {
+                crate::config::LlmProviderKind::OpenaiCompat
+            }
+            tools_engine::LlmProviderKind::Anthropic => crate::config::LlmProviderKind::Anthropic,
+        },
+        base_url: t.base_url,
+        model: t.model,
+        api_key_env: t.api_key_env,
+        extra: t.extra,
+        local_command: t.local_command,
+        local_args: t.local_args,
+        local_model_path: t.local_model_path,
+        local_port: t.local_port,
+    }
 }
 
 /// POST /v1/llm/providers/:id/start — start the local service for a provider.
@@ -2555,7 +2616,7 @@ pub async fn start_local_provider(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
-    let cfg = resolve_local_provider(&state, &id)?;
+    let cfg = resolve_local_provider(&state, &id).await?;
     let orchestrator = state.auth.orchestrator.as_ref().ok_or_else(|| {
         (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -2598,7 +2659,7 @@ pub async fn stop_local_provider(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
-    let cfg = resolve_local_provider(&state, &id)?;
+    let cfg = resolve_local_provider(&state, &id).await?;
     let orchestrator = state.auth.orchestrator.as_ref().ok_or_else(|| {
         (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -3506,15 +3567,22 @@ pub fn provider_api_key(provider_id: Option<&str>) -> Option<String> {
 /// LlmClient when the user picks a different model mid-session.
 struct ResolvedProvider {
     kind: tools_engine::backend::LlmProviderKind,
-    api_key: String,
+    api_key: Option<String>,
     base_url: String,
     model: String,
 }
 
 /// Look up the configured provider by id, resolve its api_key from the
 /// env var named by `api_key_env`, and bundle everything for the
-/// subprocess. Returns `None` if the provider is unknown OR not
-/// configured (api_key_env empty / unset).
+/// subprocess. Returns `None` if the provider is unknown.
+///
+/// EP-2026-09-12: local services (llama-server/Ollama) have NO
+/// api_key_env. Previously the `?` on the api_key resolution made this
+/// return `None` for them, so the agent subprocess never received the
+/// `llm` override and fell back to the daemon default provider — the
+/// web's selected local model was silently ignored. api_key is now
+/// `Option` (like the LlmBackend factory expects: `None` means "no auth
+/// header") and only absent-vs-present matters.
 async fn resolve_provider_runtime(
     state: &AppState,
     provider_id: &str,
@@ -3525,7 +3593,8 @@ async fn resolve_provider_runtime(
     let api_key = cfg
         .api_key_env
         .as_deref()
-        .and_then(|env| std::env::var(env).ok())?;
+        .and_then(|env| std::env::var(env).ok())
+        .filter(|v| !v.trim().is_empty());
     Some(ResolvedProvider {
         kind: tools_engine::backend::LlmProviderKind::from_str(cfg.kind.as_str())
             .unwrap_or(tools_engine::backend::LlmProviderKind::OpenaiCompat),

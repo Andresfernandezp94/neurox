@@ -18,9 +18,14 @@ use reqwest::Client;
 
 /// Tunable parameters for building the shared HTTP client.
 ///
-/// Defaults are conservative (30s total timeout, 10s connect, no
+/// Defaults are conservative (300s total timeout, 10s connect, no
 /// proxy, system trust roots). Tests can opt out of cert validation
-/// with `accept_invalid_certs = true`.
+/// with `accept_invalid_certs = true`. The 300s ceiling exists because
+/// CPU-hosted local LLMs (llama-server/Ollama) can take minutes to
+/// prefill a large prompt; 30s kept cutting local streaming requests
+/// mid-body (/v1/sessions/:id/messages/stream failed with "error
+/// decoding response body" after exactly 30s while the 4B model was
+/// still pre-filling a ~2.6k-token context).
 #[derive(Debug, Clone)]
 pub struct HttpClientConfig {
     pub timeout_secs: u64,
@@ -33,7 +38,7 @@ pub struct HttpClientConfig {
 impl Default for HttpClientConfig {
     fn default() -> Self {
         Self {
-            timeout_secs: 30,
+            timeout_secs: 300,
             connect_timeout_secs: 10,
             user_agent: format!("neurox/{}", env!("CARGO_PKG_VERSION")),
             proxy: None,

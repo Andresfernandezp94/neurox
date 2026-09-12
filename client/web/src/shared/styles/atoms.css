@@ -2818,8 +2818,10 @@
 
 /* EP-0018-04: shared class for the per-provider action buttons in the
    card header. Fixed 1.75rem slot so new buttons added later align
-   consistently without shifting existing ones. Default state is muted
-   grey; each modifier lights up its own colour on hover and on press. */
+   consistently without shifting existing ones. Transparent by default so
+   the dark actions pill (provider-card__actions) supplies the surface;
+   each modifier lights up its own colour at rest, on hover and on
+   press. */
 .provider-action {
   width: 1.75rem;
   height: 1.75rem;
@@ -2829,15 +2831,29 @@
   justify-content: center;
   flex: 0 0 1.75rem;
   color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
   border-radius: 0.375rem;
   transition: background 0.12s ease, color 0.12s ease, transform 0.06s ease;
 }
 .provider-action svg { width: 1rem; height: 1rem; }
+.provider-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.provider-action:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* Hover: each modifier takes its own brand colour. */
+/* Rest + hover: each modifier takes its own brand colour. */
+.provider-action--save {
+  color: var(--accent);
+}
 .provider-action--save:hover:not(:disabled) {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.provider-action--delete {
+  color: var(--status-danger);
 }
 .provider-action--delete:hover:not(:disabled) {
   color: var(--status-danger);
