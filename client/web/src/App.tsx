@@ -16,14 +16,12 @@ import { ChatPanel } from "./components/ChatPanel";
 import { ConfigViewer } from "./components/ConfigViewer";
 import { LoginScreen } from "./components/LoginScreen";
 import { PanelFrame } from "./shared/components/PanelFrame";
-import { SessionsPanel } from "./components/SessionsPanel";
 import { WorkspaceViewer } from "./components/WorkspaceViewer";
 
 const VALID_NAV_IDS: NavId[] = [
   "status",
   "chat",
   "config",
-  "sessions",
   "workspace",
 ];
 
@@ -102,11 +100,6 @@ function AppInner() {
         {activeTab === "config" && (
           <PanelFrame testId="config-panel">
             <ConfigViewer />
-          </PanelFrame>
-        )}
-        {activeTab === "sessions" && (
-          <PanelFrame testId="sessions-panel">
-            <SessionsPanel />
           </PanelFrame>
         )}
         {activeTab === "workspace" && (

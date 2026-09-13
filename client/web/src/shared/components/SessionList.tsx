@@ -2,7 +2,8 @@
 // Variants: "sidebar" | "panel" | "expanded"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { IconSearch, IconTrash } from "./Icons";
+import { IconClipboard, IconSearch, IconTrash } from "./Icons";
+import { ConfirmDialog } from "./ConfirmDialog";
 import type { SessionSummary } from "../../types";
 
 export type SessionListVariant = "sidebar" | "panel" | "expanded";
@@ -93,6 +94,7 @@ export function SessionList({
   const [statusFilter, setStatusFilter] = useState<SessionStatusFilter>("all");
   const [sortKey, setSortKey] = useState<SessionSortKey>("started_at");
   const [sortDir, setSortDir] = useState<SessionSortDir>("desc");
+  const [deleteTarget, setDeleteTarget] = useState<SessionSummary | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
 
@@ -196,28 +198,28 @@ export function SessionList({
     [editValue, onRename, cancelRename],
   );
 
-  const handleDelete = useCallback(
-    async (s: SessionSummary) => {
+  const requestDelete = useCallback(
+    (s: SessionSummary) => {
       if (!onDelete) return;
-      if (busy !== `confirm:${s.session_id}`) {
-        setBusy(`confirm:${s.session_id}`);
-        setTimeout(() => {
-          setBusy((b) => (b === `confirm:${s.session_id}` ? null : b));
-        }, 3000);
-        return;
-      }
-      setBusy(`delete:${s.session_id}`);
-      setError(null);
-      try {
-        await onDelete(s.session_id);
-      } catch (e) {
-        setError(`delete failed: ${(e as Error).message}`);
-      } finally {
-        setBusy(null);
-      }
+      setDeleteTarget(s);
     },
-    [busy, onDelete],
+    [onDelete],
   );
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget || !onDelete) return;
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    setBusy(`delete:${target.session_id}`);
+    setError(null);
+    try {
+      await onDelete(target.session_id);
+    } catch (e) {
+      setError(`delete failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(null);
+    }
+  }, [deleteTarget, onDelete]);
 
   const handleStop = useCallback(
     async (s: SessionSummary) => {
@@ -254,6 +256,58 @@ export function SessionList({
     },
     [sortKey, sortDir],
   );
+
+  const renderActions = (s: SessionSummary) => {
+    if (!onRename && !onStop && !onDelete) return null;
+    const editing = editingId === s.session_id;
+    return (
+      <div className="session-list__item-actions">
+        {onRename && !editing && (
+          <button
+            className="session-list__item-edit-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              startRename(s);
+            }}
+            title="Rename"
+            aria-label="Rename session"
+            data-testid={`session-list-rename-${s.session_id}`}
+          >
+            ✎
+          </button>
+        )}
+        {onStop && !editing && !isClosed(s) && (
+          <button
+            className="session-list__item-stop"
+            onClick={(e) => {
+              e.stopPropagation();
+              void handleStop(s);
+            }}
+            disabled={busy === `stop:${s.session_id}`}
+            title="Stop session agent"
+            aria-label="Stop session agent"
+            data-testid={`session-list-stop-${s.session_id}`}
+          >
+            {busy === `stop:${s.session_id}` ? "…" : "■"}
+          </button>
+        )}
+        {onDelete && !editing && (
+          <button
+            className={`session-list__item-delete${busy === `delete:${s.session_id}` ? " session-list__item-delete--busy" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              requestDelete(s);
+            }}
+            title="Delete session"
+            aria-label="Delete session"
+            data-testid={`session-list-delete-${s.session_id}`}
+          >
+            <IconTrash />
+          </button>
+        )}
+      </div>
+    );
+  };
 
   const isActive = (s: SessionSummary) => s.session_id === currentSessionId;
   const isClosed = (s: SessionSummary) => !!s.ended_at;
@@ -315,8 +369,7 @@ export function SessionList({
         </div>
       )}
 
-      {isExpanded && (
-        <div className="session-list__filters" role="tablist" aria-label="Filter by status">
+      <div className="session-list__filters" role="tablist" aria-label="Filter by status">
           {(["all", "active", "closed"] as const).map((f) => (
             <button
               key={f}
@@ -331,7 +384,6 @@ export function SessionList({
             </button>
           ))}
         </div>
-      )}
 
       {error && (
         <div className="session-list__error" role="alert">
@@ -346,7 +398,9 @@ export function SessionList({
         </div>
       ) : sessions.length === 0 ? (
         <div className="session-list__empty">
-          <div className="session-list__empty-icon">💬</div>
+          <div className="session-list__empty-icon">
+            <IconClipboard />
+          </div>
           <div className="session-list__empty-title">
             {isSidebar ? "No previous chats" : "No sessions yet"}
           </div>
@@ -367,42 +421,68 @@ export function SessionList({
         </div>
       ) : (
         <>
-          {isExpanded && (
-            <div className="session-list__sort-headers" aria-label="Sort by column">
-              <button
-                type="button"
-                className={`session-list__sort-header${sortKey === "started_at" ? " session-list__sort-header--active" : ""}`}
-                onClick={() => handleSort("started_at")}
-                data-testid="session-list-sort-started_at"
-              >
-                When {sortKey === "started_at" && SORT_INDICATORS.started_at[sortDir]}
-              </button>
-              <button
-                type="button"
-                className={`session-list__sort-header${sortKey === "agent_id" ? " session-list__sort-header--active" : ""}`}
-                onClick={() => handleSort("agent_id")}
-                data-testid="session-list-sort-agent_id"
-              >
-                Agent {sortKey === "agent_id" && SORT_INDICATORS.agent_id[sortDir]}
-              </button>
-              <button
-                type="button"
-                className={`session-list__sort-header${sortKey === "status" ? " session-list__sort-header--active" : ""}`}
-                onClick={() => handleSort("status")}
-                data-testid="session-list-sort-status"
-              >
-                Status {sortKey === "status" && SORT_INDICATORS.status[sortDir]}
-              </button>
-              <div className="session-list__sort-header session-list__sort-header--spacer" />
-            </div>
-          )}
+{!isSidebar && isExpanded ? (
+          <div className="session-list__sort-headers" aria-label="Sort by column">
+            <button
+              type="button"
+              className={`session-list__sort-header${sortKey === "started_at" ? " session-list__sort-header--active" : ""}`}
+              onClick={() => handleSort("started_at")}
+              data-testid="session-list-sort-started_at"
+            >
+              When {sortKey === "started_at" && SORT_INDICATORS.started_at[sortDir]}
+            </button>
+            <button
+              type="button"
+              className={`session-list__sort-header${sortKey === "agent_id" ? " session-list__sort-header--active" : ""}`}
+              onClick={() => handleSort("agent_id")}
+              data-testid="session-list-sort-agent_id"
+            >
+              Agent {sortKey === "agent_id" && SORT_INDICATORS.agent_id[sortDir]}
+            </button>
+            <button
+              type="button"
+              className={`session-list__sort-header${sortKey === "status" ? " session-list__sort-header--active" : ""}`}
+              onClick={() => handleSort("status")}
+              data-testid="session-list-sort-status"
+            >
+              Status {sortKey === "status" && SORT_INDICATORS.status[sortDir]}
+            </button>
+            <div className="session-list__sort-header session-list__sort-header--spacer" />
+          </div>
+        ) : isSidebar ? (
+          <div className="session-list__sort-headers session-list__sort-headers--sidebar" aria-label="Sort by column">
+            <button
+              type="button"
+              className={`session-list__sort-header${sortKey === "started_at" ? " session-list__sort-header--active" : ""}`}
+              onClick={() => handleSort("started_at")}
+              data-testid="session-list-sort-started_at"
+            >
+              When {sortKey === "started_at" && SORT_INDICATORS.started_at[sortDir]}
+            </button>
+            <button
+              type="button"
+              className={`session-list__sort-header${sortKey === "agent_id" ? " session-list__sort-header--active" : ""}`}
+              onClick={() => handleSort("agent_id")}
+              data-testid="session-list-sort-agent_id"
+            >
+              Agent {sortKey === "agent_id" && SORT_INDICATORS.agent_id[sortDir]}
+            </button>
+            <button
+              type="button"
+              className={`session-list__sort-header${sortKey === "status" ? " session-list__sort-header--active" : ""}`}
+              onClick={() => handleSort("status")}
+              data-testid="session-list-sort-status"
+            >
+              Status {sortKey === "status" && SORT_INDICATORS.status[sortDir]}
+            </button>
+          </div>
+        ) : null}
           <div className={`session-list__items ${isExpanded ? "session-list__items--expanded" : ""}`}>
             {filtered.map((s) => {
               const active = isActive(s);
               const closed = isClosed(s);
               const isEditing = editingId === s.session_id;
-              const confirmState = busy === `confirm:${s.session_id}`;
-              const title = s.summary || s.session_id.slice(0, isSidebar ? 16 : 8) + "…";
+              const title = s.summary || (isSidebar ? s.session_id : s.session_id.slice(0, 8) + "…");
               // EP-0028-b: in the sidebar variant the title can
               // wrap to a second line so users get a preview of the
               // chat without expanding. In the panel/expanded
@@ -548,55 +628,10 @@ export function SessionList({
                             )}
                           </div>
                         )}
+                        {isSidebar && renderActions(s)}
                       </div>
 
-                      {(onRename || onDelete) && !isSidebar && (
-                        <div className="session-list__item-actions">
-                          {onRename && !isEditing && (
-                            <button
-                              className="session-list__item-edit-btn"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                startRename(s);
-                              }}
-                              title="Rename"
-                              aria-label="Rename session"
-                              data-testid={`session-list-rename-${s.session_id}`}
-                            >
-                              ✎
-                            </button>
-                          )}
-                          {onStop && !isEditing && !closed && (
-                            <button
-                              className="session-list__item-stop"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void handleStop(s);
-                              }}
-                              disabled={busy === `stop:${s.session_id}`}
-                              title="Stop session agent"
-                              aria-label="Stop session agent"
-                              data-testid={`session-list-stop-${s.session_id}`}
-                            >
-                              {busy === `stop:${s.session_id}` ? "…" : "■"}
-                            </button>
-                          )}
-                          {onDelete && !isEditing && (
-                            <button
-                              className={`session-list__item-delete${confirmState ? " session-list__item-delete--confirm" : ""}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void handleDelete(s);
-                              }}
-                              title={confirmState ? "Click again to confirm" : "Delete session"}
-                              aria-label="Delete session"
-                              data-testid={`session-list-delete-${s.session_id}`}
-                            >
-                              {confirmState ? "✓" : <IconTrash />}
-                            </button>
-                          )}
-                        </div>
-                      )}
+                      {!isSidebar && renderActions(s)}
                     </>
                   )}
                 </div>
@@ -605,6 +640,22 @@ export function SessionList({
           </div>
         </>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete session"
+        message={
+          <>
+            Delete{" "}
+            <strong>{deleteTarget?.summary || deleteTarget?.session_id}</strong>?
+            This permanently removes its message history.
+          </>
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

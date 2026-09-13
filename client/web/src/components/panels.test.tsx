@@ -6,13 +6,11 @@ import { describe, expect, it, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
 import { AgentsPanel } from './AgentsPanel';
-import { SessionsPanel } from './SessionsPanel';
 import { ApprovalsPanel } from './ApprovalsPanel';
 import { ConfigViewer } from './ConfigViewer';
 import { StoreProvider, useStore, type StoreAction } from '../store/StoreContext';
 import { AuthProvider } from '../hooks/useAuth';
 import * as agentsApi from '../api/agents';
-import * as sessionsApi from '../api/sessions';
 
 function Seed({ actions }: { actions: StoreAction[] }) {
   const { dispatch } = useStore();
@@ -88,94 +86,6 @@ describe('AgentsPanel', () => {
     fireEvent.click(screen.getByTestId('agent-toggle-foo'));
     await waitFor(() => {
       expect(startSpy).toHaveBeenCalledWith('foo');
-    });
-  });
-});
-
-describe('SessionsPanel', () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it('renders the empty state when no sessions', async () => {
-    vi.spyOn(sessionsApi, 'listSessions').mockResolvedValue({
-      sessions: [],
-    } as never);
-    renderWithStore(<SessionsPanel />, [
-      { type: 'SNAPSHOT_SESSIONS', sessions: [] },
-    ]);
-    // SessionsPanel now uses SessionList variant="expanded" with loading state;
-    // wait for the initial listSessions() to resolve and the empty state to render.
-    await waitFor(() => {
-      expect(screen.getByText(/No sessions/)).toBeInTheDocument();
-    });
-  });
-
-  it('renders a row per session from the store', async () => {
-    vi.spyOn(sessionsApi, 'listSessions').mockResolvedValue({
-      sessions: [
-        {
-          session_id: 'abc-123-def',
-          agent_id: 'default',
-          started_at: '2026-08-04T00:00:00Z',
-          summary: 'hello',
-          ended_at: null,
-        },
-      ],
-    } as never);
-    renderWithStore(<SessionsPanel />, [
-      {
-        type: 'SNAPSHOT_SESSIONS',
-        sessions: [
-          {
-            session_id: 'abc-123-def',
-            agent_id: 'default',
-            started_at: '2026-08-04T00:00:00Z',
-            summary: 'hello',
-            ended_at: null,
-          },
-        ],
-      },
-    ]);
-    await waitFor(() => {
-      expect(screen.getByText('hello')).toBeInTheDocument();
-    });
-  });
-
-  it('opens the session detail when clicking Open', async () => {
-    const sampleSession = {
-      session_id: 'abc-123-def',
-      agent_id: 'default',
-      started_at: '2026-08-04T00:00:00Z',
-      summary: 'test',
-      ended_at: null,
-    };
-    // SessionsPanel refreshes on mount via listSessions(). Return the same session
-    // so the store isn't overwritten with an empty list.
-    vi.spyOn(sessionsApi, 'listSessions').mockResolvedValue({
-      sessions: [sampleSession],
-    } as never);
-    vi.spyOn(sessionsApi, 'getSessionMessages').mockResolvedValue({
-      messages: [
-        {
-          id: 1,
-          session_id: 'abc-123-def',
-          role: 'user',
-          content: 'hi',
-          ts: '2026-08-04T00:00:00Z',
-        },
-      ],
-    } as never);
-    renderWithStore(<SessionsPanel />, [
-      {
-        type: 'SNAPSHOT_SESSIONS',
-        sessions: [sampleSession],
-      },
-    ]);
-    await waitFor(() => {
-      expect(screen.getByText('test')).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByText('test'));
-    await waitFor(() => {
-      expect(screen.getByText('hi')).toBeInTheDocument();
     });
   });
 });

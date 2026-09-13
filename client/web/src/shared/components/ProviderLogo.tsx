@@ -46,5 +46,10 @@ function matchLogo(id: string, kind?: string): string | null {
 export function ProviderLogo({ id, kind, className }: ProviderLogoProps): ReactNode {
   const url = matchLogo(id, kind);
   if (!url) return <IconDefaultAgent />;
-  return <img src={url} alt={`${id} logo`} className={className ?? "provider-logo"} />;
+  const lower = id.toLowerCase();
+  // openai / grok assets are single-color black SVGs — render them white.
+  const white =
+    lower.startsWith("openai") || lower.startsWith("grok");
+  const cls = `${className ?? "provider-logo"}${white ? " provider-logo--white" : ""}`;
+  return <img src={url} alt={`${id} logo`} className={cls} />;
 }

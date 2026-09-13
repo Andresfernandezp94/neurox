@@ -22,7 +22,6 @@ import {
   IconChat,
   IconPin,
   IconPinFilled,
-  IconClipboard,
   IconPower,
 } from "./Icons";
 import { AppLogo } from "./AppLogo";
@@ -32,12 +31,7 @@ import { useConnectionState } from "../../store/StoreContext";
 import { useAuth } from "../../hooks/useAuth";
 import { logout } from "../../api/auth";
 
-export type NavId =
-  | "status"
-  | "chat"
-  | "config"
-  | "sessions"
-  | "workspace";
+export type NavId = "status" | "chat" | "config" | "workspace";
 
 export interface SidebarProps {
   view: NavId;
@@ -134,12 +128,6 @@ export function Sidebar({ view, onTabChange, hidden = false, forceCollapsed = fa
       label: "Conversation",
       items: [
         { id: "chat", label: t("sidebar.chat"), icon: IconChat },
-      ],
-    },
-    {
-      label: "History",
-      items: [
-        { id: "sessions", label: t("panels.sessions.title"), icon: IconClipboard },
       ],
     },
     {

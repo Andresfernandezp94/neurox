@@ -154,7 +154,7 @@ export function ProvidersPanel() {
       {error && <ErrorBanner>{error}</ErrorBanner>}
       {loading && <p className="muted">Loading...</p>}
 
-      <p className="muted text-sm">
+      <p className="muted text-sm providers-panel__description">
         Providers are managed by the neurox daemon and shared with the sidebar. API keys live in the daemon's environment.
       </p>
       {!loading && providers.length === 0 && (
@@ -202,7 +202,6 @@ interface ProviderCardSBProps {
 function ProviderCardSB({ provider: p, busy, onSaveKey, onClearKey }: ProviderCardSBProps) {
   const [keyValue, setKeyValue] = useState("");
   const canSave = keyValue.trim().length > 0 && !busy;
-  const envName = p.api_key_env ?? p.id;
 
   const save = () => {
     if (!canSave) return;
@@ -219,27 +218,8 @@ function ProviderCardSB({ provider: p, busy, onSaveKey, onClearKey }: ProviderCa
         {p.active && <Badge className="badge--active">ACTIVE</Badge>}
       </Row>
 
-      {/* kind • model */}
-      <div className="provider-meta">
-        {p.kind} &nbsp;•&nbsp; {p.model}
-      </div>
-
       {/* endpoint */}
       <div className="provider-endpoint">{p.base_url}</div>
-
-      {/* key status */}
-      <Row
-        gap="sm"
-        align="center"
-        className={p.configured ? "" : "status-danger"}
-      >
-        <span aria-hidden="true">{p.configured ? "🔑" : "⚠"}</span>
-        <span className="text-sm">
-          {p.configured
-            ? `API key configured (${envName})`
-            : `API key missing (${envName})`}
-        </span>
-      </Row>
 
       {/* key entry: password field + save + (clear) */}
       <Row gap="sm" align="stretch" className="provider-keyrow">

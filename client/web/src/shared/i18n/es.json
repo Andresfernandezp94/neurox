@@ -42,9 +42,6 @@
   "panels.agents.title": "Agentes",
   "panels.agents.empty": "No hay agentes registrados.",
 
-  "panels.sessions.title": "Sesiones",
-  "panels.sessions.empty": "No hay sesiones activas.",
-
   "panels.approvals.title": "Aprobaciones pendientes",
   "panels.approvals.empty": "No hay aprobaciones pendientes.",
 

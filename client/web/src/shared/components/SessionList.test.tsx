@@ -191,19 +191,32 @@ describe("SessionList", () => {
     });
   });
 
-  it("requires double-click to confirm delete", async () => {
+  it("deletes after confirming in the modal", async () => {
     const onDelete = vi.fn().mockResolvedValue(undefined);
     render(
       <SessionList sessions={baseSessions} variant="panel" onDelete={onDelete} />,
     );
     const deleteBtn = screen.getByTestId("session-list-delete-sess-12345678-abcdef");
     fireEvent.click(deleteBtn);
-    expect(onDelete).not.toHaveBeenCalled();
-    expect(deleteBtn.className).toContain("session-list__item-delete--confirm");
-    fireEvent.click(deleteBtn);
+    expect(
+      screen.getByText(/This permanently removes its message history/i),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
     await waitFor(() => {
       expect(onDelete).toHaveBeenCalledWith("sess-12345678-abcdef");
     });
+  });
+
+  it("does not delete when the confirm dialog is cancelled", async () => {
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    render(
+      <SessionList sessions={baseSessions} variant="panel" onDelete={onDelete} />,
+    );
+    const deleteBtn = screen.getByTestId("session-list-delete-sess-12345678-abcdef");
+    fireEvent.click(deleteBtn);
+    fireEvent.click(screen.getByRole("button", { name: /cancelar/i }));
+    expect(screen.queryByTestId("confirm-dialog-confirm")).not.toBeInTheDocument();
+    expect(onDelete).not.toHaveBeenCalled();
   });
 
   it("expanded variant has filter chips and sort headers", () => {

@@ -86,7 +86,6 @@ describe("App", () => {
   it("renders Sidebar with navigation items", () => {
     render(<App />);
     expect(screen.getByTestId("sidebar-nav-chat")).toBeInTheDocument();
-    expect(screen.getByTestId("sidebar-nav-sessions")).toBeInTheDocument();
     expect(screen.getByTestId("sidebar-nav-config")).toBeInTheDocument();
   });
 

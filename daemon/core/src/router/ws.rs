@@ -156,6 +156,22 @@ async fn event_owned_by(
             return true;
         }
     };
+    // SessionEnded for an explicit DELETE is emitted AFTER the session
+    // row is removed from SQLite, so the ownership lookup below would
+    // find nothing and drop the event — leaving the client's sidebar
+    // stale until the next manual refresh. The DELETE handler already
+    // enforced ownership before deleting, so a deleted-session event is
+    // safe to forward as-is (removing a non-existent id is a no-op on
+    // the client).
+    if let Event::SessionEnded {
+        summary: Some(summary),
+        ..
+    } = event
+    {
+        if summary == "deleted" {
+            return true;
+        }
+    }
     let Some(sid) = session_id else {
         return true;
     };

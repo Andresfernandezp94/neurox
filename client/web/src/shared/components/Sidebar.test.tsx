@@ -33,7 +33,6 @@ describe("Sidebar", () => {
 
     const ids: NavId[] = [
       "chat",
-      "sessions",
       "config",
     ];
     for (const id of ids) {
@@ -52,7 +51,6 @@ describe("Sidebar", () => {
 
     expect(order).toEqual([
       "sidebar-nav-chat",
-      "sidebar-nav-sessions",
       "sidebar-nav-config",
     ]);
   });
@@ -63,8 +61,8 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByTestId("sidebar-nav-chat"));
     expect(onTabChange).toHaveBeenCalledWith("chat");
 
-    fireEvent.click(screen.getByTestId("sidebar-nav-sessions"));
-    expect(onTabChange).toHaveBeenCalledWith("sessions");
+    fireEvent.click(screen.getByTestId("sidebar-nav-config"));
+    expect(onTabChange).toHaveBeenCalledWith("config");
   });
 
   it("marks the active item with the 'active' class", () => {
@@ -80,7 +78,6 @@ describe("Sidebar", () => {
   it("accepts all valid NavId values (visible ones get the active class)", () => {
     const validIds: NavId[] = [
       "chat",
-      "sessions",
       "config",
     ];
 
