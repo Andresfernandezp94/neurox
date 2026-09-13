@@ -24,15 +24,7 @@ import { Stack } from "../shared/components/molecules/Stack";
 import { Button } from "../shared/components/atoms/Button";
 import { Input } from "../shared/components/atoms/Input";
 import { ErrorBanner } from "../shared/components/molecules/ErrorBanner";
-import { Badge } from "../shared/components/atoms/Badge";
-import {
-  IconClose,
-  IconEdit,
-  IconLoop,
-  IconPlus,
-  IconTrash,
-  IconUsers,
-} from "../shared/components/Icons";
+import { IconCheck, IconClose, IconEdit, IconLoop, IconPlus, IconTrash, IconUsers } from "../shared/components/Icons";
 
 const ROLES: Role[] = ["Admin", "Operator", "Viewer"];
 
@@ -51,12 +43,6 @@ interface DraftUser {
 }
 
 const EMPTY_DRAFT: DraftUser = { username: "", password: "", role: "Viewer" };
-
-function roleVariant(role: Role): "danger" | "warn" | "neutral" {
-  if (role === "Admin") return "danger";
-  if (role === "Operator") return "warn";
-  return "neutral";
-}
 
 export function UsersPanel(): React.JSX.Element {
   const [users, setUsers] = useState<UserInfo[]>([]);
@@ -155,33 +141,33 @@ export function UsersPanel(): React.JSX.Element {
   );
 
   return (
-    <Stack gap="md" className="users-panel" data-testid="config-users-tab">
+    <div className="providers-list" data-testid="config-users-tab">
       {error && <ErrorBanner variant="error">{error}</ErrorBanner>}
 
-      <Row justify="between" align="center">
-        <h2 className="strong text-lg users-panel__title">Users</h2>
-        <Row gap="sm" align="center">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void refresh()}
-            disabled={loading}
-          >
-            <IconLoop /> Refresh
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => setShowForm((v) => !v)}
-            data-testid="users-new-toggle"
-          >
-            {showForm ? <IconClose /> : <IconPlus />} {showForm ? "Cancel" : "New user"}
-          </Button>
-        </Row>
+      <p className="muted text-sm providers-panel__description">
+        Manage user accounts and their roles. This panel is only visible to
+        admins.
+      </p>
+
+      <Row justify="start">
+        <Button
+          variant={showForm ? "secondary" : "primary"}
+          size="sm"
+          onClick={() => setShowForm((v) => !v)}
+          className="users-panel__new-btn"
+          data-testid="users-new-toggle"
+        >
+          {showForm ? "Cancel" : "New"} {showForm ? <IconClose /> : <IconPlus />}
+        </Button>
       </Row>
 
+      <div className="providers-list__section-head">
+        <h4 className="muted">Users</h4>
+        <span className="muted text-sm">{users.length}</span>
+      </div>
+
       {showForm && (
-        <Card className="users-panel__form">
+        <Card className="provider-card users-panel__form">
           <Stack gap="sm">
             <Row gap="sm" align="center" className="users-panel__form-header">
               <IconPlus />
@@ -266,21 +252,22 @@ export function UsersPanel(): React.JSX.Element {
       ) : users.length === 0 ? (
         <p className="muted">No users yet.</p>
       ) : (
-        <Stack gap="sm">
-          {users.map((u) => (
-            <Card key={u.id} className="users-panel__card" data-testid={`users-row-${u.username}`}>
-              <Row justify="between" align="center" gap="sm">
+        users.map((u) => (
+          <Card
+            key={u.id}
+            className="provider-card provider-card--spaced"
+            data-testid={`users-row-${u.username}`}
+          >
+            <Row justify="between" align="center" gap="sm">
                 <Row gap="sm" align="center" className="users-panel__user-info">
                   <span className="users-panel__item-icon" aria-hidden="true">
                     <IconUsers />
                   </span>
                   <strong className="users-panel__username">{u.username}</strong>
-                  {editingId === u.id ? (
+                  {editingId === u.id && (
                     <select
                       value={editingRole}
-                      onChange={(e) =>
-                        setEditingRole(e.target.value as Role)
-                      }
+                      onChange={(e) => setEditingRole(e.target.value as Role)}
                       className="users-panel__select users-panel__select--inline"
                     >
                       {ROLES.map((r) => (
@@ -289,85 +276,85 @@ export function UsersPanel(): React.JSX.Element {
                         </option>
                       ))}
                     </select>
-                  ) : (
-                    <Badge variant={roleVariant(u.role)}>{u.role}</Badge>
                   )}
                 </Row>
+                <span className="badge badge--active">{u.role}</span>
+              </Row>
 
-                <Row gap="sm" align="center" className="users-panel__meta">
-                  <span className="muted users-panel__meta-item">
-                    Created {new Date(u.created_at).toLocaleDateString()}
-                  </span>
-                  <span className="muted users-panel__meta-item">
-                    Last login{" "}
-                    {u.last_login_at
-                      ? new Date(u.last_login_at).toLocaleString()
-                      : "—"}
-                  </span>
-                </Row>
+              <Row justify="between" align="center" gap="sm">
+                <div className="provider-meta">
+                  Created {new Date(u.created_at).toLocaleDateString()} · Last
+                  login{" "}
+                  {u.last_login_at
+                    ? new Date(u.last_login_at).toLocaleString()
+                    : "—"}
+                </div>
 
-                <Row gap="sm" align="center" className="users-panel__actions">
+                <Row gap="sm" align="center" className="provider-card__actions">
                   {editingId === u.id ? (
                     <>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => void handleSaveRole(u.id)}
+                      <button
+                        type="button"
+                        className="provider-action provider-action--save"
+                        title="Save role"
+                        aria-label="Save role"
                         disabled={pending === `role:${u.id}`}
+                        onClick={() => void handleSaveRole(u.id)}
                       >
-                        <IconEdit /> Save
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
+                        <IconCheck />
+                      </button>
+                      <button
+                        type="button"
+                        className="provider-action"
+                        title="Cancel"
+                        aria-label="Cancel"
                         onClick={() => setEditingId(null)}
                       >
-                        <IconClose /> Cancel
-                      </Button>
+                        <IconClose />
+                      </button>
                     </>
                   ) : (
                     <>
-                      <Button
-                        variant="ghost"
-                        size="sm"
+                      <button
+                        type="button"
+                        className="provider-action"
+                        title="Edit role"
+                        aria-label="Edit role"
+                        data-testid={`users-edit-${u.username}`}
                         onClick={() => {
                           setEditingId(u.id);
                           setEditingRole(u.role);
                         }}
-                        data-testid={`users-edit-${u.username}`}
-                        title="Edit role"
-                        aria-label="Edit role"
                       >
                         <IconEdit />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => void handleResetPwd(u.id)}
-                        data-testid={`users-resetpwd-${u.username}`}
+                      </button>
+                      <button
+                        type="button"
+                        className="provider-action"
                         title="Reset password"
                         aria-label="Reset password"
+                        data-testid={`users-resetpwd-${u.username}`}
+                        onClick={() => void handleResetPwd(u.id)}
                       >
                         <IconLoop />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => void handleDelete(u.id, u.username)}
-                        data-testid={`users-delete-${u.username}`}
+                      </button>
+                      <button
+                        type="button"
+                        className="provider-action provider-action--delete"
                         title="Delete user"
                         aria-label="Delete user"
+                        data-testid={`users-delete-${u.username}`}
+                        onClick={() => void handleDelete(u.id, u.username)}
                       >
                         <IconTrash />
-                      </Button>
+                      </button>
                     </>
                   )}
                 </Row>
               </Row>
-            </Card>
-          ))}
-        </Stack>
+          </Card>
+        ))
       )}
-    </Stack>
+    </div>
   );
 }
