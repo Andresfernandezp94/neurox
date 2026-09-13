@@ -3,7 +3,7 @@
 // 2026-09: mismo look and feel que Providers (lista de .provider-card) +
 // control Start/Stop del servicio local (ollama serve) via /start /stop.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card } from "../shared/components/molecules/Card";
 import { Row } from "../shared/components/molecules/Row";
 import { Stack } from "../shared/components/molecules/Stack";
@@ -16,7 +16,7 @@ import { SearchBar } from "../shared/components/molecules/SearchBar";
 import { Badge } from "../shared/components/atoms/Badge";
 import { ProviderLogo } from "../shared/components/ProviderLogo";
 import { FamilyLogo } from "../shared/components/FamilyLogo";
-import { IconCheck, IconEdit, IconPause, IconPlay } from "../shared/components/Icons";
+import { IconCheck, IconDownload, IconEdit, IconPause, IconPlay } from "../shared/components/Icons";
 import {
   getLocalModels,
   searchHfModels,
@@ -44,7 +44,6 @@ function formatSize(bytes: number): string {
 
 export function ModelsTab() {
   const [local, setLocal] = useState<LocalModel[]>([]);
-  const [dir, setDir] = useState<string>("");
   const [hf, setHf] = useState<HfModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +64,6 @@ export function ModelsTab() {
     try {
       const data = await getLocalModels();
       setLocal(data.models);
-      setDir(data.dir);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -206,29 +204,8 @@ export function ModelsTab() {
     { id: "phi", name: "Phi", query: "phi", hint: "Microsoft" },
     { id: "deepseek", name: "DeepSeek", query: "deepseek", hint: "DeepSeek" },
     { id: "whisper", name: "Whisper", query: "whisper", hint: "OpenAI (audio)" },
+    { id: "nemotron", name: "Nemotron", query: "nemotron", hint: "NVIDIA" },
   ] as const;
-
-  const [activeFilters, setActiveFilters] = useState<Set<string>>(
-    () => new Set(),
-  );
-
-  const toggleFilter = useCallback((id: string) => {
-    setActiveFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const filteredHf = useMemo(() => {
-    if (activeFilters.size === 0) return hf;
-    const filters = Array.from(activeFilters);
-    return hf.filter((m) => {
-      const id = m.id.toLowerCase();
-      return filters.some((f) => id.includes(f.toLowerCase()));
-    });
-  }, [hf, activeFilters]);
 
   const handleDownload = useCallback(async (id: string) => {
     setDownloading(id);
@@ -244,9 +221,9 @@ export function ModelsTab() {
   }, [load]);
 
   // Logo de familia para el filename local (ej. qwen2.5-...gguf → Qwen).
-  const familyOf = useCallback((filename: string): string | null => {
-    const lower = filename.toLowerCase();
-    const fam = HF_FAMILIES.find((f) => lower.startsWith(f.id));
+  const familyOf = useCallback((s: string): string | null => {
+    const lower = s.toLowerCase();
+    const fam = HF_FAMILIES.find((f) => lower.includes(f.query));
     return fam ? fam.id : null;
   }, []);
 
@@ -257,6 +234,11 @@ export function ModelsTab() {
   return (
     <div className="providers-list" data-testid="providers-models-tab">
       {error && <ErrorBanner>{error}</ErrorBanner>}
+
+      <p className="muted text-sm providers-panel__description">
+        GGUF models in MODELS_DIR are served by the local ollama service. Use
+        the card above to start/stop it, then pick which model loads on start.
+      </p>
 
       {/* ─── Servicio local (ollama serve) ─── */}
       {service ? (
@@ -270,14 +252,9 @@ export function ModelsTab() {
                 kind={service.kind}
                 className="provider-logo"
               />
-              <span className="provider-card__title">{service.id}</span>
+              <strong className="strong">{service.id}</strong>
             </div>
             <div className="provider-card__actions">
-              <span
-                className={`provider-card__dot provider-card__dot--${svcRunning || svcStarting ? "active" : "inactive"}`}
-                title={svcState}
-              />
-              <span className="provider-card__divider-v" />
               <button
                 type="button"
                 disabled={svcBusy || svcStarting}
@@ -288,30 +265,14 @@ export function ModelsTab() {
               >
                 {svcRunning ? <IconPause /> : <IconPlay />}
               </button>
+              {(service.active || svcRunning) && (
+                <Badge className="badge--active">ACTIVE</Badge>
+              )}
             </div>
           </header>
           <hr className="provider-card__divider" />
 
-          <Row gap="sm" align="center">
-            <div className="provider-meta">
-              {service.kind} &nbsp;•&nbsp; {service.model}
-            </div>
-            <span className="muted text-sm" style={{ marginLeft: "auto" }}>
-              {svcState}
-            </span>
-          </Row>
           <div className="provider-endpoint">{service.base_url}</div>
-          {service.local_command ? (
-            <div className="muted text-sm">
-              run: <code>{service.local_command}</code>
-            </div>
-          ) : (
-            <div className="muted text-sm">
-              not orchestrated by the daemon yet: set a{" "}
-              <code>local_command</code> on this provider (Providers tab) so
-              Start/Stop can control the service.
-            </div>
-          )}
         </Card>
       ) : (
         <p className="muted text-sm">
@@ -320,19 +281,11 @@ export function ModelsTab() {
         </p>
       )}
 
-      <h3 className="provider-card__title">Models</h3>
-      <p className="muted text-sm">
-        GGUF models in MODELS_DIR are served by the local ollama service. Use
-        the card above to start/stop it, then pick which model loads on start.
-      </p>
-
       {/* ─── Local GGUF models ─── */}
-      <h4 className="muted">
-        Local GGUF models ({local.length})
-        {dir ? (
-          <span className="text-sm">{` — dir: ${dir}`}</span>
-        ) : null}
-      </h4>
+      <div className="providers-list__section-head">
+        <h4 className="muted">Local GGUF models</h4>
+        <span className="muted text-sm">Models: {local.length}</span>
+      </div>
       {loading && <p className="muted">Loading local models…</p>}
       {!loading && local.length === 0 && (
         <EmptyState>
@@ -357,15 +310,9 @@ export function ModelsTab() {
                 ) : (
                   <ProviderLogo id={m.filename} kind="local" className="provider-logo" />
                 )}
-                <span className="provider-card__title">{m.filename}</span>
+                <strong className="strong">{m.filename}</strong>
               </div>
               <div className="provider-card__actions">
-                <span
-                  className={`provider-card__dot provider-card__dot--${isActive ? "active" : "inactive"}`}
-                  title={isActive ? "active model" : "inactive"}
-                  data-testid="model-active-dot"
-                />
-                <span className="provider-card__divider-v" />
                 {!isActive && (
                   <button
                     type="button"
@@ -386,64 +333,23 @@ export function ModelsTab() {
                 >
                   <IconEdit />
                 </button>
+                {isActive && (
+                  <Badge className="badge--active">ACTIVE</Badge>
+                )}
               </div>
             </header>
             <hr className="provider-card__divider" />
 
-            <Row gap="sm" align="center">
-              <div className="provider-meta">{formatSize(m.size_bytes)}</div>
-              {isActive && (
-                <Badge className="badge--active" data-testid="model-active-badge">
-                  ACTIVE
-                </Badge>
-              )}
-            </Row>
-            <div className="provider-endpoint">{m.path}</div>
+            <div className="provider-meta provider-meta--right">{formatSize(m.size_bytes)}</div>
           </Card>
         );
       })}
 
       {/* ─── Hugging Face search ─── */}
-      <h4 className="muted">Download from Hugging Face</h4>
+      <div className="providers-list__section-head">
+        <h4 className="muted">Download from Hugging Face</h4>
+      </div>
       <Card className="provider-card">
-        <div
-          className="models-panel__family-grid"
-          data-testid="models-family-grid"
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-            gap: 8,
-          }}
-        >
-          {HF_FAMILIES.map((f) => {
-            const isActive = activeFilters.has(f.id);
-            return (
-              <Card
-                key={f.id}
-                className="models-panel__family-card"
-                data-testid={`models-family-${f.id}`}
-                data-active={isActive ? "true" : undefined}
-                onClick={() => toggleFilter(f.id)}
-                style={{
-                  background: "var(--bg)",
-                  border: isActive
-                    ? "2px solid var(--accent, #6366f1)"
-                    : "1px solid var(--border-color, transparent)",
-                  cursor: "pointer",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <FamilyLogo id={f.id} className="models-panel__family-logo" />
-                  <div>
-                    <div className="models-panel__family-name">{f.name}</div>
-                    <div className="muted models-panel__family-hint">{f.hint}</div>
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-
         <Row gap="sm" align="center">
           <div style={{ flex: 1 }}>
             <SearchBar
@@ -459,9 +365,7 @@ export function ModelsTab() {
           )}
           {!searching && search.trim() && hf.length > 0 && (
             <span className="badge badge--accent" data-testid="hf-results-badge">
-              {activeFilters.size > 0
-                ? `${filteredHf.length}/${hf.length} filtered`
-                : `${hf.length} result${hf.length === 1 ? "" : "s"}`}
+              {hf.length} result{hf.length === 1 ? "" : "s"}
             </span>
           )}
         </Row>
@@ -473,28 +377,28 @@ export function ModelsTab() {
             <EmptyState.Hint>Try a different query.</EmptyState.Hint>
           </EmptyState>
         )}
-        {filteredHf.length > 0 && (
+        {hf.length > 0 && (
           <div
             className="models-panel__hf-list"
             data-testid="models-hf-list"
             style={{
-              maxHeight: 360,
+              maxHeight: "26rem",
               overflowY: "auto",
               overflowX: "hidden",
               display: "flex",
               flexDirection: "column",
               gap: 8,
               padding: 4,
-              border: "1px solid var(--border-color, #3a3a3a)",
-              borderRadius: 8,
             }}
           >
-            {filteredHf.map((m) => (
+            {hf.map((m) => {
+            const fam = familyOf(m.id);
+            return (
               <Card key={m.id} className="models-panel__hf-card">
                 <Row justify="between" align="center">
-                  <Row gap="md">
+                  <Row gap="md" align="center">
+                    {fam && <FamilyLogo id={fam} className="provider-logo" />}
                     <strong className="strong">{m.display_name || m.id}</strong>
-                    <span className="muted text-sm">{m.downloads.toLocaleString()} ↓</span>
                     {m.gated && (
                       <span className="badge badge--warn">gated</span>
                     )}
@@ -508,20 +412,18 @@ export function ModelsTab() {
                     {downloading === m.id ? "…" : "Download"}
                   </Button>
                 </Row>
-                <div className="muted text-sm">
-                  <code>{m.id}</code>
-                </div>
+                <Row justify="between" align="center">
+                  <div className="muted text-sm">
+                    <code>{m.id}</code>
+                  </div>
+                  <span className="badge badge--down">
+                    <IconDownload /> {m.downloads.toLocaleString()}
+                  </span>
+                </Row>
               </Card>
-            ))}
+            );
+          })}
           </div>
-        )}
-        {!searching && hf.length > 0 && filteredHf.length === 0 && (
-          <EmptyState>
-            <EmptyState.Title>No matches with current filters</EmptyState.Title>
-            <EmptyState.Hint>
-              Click an active family card above to remove the filter.
-            </EmptyState.Hint>
-          </EmptyState>
         )}
       </Card>
 

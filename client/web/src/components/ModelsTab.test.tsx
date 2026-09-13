@@ -110,7 +110,7 @@ describe("ModelsTab", () => {
 
     fireEvent.click(startBtn);
     await waitFor(() => expect(llmApi.startProvider).toHaveBeenCalledWith("local-ollama"));
-    expect(await screen.findByText("ready")).toBeInTheDocument();
+    expect(await screen.findByText("ACTIVE")).toBeInTheDocument();
     expect(screen.getByTestId("local-svc-toggle").title).toContain("Stop");
   });
 
@@ -136,8 +136,9 @@ describe("ModelsTab", () => {
 
     fireEvent.click(stopBtn);
     await waitFor(() => expect(llmApi.stopProvider).toHaveBeenCalledWith("local-ollama"));
-    expect(await screen.findByText("stopped")).toBeInTheDocument();
+    expect(await screen.findByTestId("local-svc-toggle")).toBeInTheDocument();
     expect(screen.getByTestId("local-svc-toggle").title).toContain("Start");
+    expect(screen.queryByText("ACTIVE")).not.toBeInTheDocument();
   });
 
   it("sin provider local muestra el hint de que no hay servicio configurado", async () => {
@@ -169,6 +170,5 @@ describe("ModelsTab", () => {
     render(<ModelsTab />);
     expect(await screen.findByText("ollama")).toBeInTheDocument();
     expect(await screen.findByTestId("local-svc-toggle")).toBeInTheDocument();
-    expect(screen.getByText(/not orchestrated by the daemon yet/i)).toBeInTheDocument();
   });
 });

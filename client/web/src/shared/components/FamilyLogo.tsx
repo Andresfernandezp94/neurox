@@ -16,6 +16,7 @@ import googleUrl from "../assets/families/google-color.svg?url";
 import deepseekUrl from "../assets/families/deepseek-color.svg?url";
 import microsoftUrl from "../assets/families/microsoft-color.svg?url";
 import openaiUrl from "../assets/families/openai-color.svg?url";
+import nvidiaUrl from "../assets/families/nvidia-color.svg?url";
 
 interface FamilyLogoProps {
   id: string;
@@ -31,6 +32,7 @@ function matchLogo(id: string): string | null {
   if (lower.startsWith("deepseek")) return deepseekUrl;
   if (lower.startsWith("phi") || lower.startsWith("microsoft")) return microsoftUrl;
   if (lower.startsWith("whisper") || lower.startsWith("openai")) return openaiUrl;
+  if (lower.startsWith("nemotron") || lower.startsWith("nvidia")) return nvidiaUrl;
   return null;
 }
 

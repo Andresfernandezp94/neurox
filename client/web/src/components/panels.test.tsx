@@ -161,7 +161,8 @@ describe('ConfigViewer', () => {
   it('shows the models view when switching to Local', async () => {
     renderWithStore(<ConfigViewer />);
     fireEvent.click(screen.getByTestId('config-tab-local'));
-    expect(await screen.findByText('Models')).toBeInTheDocument();
+    expect(await screen.findByTestId('providers-models-tab')).toBeInTheDocument();
+    expect(await screen.findByText(/Local GGUF models/)).toBeInTheDocument();
   });
 });
 
