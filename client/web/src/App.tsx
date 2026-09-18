@@ -84,7 +84,6 @@ function AppInner() {
         view={activeTab}
         onTabChange={setActiveTab}
         hidden={sidebarHidden}
-        forceCollapsed={activeTab === "config"}
       />
       <main className="app-main">
         {activeTab === "status" && (

@@ -27,9 +27,11 @@ export interface UserPlaceholderProps {
   avatarClassName?: string;
   /** Contenido extra que se renderiza dentro del user-card (ej: botón logout). */
   footer?: ReactNode;
+  /** Click handler para el trigger del avatar (para abrir menú). */
+  onTriggerClick?: () => void;
 }
 
-export function UserPlaceholder({ avatarClassName, footer }: UserPlaceholderProps = {}) {
+export function UserPlaceholder({ avatarClassName, footer, onTriggerClick }: UserPlaceholderProps = {}) {
   const { user } = useAuth();
 
   const initials = initialsFrom(user?.username);
@@ -41,6 +43,10 @@ export function UserPlaceholder({ avatarClassName, footer }: UserPlaceholderProp
           className="user-card__trigger"
           title={user ? `${user.username} (${user.role})` : "Cuenta"}
           data-testid="user-avatar"
+          onClick={onTriggerClick}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onTriggerClick?.(); }}
         >
           <span className="user-avatar">
             <span className="user-avatar__initials" aria-hidden="true">

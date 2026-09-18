@@ -14,17 +14,18 @@
 // internas (NeuralNetwork y SessionsPanel). El sidebar queda con 3
 // items (status, chat, config). El sidebar es ahora un menú de
 // nivel superior — los detalles viven en Config.
+// 2026-09-17: el pin (IconPin) se reemplazó por un toggle de sidebar
+// (IconSidebarOpen/IconSidebarClose). El expand/colapso es solo por
+// click — se eliminó el hover-to-expand.
 // ============================================================
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
   IconConfig,
   IconChat,
-  IconPin,
-  IconPinFilled,
+  IconSidebar,
   IconPower,
 } from "./Icons";
-import { AppLogo } from "./AppLogo";
 import { UserPlaceholder } from "../../components/UserPlaceholder";
 import { useI18n } from "../hooks/useI18n";
 import { useConnectionState } from "../../store/StoreContext";
@@ -36,12 +37,8 @@ export type NavId = "status" | "chat" | "config" | "workspace";
 export interface SidebarProps {
   view: NavId;
   onTabChange: (id: NavId) => void;
-  /** EP-0026-UX: ocultar el sidebar completamente (gana sobre `pinned`). */
+  /** EP-0026-UX: ocultar el sidebar completamente. */
   hidden?: boolean;
-  /** EP-2026-08-15: forzar collapsed (rail de iconos, sin expandir) sin
-   * importar `pinned` ni hover. Usado en vistas densas como Settings/Config
-   * para liberar ancho horizontal sin perder acceso a la navegación. */
-  forceCollapsed?: boolean;
 }
 
 interface NavItem {
@@ -50,17 +47,12 @@ interface NavItem {
   icon: () => ReactNode;
 }
 
-interface NavGroup {
-  label: string;
-  items: NavItem[];
-}
-
-export function Sidebar({ view, onTabChange, hidden = false, forceCollapsed = false }: SidebarProps) {
+export function Sidebar({ view, onTabChange, hidden = false }: SidebarProps) {
   const { t } = useI18n();
   const { clear } = useAuth();
   const connAvatarClass = useConnAvatarClass();
   // EP-0024: en mobile (max-width: 1024px) la sidebar es bottom-bar, no aplica
-  // el concepto de "pinned" (siempre se muestra). Forzamos pinned=false en mobile.
+  // el concepto de expand/collapse (siempre se muestra como barra horizontal).
   // Declarada como `function` (no `const arrow`) para que se hoisted y
   // sea seguro usarla desde el initializer del `useState` de abajo.
   function isMobile(): boolean {
@@ -70,117 +62,72 @@ export function Sidebar({ view, onTabChange, hidden = false, forceCollapsed = fa
     );
   }
 
-  // EP-0024: persistencia de `pinned` en localStorage (no del hidden —
-  // ese es efímero y se pasa por prop).
-  const [pinned, setPinned] = useState<boolean>(
-    () => !isMobile() && localStorage.getItem("sidebar-pinned") === "true",
+  // 2026-09-17: estado simple de expand/colapse, persistido. Por defecto
+  // expandida para que la navegación sea visible sin depender del hover.
+  const [expanded, setExpanded] = useState<boolean>(
+    () => !isMobile() && localStorage.getItem("sidebar-expanded") !== "false",
   );
 
-  // EP-0026-UX: sincroniza el pinned con `data-sidebar-pinned` en <body>
-  // para que `tokens.css` ajuste el `margin-left` / `max-width` de
-  // `.app-main` cuando el usuario pinea. Single source of truth.
+  // Mantenemos el atributo con el nombre histórico (`sidebar-pinned`)
+  // porque `tokens.css` ajusta el `margin-left` de `.app-main` con él.
   useEffect(() => {
     if (typeof document === "undefined") return;
-    document.body.dataset.sidebarPinned = pinned ? "true" : "false";
-  }, [pinned]);
+    document.body.dataset.sidebarPinned = expanded ? "true" : "false";
+  }, [expanded]);
 
-  // Collapsible state: pinned (persistent) overrides todo lo demás.
-  // Si pinned=true, la sidebar siempre está expandida — incluso en
-  // vistas con forceCollapsed (config) o en mobile.
-  // En mobile (bottom-bar), forceCollapsed no aplica: el layout es horizontal.
-  const [_hovered, setHovered] = useState<boolean>(false);
-  const collapsed = !pinned && (isMobile() ? false : forceCollapsed ? true : !_hovered);
-  const asideRef = useRef<HTMLElement>(null);
+  // En mobile la sidebar es bottom-bar: sin expand/collapse.
+  const collapsed = isMobile() ? false : !expanded;
 
-  // EP-0026-UX: si entramos a mobile, forzamos pinned=false (la sidebar
-  // se muestra como bottom-bar siempre, sin importar pin).
+  // EP-0026-UX: si entramos a mobile, forzamos expanded=false.
   useEffect(() => {
-    if (isMobile() && pinned) setPinned(false);
-  }, [pinned, setPinned]);
+    if (isMobile() && expanded) setExpanded(false);
+  }, [expanded, setExpanded]);
 
-  // Listener de resize: si pasamos a mobile, forzamos pinned=false.
+  // Listener de resize: si pasamos a mobile, forzamos expanded=false.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const mq = window.matchMedia("(max-width: 1024px)");
     const onChange = () => {
-      if (mq.matches && pinned) setPinned(false);
+      if (mq.matches && expanded) setExpanded(false);
     };
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
-  }, [pinned, setPinned]);
+  }, [expanded, setExpanded]);
 
-  useEffect(() => {
-    if (pinned) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        asideRef.current &&
-        !asideRef.current.contains(e.target as Node)
-      ) {
-        setHovered(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [pinned]);
-
-  const navGroups: NavGroup[] = [
-    {
-      label: "Conversation",
-      items: [
-        { id: "chat", label: t("sidebar.chat"), icon: IconChat },
-      ],
-    },
-    {
-      label: "System",
-      items: [
-        { id: "config", label: t("sidebar.config"), icon: IconConfig },
-      ],
-    },
+  const navItems: NavItem[] = [
+    { id: "chat", label: t("sidebar.chat"), icon: IconChat },
+    { id: "config", label: t("sidebar.config"), icon: IconConfig },
   ];
 
   return (
     <div className="sidebar-wrapper" hidden={hidden} style={hidden ? { display: "none" } : undefined}>
-      <aside
-        ref={asideRef}
-        className={`sidebar-panel ${collapsed ? "collapsed" : ""}`}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        onClick={() => setHovered(true)}
-      >
-        {/* EP-0024: topbar con el botón pin. Logo + título vienen del AppHeader. */}
+      <aside className={`sidebar-panel ${collapsed ? "collapsed" : ""}`}>
+        {/* topbar con el toggle de sidebar: expandir/contraer por click. */}
         <div className="sidebar-panel__topbar">
-          <div className="sidebar-panel__brand">
-            <AppLogo />
-            <h1 className="sidebar-panel__title">neurox</h1>
-          </div>
           <button
             type="button"
-            className={`sidebar-pin ${pinned ? "active" : ""}`}
-            onClick={() => setPinned((p) => !p)}
-            title={pinned ? "Unpin sidebar" : "Pin sidebar open"}
-            aria-label={pinned ? "Unpin sidebar" : "Pin sidebar open"}
-            data-testid="sidebar-pin"
+            className="sidebar-toggle"
+            onClick={() => setExpanded((e) => !e)}
+            title={expanded ? "Collapse sidebar" : "Expand sidebar"}
+            aria-label={expanded ? "Collapse sidebar" : "Expand sidebar"}
+            aria-expanded={expanded}
+            data-testid="sidebar-toggle"
           >
-            {pinned ? <IconPinFilled /> : <IconPin />}
+            <IconSidebar />
           </button>
         </div>
 
         <nav className="sidebar-panel__nav">
-          {navGroups.map((group) => (
-            <div key={group.label} className="nav-group">
-              <span className="nav-group__label">{group.label}</span>
-              {group.items.map(({ id, label, icon: Icon }) => (
-                <button
-                  key={id}
-                  className={`nav-btn ${view === id ? "active" : ""}`}
-                  onClick={() => onTabChange(id)}
-                  data-testid={`sidebar-nav-${id}`}
-                >
-                  <Icon />
-                  <span>{label}</span>
-                </button>
-              ))}
-            </div>
+          {navItems.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              className={`nav-btn ${view === id ? "active" : ""}`}
+              onClick={() => onTabChange(id)}
+              data-testid={`sidebar-nav-${id}`}
+            >
+              <Icon />
+              <span>{label}</span>
+            </button>
           ))}
         </nav>
 

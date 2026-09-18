@@ -54,8 +54,8 @@ svg {
 
   --rail-content-x: 2.5rem;
   --mode-tag-w: 3.25rem;
-  --sidebar-w: 12rem;
-  --sidebar-w-collapsed: 3rem;
+  --sidebar-w: 18rem;
+  --sidebar-w-collapsed: 4rem;
   /* EP-0024: alto del header persistente (incluye border-bottom 1px).
    * Footgun: el header real mide ~3.7rem; este token debe ser >= ese valor
    * para que el shell (sidebar top, .app-main padding-top) no se solape
@@ -116,7 +116,7 @@ svg {
 
 /* Global smooth transitions for interactive properties (not layout) */
 button, a, input, textarea, select,
-.nav-btn, .sidebar, .sidebar-header, .sidebar-pin,
+.nav-btn, .sidebar, .sidebar-header, .sidebar-toggle,
 .chat-tab, .settings-tab, .model-dropdown,
 .agents-modal, .confirm-dialog {
   transition: color 0.4s cubic-bezier(0.4, 0, 0.2, 1), 

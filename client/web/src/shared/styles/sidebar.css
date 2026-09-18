@@ -45,7 +45,7 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
   display: flex;
   flex-direction: column;
   padding: 0;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .sidebar-panel:not(.collapsed) {
@@ -59,10 +59,11 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem 0.35rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   flex-shrink: 0;
+  transition: padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar-panel__brand {
@@ -71,11 +72,12 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
   gap: 0.5rem;
   flex: 1;
   min-width: 0;
+  transition: padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sidebar-panel__brand .app-logo {
-  width: 2rem;
-  height: 2rem;
+  width: 1.5rem;
+  height: 1.5rem;
   flex-shrink: 0;
   color: var(--accent);
 }
@@ -91,9 +93,9 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
   text-overflow: ellipsis;
 }
 
-/* ---- Pin button ---- */
+/* ---- Toggle sidebar (expandir/contraer) ---- */
 
-.sidebar-pin {
+.sidebar-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -109,19 +111,19 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
               color 120ms steps(2, end);
 }
 
-.sidebar-pin:hover {
+.sidebar-toggle:hover {
   background: var(--bg-elevated);
   color: var(--text-primary);
 }
 
-.sidebar-pin.active {
+.sidebar-toggle[aria-expanded="true"] {
   color: var(--accent);
   background: var(--accent-soft);
 }
 
-.sidebar-pin svg {
-  width: 1rem;
-  height: 1rem;
+.sidebar-toggle svg {
+  width: 1.5rem;
+  height: 1.5rem;
 }
 
 /* ---- Nav (iconos + labels) ---- */
@@ -129,11 +131,16 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
 .sidebar-panel__nav {
   display: flex;
   flex-direction: column;
-  gap: 0.125rem;
+  gap: 0.75rem;
   flex: 0 0 auto;
-  padding: 0.5rem 0.5rem;
+  padding: 0.5rem 1rem;
   overflow-y: auto;
   overflow-x: visible;
+  transition: padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-panel:not(.collapsed) .sidebar-panel__nav {
+  padding: 0.5rem 0.35rem;
 }
 
 .nav-group {
@@ -158,7 +165,7 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
-  padding: 0.5rem 0.625rem 0.25rem;
+  padding: 0.5rem 0.75rem 0.25rem;
   user-select: none;
   white-space: nowrap;
   overflow: hidden;
@@ -169,11 +176,10 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 0.625rem;
+  gap: 0.875rem;
   width: 100%;
-  height: 2rem;
-  padding: 0 0.625rem;
-  font-size: 0.8125rem;
+  padding: 0.375rem;
+  font-size: 0.875rem;
   font-family: inherit;
   font-weight: 500;
   background: transparent;
@@ -186,7 +192,8 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
   overflow: hidden;
   text-overflow: ellipsis;
   flex-shrink: 0;
-  transition: background-color 120ms steps(2, end),
+  transition: padding 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 120ms steps(2, end),
               color 120ms steps(2, end);
 }
 
@@ -201,8 +208,8 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
 }
 
 .nav-btn svg {
-  width: 1.125rem;
-  height: 1.125rem;
+  width: 1.25rem;
+  height: 1.25rem;
   flex-shrink: 0;
 }
 
@@ -219,10 +226,15 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.5rem;
+  padding: 0.5rem 0.75rem;
   border-top: 1px solid var(--border);
   background: var(--sidebar);
   flex-shrink: 0;
+  transition: padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-panel:not(.collapsed) .sidebar-panel__footer {
+  padding: 0.5rem 0.35rem;
 }
 
 /* ---- User card (avatar + nombre + rol) ---- */
@@ -243,7 +255,7 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
   gap: 0.5rem;
   flex: 1 1 auto;
   min-width: 0;
-  padding: 0.5rem;
+  padding: 0.35rem;
   background: transparent;
   border: none;
   border-radius: 0.375rem;
@@ -252,7 +264,8 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
   cursor: pointer;
   text-align: left;
   flex-shrink: 1;
-  transition: background-color 120ms steps(2, end);
+  transition: padding 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 120ms steps(2, end);
 }
 
 .user-card__trigger {
@@ -370,43 +383,35 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
 }
 
 /* ---- Connection indicator (halo pulsante del avatar) ---- */
+/* EP-2026-09-17: el halo es un box-shadow del propio avatar (no un
+ * ::after posicionado). Así es siempre concéntrico al círculo y no
+ * se desplaza al expandir/colapsar la sidebar: sigue al avatar. */
 
-.user-card.conn-avatar {
-  position: relative;
-  overflow: visible;
-}
-
-.user-card.conn-avatar::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 0.5rem;
-  transform: translateY(-50%);
-  width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
-  pointer-events: none;
+.user-card.conn-avatar .user-avatar {
   animation: conn-avatar-pulse 2.4s ease-in-out infinite;
 }
 
-.user-card.conn-avatar--ok::after {
-  box-shadow: 0 0 0 1.5px var(--status-active),
-              0 0 8px var(--status-active);
+.user-card.conn-avatar--ok .user-avatar {
+  --halo: var(--status-active);
 }
 
-.user-card.conn-avatar--degraded::after {
-  box-shadow: 0 0 0 1.5px var(--status-warn),
-              0 0 8px var(--status-warn);
+.user-card.conn-avatar--degraded .user-avatar {
+  --halo: var(--status-warn);
 }
 
-.user-card.conn-avatar--unreachable::after {
-  box-shadow: 0 0 0 1.5px var(--status-danger),
-              0 0 8px var(--status-danger);
+.user-card.conn-avatar--unreachable .user-avatar {
+  --halo: var(--status-danger);
 }
 
 @keyframes conn-avatar-pulse {
-  0%, 100% { opacity: 0.6; }
-  50%      { opacity: 1; }
+  0%, 100% {
+    box-shadow: 0 0 0 1.5px var(--halo),
+                0 0 8px var(--halo);
+  }
+  50% {
+    box-shadow: 0 0 0 3px var(--halo),
+                0 0 14px var(--halo);
+  }
 }
 
 /* ============================================================
@@ -415,37 +420,55 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
 
 .sidebar-panel.collapsed .sidebar-panel__topbar {
   justify-content: center;
-  padding: 0.5rem 0.25rem;
+  padding: 0.5rem 0.75rem;
 }
 
 .sidebar-panel.collapsed .sidebar-panel__brand {
-  justify-content: center;
+  justify-content: flex-start;
+  padding: 0 0.25rem;
+}
+
+.sidebar-panel.collapsed .sidebar-panel__title {
+  display: none;
 }
 
 .sidebar-panel.collapsed .sidebar-panel__footer {
   justify-content: center;
-  padding: 0.5rem 0.25rem;
+  padding: 0.5rem 0.75rem;
 }
 
-.sidebar-panel.collapsed .sidebar-pin {
-  display: none;
+.sidebar-panel.collapsed .sidebar-toggle {
+  margin-left: 0;
 }
 
 .sidebar-panel.collapsed .user-card {
-  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  justify-content: flex-start;
   gap: 0;
-  padding: 0.25rem 0;
+  padding: 0;
+  margin-inline: auto;
+  position: relative;
+}
+
+.sidebar-panel.collapsed .user-avatar {
+  position: absolute;
+  inset: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: auto;
+  flex-shrink: 0;
+  transform: none;
+}
+
+.sidebar-panel.collapsed .user-card:hover .user-avatar {
+  transform: none;
 }
 
 .sidebar-panel.collapsed .user-info,
 .sidebar-panel.collapsed .user-info__name,
 .sidebar-panel.collapsed .user-info__role {
   display: none !important;
-}
-
-.sidebar-panel.collapsed .user-card.conn-avatar::after {
-  left: 50%;
-  transform: translate(-50%, -50%);
 }
 
 .sidebar-panel.collapsed .sidebar-logout {
@@ -460,15 +483,22 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
   border-top: none;
 }
 
+.sidebar-panel.collapsed .sidebar-panel__nav {
+  overflow-x: hidden;
+  padding: 0.5rem 1rem;
+}
+
 .sidebar-panel.collapsed .nav-btn {
+  width: 2rem;
+  height: 2rem;
   justify-content: center;
-  padding: 0;
+  gap: 0;
+  padding: 0.375rem;
+  margin-inline: auto;
 }
 
 .sidebar-panel.collapsed .nav-btn span {
-  visibility: hidden;
-  width: 0;
-  margin-left: -0.625rem;
+  display: none;
 }
 
 /* ============================================================
