@@ -340,6 +340,28 @@
   text-transform: capitalize;
   letter-spacing: 0.01em;
 }
+
+/* Campos del formulario de la card del servicio local. Un bloque por
+ * campo (label + control + ayuda) para que el operador pueda escanear la
+ * configuración sin que el label flote suelto. */
+.local-service__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.local-service__field .text-sm,
+.local-service__field p {
+  margin: 0;
+}
+
+/* Estado inválido (puerto no numérico, servicio que no arrancó). Usa el
+ * color de error pero sin el badge: es un mensaje, no un estado de chip. */
+.local-service__invalid {
+  margin: 0;
+  color: var(--status-danger);
+  font-size: 0.8125rem;
+}
 /* Provider name: medium weight, like the sidebar's provider title. */
 .provider-card .strong { font-weight: 500; font-size: 0.9375rem; }
 .provider-endpoint {

@@ -41,16 +41,21 @@ const localModel = {
   category: "chat",
 };
 
+// El servicio local que administra LocalServiceCard. El id tiene que
+// coincidir con `LOCAL_SERVICE_ID`: la card busca el provider por id, y con
+// otro id no encuentra ninguno y muestra el formulario de creacion en vez
+// del switch.
 const ollamaStopped: LlmProviderStatus = {
-  id: "local-ollama",
-  kind: "ollama",
-  model: "qwen2.5-1.5b-instruct",
-  base_url: "http://127.0.0.1:11434/v1",
+  id: "local-llama-server",
+  kind: "openai_compat",
+  model: "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+  base_url: "http://127.0.0.1:8080/v1",
   api_key_env: null,
   configured: true,
   active: false,
   service_state: "stopped",
-  local_command: "ollama serve",
+  local_command: "llama-server",
+  local_port: 8080,
 };
 
 // Ollama externo (servicio del sistema): loopback, sin local_command ni
@@ -86,7 +91,10 @@ describe("ModelsTab", () => {
       default_model: "",
     } as never);
     render(<ModelsTab />);
-    expect(await screen.findByText("qwen2.5-1.5b-instruct-Q4_K_M.gguf")).toBeInTheDocument();
+    const names = await screen.findAllByText("qwen2.5-1.5b-instruct-Q4_K_M.gguf");
+    // Aparece en la card del servicio local (como modelo configurado) y en
+    // la lista de GGUF. Lo que se verifica es que esté en la lista.
+    expect(names.length).toBeGreaterThan(0);
     expect(screen.getByText("1.02 GB")).toBeInTheDocument();
     expect(screen.getByTestId("set-active-button")).toBeInTheDocument();
   });
@@ -99,12 +107,12 @@ describe("ModelsTab", () => {
       models: [],
     } as never);
     vi.mocked(llmApi.getProviders).mockImplementation(async () => ({
-      providers: [{ ...ollamaStopped, service_state: state }],
+      providers: [{ ...ollamaStopped, id: "local-llama-server", service_state: state }],
       default_model: "",
     } as never));
     vi.mocked(llmApi.startProvider).mockImplementation(async () => {
       state = "ready";
-      return { id: "local-ollama", service_state: "ready" } as never;
+      return { id: "local-llama-server", service_state: "ready" } as never;
     });
 
     render(<ModelsTab />);
@@ -112,8 +120,12 @@ describe("ModelsTab", () => {
     expect(startBtn.title).toContain("Start");
 
     fireEvent.click(startBtn);
-    await waitFor(() => expect(llmApi.startProvider).toHaveBeenCalledWith("local-ollama"));
-    expect(await screen.findByText("ACTIVE")).toBeInTheDocument();
+    await waitFor(() => expect(llmApi.startProvider).toHaveBeenCalledWith("local-llama-server"));
+    // El estado real del servicio, no un badge genérico "ACTIVE": antes la
+    // card decía ACTIVE sin decir si el proceso estaba vivo.
+    await waitFor(() => {
+      expect(screen.getByTestId("local-service-state")).toHaveTextContent("ready");
+    });
     expect(screen.getByTestId("local-svc-toggle").title).toContain("Stop");
   });
 
@@ -125,12 +137,12 @@ describe("ModelsTab", () => {
       models: [],
     } as never);
     vi.mocked(llmApi.getProviders).mockImplementation(async () => ({
-      providers: [{ ...ollamaStopped, service_state: state }],
+      providers: [{ ...ollamaStopped, id: "local-llama-server", service_state: state }],
       default_model: "",
     } as never));
     vi.mocked(llmApi.stopProvider).mockImplementation(async () => {
       state = "stopped";
-      return { id: "local-ollama", service_state: "stopped" } as never;
+      return { id: "local-llama-server", service_state: "stopped" } as never;
     });
 
     render(<ModelsTab />);
@@ -138,13 +150,15 @@ describe("ModelsTab", () => {
     expect(stopBtn.title).toContain("Stop");
 
     fireEvent.click(stopBtn);
-    await waitFor(() => expect(llmApi.stopProvider).toHaveBeenCalledWith("local-ollama"));
+    await waitFor(() => expect(llmApi.stopProvider).toHaveBeenCalledWith("local-llama-server"));
     expect(await screen.findByTestId("local-svc-toggle")).toBeInTheDocument();
     expect(screen.getByTestId("local-svc-toggle").title).toContain("Start");
     expect(screen.queryByText("ACTIVE")).not.toBeInTheDocument();
   });
 
-  it("sin provider local muestra el hint de que no hay servicio configurado", async () => {
+  it("sin provider local ofrece el formulario de creacion, no un hint a otra tab", async () => {
+    // Antes decia "configure one under the Providers tab". La configuracion
+    // del servicio local vive en esta misma tab.
     vi.mocked(modelsApi.getLocalModels).mockResolvedValue({
       dir: "/models",
       env_var: "MODELS_DIR",
@@ -155,12 +169,16 @@ describe("ModelsTab", () => {
       default_model: "",
     } as never);
     render(<ModelsTab />);
-    expect(
-      await screen.findByText(/no local service configured/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId("local-svc-create")).toBeInTheDocument();
+    expect(screen.queryByText(/no local service configured/i)).toBeNull();
+    expect(screen.queryByText(/Providers tab/i)).toBeNull();
   });
 
-  it("renderiza la card para un Ollama loopback sin local_command (no orquestado)", async () => {
+  it("no ofrece switch para un Ollama loopback sin local_command", async () => {
+    // Un provider remoto que escucha en loopback no es el servicio local que
+    // neurox orquesta: no tiene `local_command`, asi que no hay nada que
+    // arrancar/parar. Mostrarle un switch seria mentir sobre quien lo
+    // controla.
     vi.mocked(modelsApi.getLocalModels).mockResolvedValue({
       dir: "/models",
       env_var: "MODELS_DIR",
@@ -171,8 +189,10 @@ describe("ModelsTab", () => {
       default_model: "",
     } as never);
     render(<ModelsTab />);
-    expect(await screen.findByText("ollama")).toBeInTheDocument();
-    expect(await screen.findByTestId("local-svc-toggle")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("local-svc-create")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("local-svc-toggle")).toBeNull();
   });
 });
 // ─── Categorías por carpeta (EP-2026-10) ──────────────────────────────
@@ -216,7 +236,8 @@ describe("ModelsTab categories", () => {
     render(<ModelsTab />);
 
     await waitFor(() => {
-      expect(screen.getByText("qwen.gguf")).toBeInTheDocument();
+      // Puede aparecer también como modelo configurado del servicio local.
+      expect(screen.getAllByText("qwen.gguf").length).toBeGreaterThan(0);
     });
     expect(screen.getByText("bge-m3.gguf")).toBeInTheDocument();
     expect(screen.getByText("bge-large.gguf")).toBeInTheDocument();

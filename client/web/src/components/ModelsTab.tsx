@@ -16,7 +16,7 @@ import { SearchBar } from "../shared/components/molecules/SearchBar";
 import { Badge } from "../shared/components/atoms/Badge";
 import { ProviderLogo } from "../shared/components/ProviderLogo";
 import { FamilyLogo } from "../shared/components/FamilyLogo";
-import { IconCheck, IconDownload, IconEdit, IconPause, IconPlay } from "../shared/components/Icons";
+import { IconCheck, IconDownload, IconEdit } from "../shared/components/Icons";
 import {
   getLocalModels,
   searchHfModels,
@@ -30,10 +30,9 @@ import {
 import {
   getProviders,
   updateProvider,
-  startProvider,
-  stopProvider,
   type LlmProviderStatus,
 } from "../api/llm";
+import { LocalServiceCard } from "./LocalServiceCard";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -79,9 +78,6 @@ export function ModelsTab() {
   const [searching, setSearching] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [editing, setEditing] = useState<LocalModel | null>(null);
-  // Servicio local (ollama serve): provider con local_command. Start/Stop.
-  const [service, setService] = useState<LlmProviderStatus | null>(null);
-  const [svcBusy, setSvcBusy] = useState(false);
   // EP-0025: selector runtime del modelo a cargar.
   const [activeLocalPath, setActiveLocalPath] = useState<string | null>(null);
   const [setting, setSetting] = useState<string | null>(null);
@@ -89,6 +85,14 @@ export function ModelsTab() {
   // Agrupa por categoría. El daemon ya devuelve los resultados ordenados
   // por categoría, así que el orden de aparición respeta el del daemon sin
   // volver a ordenar acá.
+  // Solo los GGUF de categoría `chat`: `llama-server` sirve modelos de
+  // chat. Ofrecer un embedding (bge-m3, embeddinggemma) seria prometer algo
+  // que el servicio no puede hacer.
+  const chatModels = useMemo(
+    () => local.filter((m) => (m.category || UNCLASSIFIED) === "chat"),
+    [local],
+  );
+
   const localByCategory = useMemo(() => {
     const map = new Map<string, LocalModel[]>();
     for (const m of local) {
@@ -150,10 +154,8 @@ export function ModelsTab() {
           return rank(a) - rank(b);
         });
       const localProvider = sorted[0] ?? null;
-      setService(localProvider);
       setActiveLocalPath(localProvider?.local_model_path ?? null);
     } catch {
-      setService(null);
       setActiveLocalPath(null);
     }
   }, [isLocalProvider]);
@@ -176,29 +178,6 @@ export function ModelsTab() {
     [],
   );
 
-  // EP-0018-04: encender/apagar el servicio local (ollama serve) desde
-  // el frontend. Patch optimista + refetch en background.
-  const handleToggleService = useCallback(async () => {
-    if (!service) return;
-    const action =
-      service.service_state === "running" || service.service_state === "ready"
-        ? "stop"
-        : "start";
-    setSvcBusy(true);
-    setError(null);
-    try {
-      const resp =
-        action === "start" ? await startProvider(service.id) : await stopProvider(service.id);
-      setService((prev) =>
-        prev ? { ...prev, service_state: resp.service_state } : prev,
-      );
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSvcBusy(false);
-      void loadProviders();
-    }
-  }, [service, loadProviders]);
 
   useEffect(() => {
     void load();
@@ -274,9 +253,6 @@ export function ModelsTab() {
     return fam ? fam.id : null;
   }, []);
 
-  const svcState = service?.service_state ?? "stopped";
-  const svcRunning = svcState === "running" || svcState === "ready";
-  const svcStarting = svcState === "starting";
 
   return (
     <div className="providers-list" data-testid="providers-models-tab">
@@ -287,46 +263,15 @@ export function ModelsTab() {
         the card above to start/stop it, then pick which model loads on start.
       </p>
 
-      {/* ─── Servicio local (ollama serve) ─── */}
-      {service ? (
-        <Card
-          className={`provider-card ${service.active || svcRunning ? "provider-card--active" : ""}`}
-        >
-          <header className="provider-card__header">
-            <div className="provider-card__identity">
-              <ProviderLogo
-                id={service.id}
-                kind={service.kind}
-                className="provider-logo"
-              />
-              <strong className="strong">{service.id}</strong>
-            </div>
-            <div className="provider-card__actions">
-              <button
-                type="button"
-                disabled={svcBusy || svcStarting}
-                className={`provider-action ${svcRunning ? "provider-action--delete" : "provider-action--save"}`}
-                title={svcRunning ? "Stop local service" : "Start local service"}
-                data-testid="local-svc-toggle"
-                onClick={handleToggleService}
-              >
-                {svcRunning ? <IconPause /> : <IconPlay />}
-              </button>
-              {(service.active || svcRunning) && (
-                <Badge className="badge--active">ACTIVE</Badge>
-              )}
-            </div>
-          </header>
-          <hr className="provider-card__divider" />
-
-          <div className="provider-endpoint">{service.base_url}</div>
-        </Card>
-      ) : (
-        <p className="muted text-sm">
-          No local service configured: no provider has a local_command to
-          start/stop. Configure one under the Providers tab.
-        </p>
-      )}
+      {/* ─── Servicio local ───
+          Vive acá y no en la tab Providers: un provider local no tiene API
+          key, y mezclarlo con los remotos lo hace indistinguible de algo que
+          necesita un key. El lugar donde se configura es donde se ven los
+          GGUF que va a servir. */}
+      <div className="providers-list__section-head">
+        <h4 className="muted">Local service</h4>
+      </div>
+      <LocalServiceCard chatModels={chatModels} onChanged={load} />
 
       {/* ─── Local GGUF models ─── */}
       <div className="providers-list__section-head">
