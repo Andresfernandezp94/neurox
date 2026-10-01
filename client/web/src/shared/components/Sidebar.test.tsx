@@ -49,9 +49,13 @@ describe("Sidebar", () => {
       container.querySelectorAll<HTMLElement>('[data-testid^="sidebar-nav-"]'),
     ).map((el) => el.dataset.testid);
 
+    // Overview va primero: es la pantalla default tras el login y lo
+    // accionable tiene que estar arriba. `status` es su NavId (histórico).
     expect(order).toEqual([
+      "sidebar-nav-status",
       "sidebar-nav-chat",
       "sidebar-nav-config",
+      "sidebar-nav-workspace",
     ]);
   });
 

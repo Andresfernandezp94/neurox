@@ -24,11 +24,15 @@ import {
   IconConfig,
   IconChat,
   IconSidebar,
+  IconBell,
   IconPower,
+  IconGrid,
+  IconWorkspaces,
 } from "./Icons";
 import { UserPlaceholder } from "../../components/UserPlaceholder";
+import { ThemeToggle } from "./ThemeToggle";
 import { useI18n } from "../hooks/useI18n";
-import { useConnectionState } from "../../store/StoreContext";
+import { useConnectionState, useStore } from "../../store/StoreContext";
 import { useAuth } from "../../hooks/useAuth";
 import { logout } from "../../api/auth";
 
@@ -39,6 +43,8 @@ export interface SidebarProps {
   onTabChange: (id: NavId) => void;
   /** EP-0026-UX: ocultar el sidebar completamente. */
   hidden?: boolean;
+  /** Tras cerrar sesión. App.tsx navega a /login con replace. */
+  onLogout?: () => void;
 }
 
 interface NavItem {
@@ -47,9 +53,13 @@ interface NavItem {
   icon: () => ReactNode;
 }
 
-export function Sidebar({ view, onTabChange, hidden = false }: SidebarProps) {
+export function Sidebar({ view, onTabChange, hidden = false, onLogout }: SidebarProps) {
   const { t } = useI18n();
   const { clear } = useAuth();
+  // Aprobaciones pendientes para el badge de la campana. Viene del store
+  // (mantenido por el WS), así que el contador se actualiza solo.
+  const { state } = useStore();
+  const pendingApprovals = state.approvals.size;
   const connAvatarClass = useConnAvatarClass();
   // EP-0024: en mobile (max-width: 1024px) la sidebar es bottom-bar, no aplica
   // el concepto de expand/collapse (siempre se muestra como barra horizontal).
@@ -95,8 +105,10 @@ export function Sidebar({ view, onTabChange, hidden = false }: SidebarProps) {
   }, [expanded, setExpanded]);
 
   const navItems: NavItem[] = [
+    { id: "status", label: t("sidebar.overview"), icon: IconGrid },
     { id: "chat", label: t("sidebar.chat"), icon: IconChat },
     { id: "config", label: t("sidebar.config"), icon: IconConfig },
+    { id: "workspace", label: t("sidebar.workspace"), icon: IconWorkspaces },
   ];
 
   return (
@@ -142,23 +154,58 @@ export function Sidebar({ view, onTabChange, hidden = false }: SidebarProps) {
           <UserPlaceholder
             avatarClassName={connAvatarClass}
             footer={
-              <button
-                type="button"
-                className="sidebar-logout"
-                title="Logout"
-                aria-label="Logout"
-                data-testid="sidebar-logout"
-                onClick={async () => {
-                  try {
-                    await logout();
-                  } catch {
-                    // ignore
+              /* Acciones de sesión al pie: campana · tema · logout. La
+               * campana muestra las aprobaciones pendientes, que es data
+               * real del store y lo único accionable hoy. */
+              <div className="sidebar-footer-actions">
+                <button
+                  type="button"
+                  className="sidebar-footer-action sidebar-bell"
+                  title={
+                    pendingApprovals > 0
+                      ? `${pendingApprovals} aprobación${pendingApprovals === 1 ? "" : "es"} pendiente${pendingApprovals === 1 ? "" : "s"}`
+                      : "Notificaciones"
                   }
-                  clear();
-                }}
-              >
-                <IconPower />
-              </button>
+                  aria-label={
+                    pendingApprovals > 0
+                      ? `Notificaciones: ${pendingApprovals} aprobación${pendingApprovals === 1 ? "" : "es"} pendiente${pendingApprovals === 1 ? "" : "s"}`
+                      : "Notificaciones"
+                  }
+                  data-testid="sidebar-bell"
+                >
+                  <IconBell />
+                  {pendingApprovals > 0 && (
+                    <span
+                      className="sidebar-bell__badge"
+                      aria-hidden="true"
+                      data-testid="sidebar-bell-badge"
+                    >
+                      {pendingApprovals}
+                    </span>
+                  )}
+                </button>
+                <ThemeToggle className="sidebar-footer-action" />
+                <button
+                  type="button"
+                  className="sidebar-logout sidebar-footer-action"
+                  title="Cerrar sesión"
+                  aria-label="Cerrar sesión"
+                  data-testid="sidebar-logout"
+                  onClick={async () => {
+                    try {
+                      await logout();
+                    } catch {
+                      // ignore
+                    }
+                    clear();
+                    // La navegación a /login la hace App.tsx: el sidebar no
+                    // conoce el router.
+                    onLogout?.();
+                  }}
+                >
+                  <IconPower />
+                </button>
+              </div>
             }
           />
         </div>
