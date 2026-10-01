@@ -23,12 +23,31 @@ vi.mock("../hooks/useAuth", () => ({
 
 vi.mock("../shared/hooks/useTheme", () => ({
   useTheme: () => ({ mode: "dark", setMode: vi.fn() }),
+  // <ThemeToggle> (usado ahora en el login) también importa resolveTheme
+  // para decidir qué ícono mostrar según el tema efectivo.
+  resolveTheme: (mode: string) => (mode === "light" ? "light" : "dark"),
 }));
 
 describe("LoginScreen", () => {
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
+  });
+
+  it("shows a back button only when onBack is provided", () => {
+    const { unmount } = render(<LoginScreen />);
+    expect(screen.queryByTestId("login-back")).not.toBeInTheDocument();
+    unmount();
+
+    render(<LoginScreen onBack={vi.fn()} />);
+    expect(screen.getByTestId("login-back")).toBeInTheDocument();
+  });
+
+  it("calls onBack when the back button is clicked", () => {
+    const onBack = vi.fn();
+    render(<LoginScreen onBack={onBack} />);
+    fireEvent.click(screen.getByTestId("login-back"));
+    expect(onBack).toHaveBeenCalledTimes(1);
   });
 
   it("renders form with username + password inputs and submit button", () => {

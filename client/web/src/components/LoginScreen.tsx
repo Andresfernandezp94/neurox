@@ -15,14 +15,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { login } from "../api/auth";
 import { ApiError } from "../api/client";
-import { useTheme } from "../shared/hooks/useTheme";
+import { ThemeToggle } from "../shared/components/ThemeToggle";
 import { AppLogo } from "../shared/components/AppLogo";
 import { ErrorBanner } from "../shared/components/molecules/ErrorBanner";
 import { Spinner } from "../shared/components/atoms/Spinner";
 
-export function LoginScreen(): React.JSX.Element {
+export interface LoginScreenProps {
+  /** Vuelve a la landing pública. Escape para cuando el usuario no
+   *  tiene credenciales a mano: el login es la puerta del panel, no un
+   *  muro que tapa el producto. */
+  onBack?: () => void;
+  /** Login exitoso. App.tsx lo usa para navegar a /app con replace,
+   *  para que el botón atrás no devuelva al formulario ya autenticado. */
+  onSuccess?: () => void;
+}
+
+export function LoginScreen({ onBack, onSuccess }: LoginScreenProps): React.JSX.Element {
   const { setSession } = useAuth();
-  const { mode, setMode } = useTheme();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -52,7 +61,13 @@ export function LoginScreen(): React.JSX.Element {
         setSuccess(true);
         // Pequeño delay para que la success animation alcance a verse
         // antes de que el parent (AuthProvider) desmonte LoginScreen.
-        setTimeout(() => setSession(res.token, res.user), 360);
+        setTimeout(() => {
+          setSession(res.token, res.user);
+          // Navegación post-login la maneja App.tsx; se invoca después
+          // de setSession para que el token ya esté guardado cuando
+          // /app monte y pida datos.
+          onSuccess?.();
+        }, 360);
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) {
           setError("Credenciales inválidas");
@@ -64,7 +79,7 @@ export function LoginScreen(): React.JSX.Element {
         setLoading(false);
       }
     },
-    [username, password, setSession],
+    [username, password, setSession, onSuccess],
   );
 
   const handleUsernameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -74,48 +89,17 @@ export function LoginScreen(): React.JSX.Element {
     }
   };
 
-  const toggleTheme = () => {
-    const effective =
-      mode === "system"
-        ? window.matchMedia("(prefers-color-scheme: light)").matches
-          ? "light"
-          : "dark"
-        : mode;
-    setMode(effective === "dark" ? "light" : "dark");
-  };
+  // El toggle de tema vive en <ThemeToggle>; acá ya no hace falta.
 
   return (
     <div className="login-screen">
-      {/* Background: grid sutil */}
-      <div className="login-screen__bg" aria-hidden="true">
-        <div className="login-screen__grid" />
-      </div>
+      {/* El fondo (grilla + cristal) es global: ver <GridBackdrop fixed />
+          en App.tsx. El login sólo pone su layout encima. */}
 
-      <button
-        type="button"
-        className="login-screen__theme-toggle"
-        onClick={toggleTheme}
-        title="Cambiar tema"
-        aria-label="Cambiar tema"
-      >
-        {mode === "light" ? (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-          </svg>
-        ) : (
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="4" />
-            <line x1="12" y1="2" x2="12" y2="4" />
-            <line x1="12" y1="20" x2="12" y2="22" />
-            <line x1="4.93" y1="4.93" x2="6.34" y2="6.34" />
-            <line x1="17.66" y1="17.66" x2="19.07" y2="19.07" />
-            <line x1="2" y1="12" x2="4" y2="12" />
-            <line x1="20" y1="12" x2="22" y2="12" />
-            <line x1="4.93" y1="19.07" x2="6.34" y2="17.66" />
-            <line x1="17.66" y1="6.34" x2="19.07" y2="4.93" />
-          </svg>
-        )}
-      </button>
+      {/* El toggle se extrajo a <ThemeToggle> para no duplicar la lógica de
+       * resolución del modo efectivo. La clase del login se conserva como
+       * hook de positioning. */}
+      <ThemeToggle className="login-screen__theme-toggle" />
 
       <div className="login-screen__container">
         {/* HERO — features. Se oculta en mobile. */}
@@ -157,6 +141,24 @@ export function LoginScreen(): React.JSX.Element {
             </li>
           </ul>
         </aside>
+
+        {/* Volver a la landing: va FUERA de la card, arriba a la izquierda,
+         * junto al theme toggle. Adentro quedaba sobre el glassmorphism
+         * y se perdía. `login-screen__topbar` lo posiciona. */}
+        {onBack && (
+          <button
+            type="button"
+            className="login-screen__back"
+            onClick={onBack}
+            data-testid="login-back"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <line x1="19" y1="12" x2="5" y2="12" />
+              <polyline points="12 19 5 12 12 5" />
+            </svg>
+            Volver al inicio
+          </button>
+        )}
 
         {/* FORM — card con glassmorphism y los inputs */}
         <section

@@ -52,6 +52,59 @@ svg {
   --status-tools: #64b5f6;
   --status-tools-bg: rgba(100, 181, 246, 0.15);
 
+  /* ─── Radios ─── */
+  /* Los botones son cápsulas: 999px los convierte en píldora sin importar
+   * del alto real (padding + line-height), a diferencia de un radio en
+   * rem que deja las esquinas visibles en botones chicos.
+   * Las cards usan un radio acotado: si fuera 999px se leerían como
+   * píldoras y perderían la superficie de contenido. */
+  --radius-pill: 999px;
+  --radius-card: 0.875rem;
+  /* Controles de formulario (input, botones de acción en línea). Más
+   * chico que la card: un radio de 0.875rem en algo de 2.25rem de alto
+   * queda casi como una cápsula y desalinea con la card que lo contiene. */
+  --radius-control: 0.5rem;
+  --radius-sm: 0.375rem;
+
+  /* Fondo de la landing + chrome fijo (header/footer).
+   *
+   * Estos NO podem usar --bg ni --bg-glass: la landing es casi negra en
+   * dark (#020202) y casi blanca en light (#f7f7fa), muy distintos de
+   * los del shell. Se separan para que el toggle de tema afecte a la
+   * landing entera — antes iban hardcodeados y cambiar el tema no hacía
+   * nada visible ahí. */
+  --landing-bg: #020202;
+  --landing-chrome: rgba(6, 6, 6, 0.82);
+  --landing-chrome-strong: rgba(6, 6, 6, 0.86);
+
+  /* ─── Sombras ─── */
+  /* Cards. Claras a propósito: el fondo es casi negro (#020202) y una
+   * sombra negra fuerte sobre negro se lee como un agujero, no como
+   * elevación. El peso visual viene del borde y del rim interior del
+   * cristal, no de la sombra. */
+  --shadow-card:
+    0 1px 2px rgba(0, 0, 0, 0.22), 0 6px 16px -8px rgba(0, 0, 0, 0.32);
+  --shadow-card-hover:
+    0 2px 4px rgba(0, 0, 0, 0.26), 0 10px 26px -10px rgba(0, 0, 0, 0.4);
+
+  /* ─── Cristal (glass) de las cards ───
+   * El glass va en las CARDS, no en el fondo general. Es la diferencia
+   * entre "panel difuminado" y "textura destruida": aplicado sobre el
+   * fondo, el blur borra la grilla de la vista entera; aplicado sobre
+   * una card, sólo difumina lo que hay detrás de ESA card y el resto de
+   * la grilla queda nítida. Ese contraste es la profundidad.
+   *
+   * El radio del blur tiene que ser comparable al grosor de la línea de
+   * la grilla (3px acá): blur(r) deja la línea con w/2r de su intensidad.
+   * Con 14px la grilla desaparecía detrás de la card y la card se veía
+   * como un panel oscuro plano — es decir, sin efecto glass. */
+  --glass-card-bg: color-mix(in oklab, var(--bg-elevated) 45%, transparent);
+  --glass-card-blur: blur(6px) saturate(140%);
+  /* Rasgo interior superior: la luz que "rebota" en el borde del vidrio.
+   * Es lo que más hace que una superficie se lea como cristal y no como
+   * un rectángulo con blur. */
+  --glass-card-rim: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+
   --rail-content-x: 2.5rem;
   --mode-tag-w: 3.25rem;
   --sidebar-w: 18rem;
@@ -78,6 +131,18 @@ svg {
 
 [data-theme="light"] {
   --bg: #f0f0f4;
+  /* Landing: fondo casi blanco y chrome translúcido con la misma
+   * proporción que en dark. Sin esto el toggle dejaba la landing
+   * oscura sobre una app clara. */
+  --landing-bg: #f7f7fa;
+  --landing-chrome: rgba(255, 255, 255, 0.82);
+  /* Cristal de las cards: mismo principio, velo claro para que la grilla
+   * se siga leyendo detrás. */
+  --glass-card-bg: color-mix(in oklab, #ffffff 62%, transparent);
+  /* Rim más marcado en claro: sobre un borde claro el de 0.07 no se
+   * distingue, y el cristal pierde el rasgo que lo identifica. */
+  --glass-card-rim: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --landing-chrome-strong: rgba(255, 255, 255, 0.88);
   --sidebar: rgba(232, 232, 238, 0.72);
   --surface: #ffffff;
   --bg-elevated: #f5f5f7;
@@ -203,7 +268,11 @@ option {
   width: 100vw;
   max-width: 100vw;
   overflow: hidden;
-  background: var(--bg);
+  /* Transparente a propósito: el fondo (base → grilla → cristal) vive en
+   * la raíz de la app como capas fijas. Con `background: var(--bg)` acá,
+   * el shell tapaba la grilla y el cristal en todas las vistas internas
+   * (overview, chat, config, workspace). */
+  background: transparent;
 }
 
 .app-main {
