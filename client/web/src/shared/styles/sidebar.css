@@ -356,6 +356,69 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
 
 /* ---- Logout button (footer) ---- */
 
+/* ---- Acciones de sesión (campana · tema · logout) ----
+ * Agrupadas en una fila a la derecha del avatar. Sin `display: flex`
+ * el div cae a block y apila los tres botones en columna, que es como
+ * aparecían: la campana y el tema "encima" del logout. */
+.sidebar-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  flex-shrink: 0;
+}
+
+.sidebar-footer-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0.375rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 120ms steps(2, end),
+              color 120ms steps(2, end);
+}
+
+.sidebar-footer-action:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.sidebar-footer-action svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+/* Badge de aprobaciones pendientes. Es un contador sobre el borde
+ * superior derecho de la campana: `position: relative` en el botón y
+ * `transform` para centrarlo sobre el borde sin sumar alto al footer. */
+.sidebar-bell__badge {
+  position: absolute;
+  top: 0.0625rem;
+  right: 0.0625rem;
+  min-width: 0.75rem;
+  height: 0.75rem;
+  padding: 0 0.125rem;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--status-warn);
+  color: var(--bg);
+  font-size: 0.5rem;
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.sidebar-bell:hover .sidebar-bell__badge {
+  background: var(--status-warn);
+}
+
 .sidebar-logout {
   display: flex;
   align-items: center;
@@ -469,6 +532,15 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
 .sidebar-panel.collapsed .user-info__name,
 .sidebar-panel.collapsed .user-info__role {
   display: none !important;
+}
+
+/* Colapsada, el footer queda en modo avatar: se ocultan TODAS las
+ * acciones de sesión (campana, tema, logout), no sólo el logout. Antes
+ * quedaban dos íconos sueltos al lado del avatar sin contexto. Se oculta
+ * el grupo entero en vez de cada botón, porque las tres comparten el
+ * mismo comportamiento. */
+.sidebar-panel.collapsed .sidebar-footer-actions {
+  display: none;
 }
 
 .sidebar-panel.collapsed .sidebar-logout {

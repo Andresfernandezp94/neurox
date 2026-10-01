@@ -249,6 +249,19 @@ export const IconEdit = () => (
   <svg viewBox="0 0 24 24" {...s}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
 );
 
+/* Puerta de entrada: marco + flecha que entra. Para botones de navegación
+ * tipo "Entrar al panel" donde el texto no aporta tanto como el ícono. */
+export const IconLogin = () => (
+  <svg viewBox="0 0 24 24" {...s}><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><polyline points="10 17 15 12 10 7" /><line x1="15" y1="12" x2="3" y2="12" /></svg>
+);
+
+/* Campana de notificaciones. El badge de pendientes se renderiza como
+ * elemento aparte en el componente que la use, no dentro del svg, para
+ * poder estilizar el contador de forma independiente. */
+export const IconBell = () => (
+  <svg viewBox="0 0 24 24" {...s}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>
+);
+
 export const IconStar = () => (
   <svg viewBox="0 0 24 24" {...s}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
 );
