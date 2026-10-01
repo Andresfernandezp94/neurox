@@ -103,3 +103,48 @@ fn spawner_concurrency_loads_from_yaml() {
     let cfg: neurox::config::CoreConfig = serde_yml::from_str(yaml).unwrap();
     assert_eq!(cfg.spawner_concurrency, 16);
 }
+
+/// El example es la puerta de entrada de una instalación: alguien que
+/// clona el repo lo copia a ~/.config/neurox/config.yaml. Si queda atrás
+/// del config real, instala un daemon sin providers declarados ni auth
+/// configurada, y el síntoma es "no me funciona el chat" sin pista.
+///
+/// Este test ata el example al struct real: si mañana se agrega un campo
+/// obligatorio o se renombra una sección, falla acá y no en la máquina de
+/// quien instaló.
+#[test]
+fn config_example_parses_into_core_config() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config.example.yaml");
+    let cfg = neurox::config::CoreConfig::load(&path)
+        .expect("config.example.yaml must parse into CoreConfig");
+
+    assert_eq!(cfg.bind_addr, "127.0.0.1:7878");
+    assert!(
+        !cfg.llm.providers.is_empty(),
+        "the example must declare providers, otherwise a clean install has none"
+    );
+    assert!(
+        cfg.llm.providers.iter().all(|p| p.api_key_env.is_some()),
+        "every provider in the example should name its api_key_env"
+    );
+}
+
+/// Los providers del example deben coincidir con los que el daemon puede
+/// resolver: cada `kind` tiene su propio endpoint por defecto, asi que un
+/// kind invalido no se descubre en elCatalogo.
+#[test]
+fn config_example_providers_have_valid_kinds() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config.example.yaml");
+    let cfg = neurox::config::CoreConfig::load(&path).unwrap();
+
+    for p in &cfg.llm.providers {
+        assert!(
+            !p.id.is_empty(),
+            "provider with empty id would break `default_provider` lookups"
+        );
+        assert!(
+            !p.base_url.starts_with("https://") || p.kind != neurox::config::LlmProviderKind::Anthropic,
+            "anthropic expects https://api.anthropic.com"
+        );
+    }
+}

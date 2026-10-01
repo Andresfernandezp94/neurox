@@ -1,14 +1,180 @@
 # neurox daemon — configuración de ejemplo.
 #
 # Copiá este archivo a ~/.config/neurox/config.yaml y ajustá las rutas.
-# Las API keys NO van aquí: viven en ~/.config/neurox/env (permisos 0600),
-# cargadas por el EnvironmentFile del servicio systemd y por el env watcher.
 #
-# Sustitución de variables:
+# ─────────────────────────────────────────────────────────────────────────────
+# CATEGORÍAS DE VARIABLES DE ENTORNO
+#
+# Las API keys y los secretos NO van en este archivo: viven en
+# ~/.config/neurox/env (permisos 0600), que el daemon lee de dos maneras:
+#
+#   1. El `EnvironmentFile=` del unit systemd, al arrancar.
+#   2. El env watcher (core/src/env_watcher.rs), que relee el archivo cada
+#      5s y propaga los cambios al proceso con `set_var`. Es aditivo: si
+#      una key se borra del archivo, el watcher NO la quita del proceso
+#      (unsetVar es `unsafe` en Rust 1.65+ porque libc mantiene su propia
+#      copia de `environ`). Para borrar una key usá DELETE /v1/env/:key.
+#
+# El archivo `env` se organiza por responsabilidad. Cada bloque es
+# independiente: podés borrar uno entero sin romper los otros.
+#
+# ┌─ 1. RUNTIME ─────────────────────────────────────────────────────────────┐
+# | Configuración del propio daemon. Sin secretos.                            |
+# |   NEUROX_WORKSPACE                   raíz del workspace                   |
+# |   NEUROX_ENV_FILE                    override de la ruta del env file   |
+# |   NEUROX_MAX_TOOL_ITERATIONS         tope de iteraciones por tool call   |
+# |   NEUROX_SESSION_STREAM_TIMEOUT_SECS timeout de streaming de una sesión   |
+# │   RUST_LOG / NEUROX_LOG_FORMAT       nivel y formato del log             │
+# └──────────────────────────────────────────────────────────────────────────┘
+#
+# ┌─ 2. PROVIDERS LLM ───────────────────────────────────────────────────────┐
+# | Son los secretos principales. Un `*_API_KEY` por provider declarado      |
+# | abajo en la sección `llm`. El daemon NO guarda el valor: solo el nombre   |
+# | de la variable (`api_key_env`).                                          │
+# |   MINIMAX_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, XAI_API_KEY,        |
+# |   GEMINI_API_KEY, MISTRAL_API_KEY, OPENROUTER_API_KEY, OPENCODE_API_KEY  │
+# |   MINIMAX_BASE_URL / MINIMAX_MODEL   overrides del provider por defecto   |
+# └──────────────────────────────────────────────────────────────────────────┘
+#
+# ┌─ 3. DEFAULT DE LLM (override del operador) ──────────────────────────────┐
+# | Aplica SOLO cuando el usuario no eligió provider/modelo desde el front.   |
+# | Pisar una elección explícita con una env var sería invisible y destructivo:│
+# | un cambio de deploy le borraría la config a todos.                       │
+# |   NEUROX_DEFAULT_PROVIDER   id del provider (default: primer configurado)│
+# |   NEUROX_DEFAULT_MODEL      id del modelo (default: el del provider)     │
+# └──────────────────────────────────────────────────────────────────────────┘
+#
+# ┌─ 4. AUTH ────────────────────────────────────────────────────────────────┐
+# | Aislada a propósito: la password del admin nunca debe travelling junto a   |
+# | las keys de providers. Si algún día se agrega un listado de env vars,     |
+# | esta categoría es la que se excluye.                                     │
+# |   NEUROX_ADMIN_PASSWORD    password del usuario admin inicial            │
+# └──────────────────────────────────────────────────────────────────────────┘
+#
+# ┌─ 5. INTEGRACIONES ───────────────────────────────────────────────────────┐
+# | Plugins y tool engine.                                                   │
+# │   NEUROX_MEMORY_URL / NEUROX_MEMORY_WORKSPACE   plugin de memoria        │
+# │   NEUROX_IDENTITY_DIR                            identidad de los agentes│
+# │   NEUROX_TODO_DIR                               store de tareas (todos)  │
+# │   NEUROX_TOOLS_ALLOWLIST                        tools habilitadas         │
+# └──────────────────────────────────────────────────────────────────────────┘
+#
+# ┌─ 6. INFRAESTRUCTURA ─────────────────────────────────────────────────────┐
+# | Las aporta el host (HOME, PATH, XDG_*). No las escribimos nunca.          │
+# └──────────────────────────────────────────────────────────────────────────┘
+#
+# Formato del archivo `env`: `KEY=valor`, un comentario por línea, permisos
+# 0600. OJO: no se parsean comillas ni `${...}` de dotenv. Un valor entre
+# comillas guarda las comillas LITERALES en el valor, y la key falla en el
+# provider sin error visible. Escribí el valor pelado.
+#
+# Sustitución de variables en ESTE archivo:
 #   ${env:VAR}  — reemplazado por std::env::var("VAR") al cargar.
+#                  OJO: una variable inexistente expande a cadena vacía con
+#                  un warning, no falla. Para un valor que debe estar presente
+#                  (una API key), una expansión vacía termina en un 401 más
+#                  abajo, lejos de la causa. Verificá que exista.
 
 bind_addr: "127.0.0.1:7878"
 log_level: "info"
+
+# ─── Proveedores LLM ───────────────────────────────────────────────────────
+# OJO: `bootstrap_from_yaml` corta si el store ya tiene algún provider
+# (`if count > 0 { return Ok(0) }`). Estos bloques son para installs
+# limpios; para agregar uno a una base existente usá POST
+# /v1/llm/providers, que es lo que hace la web desde Config → Providers.
+#
+# `api_key_env` es sólo el NOMBRE de la variable; el valor vive en
+# ~/.config/neurox/env. Sin la key, el provider aparece pero queda
+# `configured: false` y el chat devuelve error.
+#
+# El provider por defecto NO se define acá: es config de cada usuario y
+# vive en la tabla `user_llm_prefs` (SQLite), se setea desde el front con
+# PUT /v1/llm/prefs y se lee con GET /v1/llm/prefs. En la base del install
+# queda vacío y el daemon resuelve por precedencia:
+#
+#   1. user_llm_prefs           — lo que eligió el usuario
+#   2. NEUROX_DEFAULT_PROVIDER  — override del operador (env)
+#   3. llm.default_provider     — esta base del install
+#   4. primer provider con key, alfabético — para que un usuario nuevo
+#      pueda usar el chat sin configurar nada
+llm:
+  # Base del install. Opcional: si se omite, el daemon usa el provider
+  # configurado en primer lugar por orden alfabético.
+  default_provider: "minimax"
+  # Modelo por defecto. Vacío = el `model` del provider elegido.
+  default_model: ""
+  providers:
+    - id: "minimax"
+      kind: "minimax"
+      api_key_env: "MINIMAX_API_KEY"
+
+    - id: "anthropic"
+      kind: "anthropic"
+      base_url: "https://api.anthropic.com"
+      model: "claude-3-5-haiku-latest"
+      api_key_env: "ANTHROPIC_API_KEY"
+
+    - id: "mistral"
+      kind: "openai_compat"
+      base_url: "https://api.mistral.ai/v1"
+      model: "mistral-large-latest"
+      api_key_env: "MISTRAL_API_KEY"
+
+    - id: "openrouter"
+      kind: "openai_compat"
+      base_url: "https://openrouter.ai/api/v1"
+      model: "openai/gpt-4o-mini"
+      api_key_env: "OPENROUTER_API_KEY"
+
+    # opencode Zen: gateway OpenAI-compatible. El base_url y el env var
+    # salen del catálogo oficial que publica el propio opencode
+    # (https://models.opencode.ai/api.json -> provider "opencode").
+    - id: "opencode"
+      kind: "openai_compat"
+      base_url: "https://opencode.ai/zen/v1"
+      model: "glm-5-free"
+      api_key_env: "OPENCODE_API_KEY"
+
+    # ── Stack completo ──
+    # Los tres de abajo usan la API OpenAI-compatible de cada vendor.
+    # base_url y env verificados contra la doc oficial de cada uno.
+
+    - id: "openai"
+      kind: "openai_compat"
+      base_url: "https://api.openai.com/v1"
+      model: "gpt-4o-mini"
+      api_key_env: "OPENAI_API_KEY"
+
+    # xAI publica un REST compatible con OpenAI: sólo cambia base_url y key.
+    - id: "grok"
+      kind: "openai_compat"
+      base_url: "https://api.x.ai/v1"
+      model: "grok-4.6"
+      api_key_env: "XAI_API_KEY"
+
+    # Gemini también expone un endpoint OpenAI-compatible. Ojo: el path
+    # es /v1beta/openai (no /v1) y el key va en GEMINI_API_KEY.
+    - id: "google"
+      kind: "openai_compat"
+      base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
+      model: "gemini-3.7-flash"
+      api_key_env: "GEMINI_API_KEY"
+
+# ─── Auth ─────────────────────────────────────────────────────────────────
+# EP-0007 / EP-0011: con `enabled: true` el daemon exige un JWT válido en
+# todas las rutas /v1/* salvo las públicas (/health, /livez, /readyz,
+# /v1/auth/login). Los loopbacks ya NO tienen bypass: presentar un token
+# es obligatorio, incluso desde 127.0.0.1.
+#
+# Esto NO es opcional en la práctica: 10 handlers (sessiones, usuarios,
+# prefs de LLM, etc.) usan `UserContext` como extractor, y ese valor solo lo
+# inyecta JwtAuthLayer. Con auth deshabilitado esos endpoints devuelven 401
+# aunque /health reporte `auth_required: false`.
+auth:
+  enabled: true
+  # Paths por defecto: ~/.config/neurox/users.json y ~/.config/neurox/jwt_secret
+  jwt_expiry_hours: 24
 
 # ─── Session agents (un subproceso por sesión de chat) ─────────────────────
 # `default` es un SESSION agent: cada sesión (pestaña web, sidebar, clientes
