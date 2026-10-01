@@ -104,7 +104,7 @@ describe('StatusPanel', () => {
     await waitFor(() => {
       expect(screen.getByText(/Services \(2\)/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/MCP \(0\)/)).toBeInTheDocument();
+    expect(screen.getByText(/MCP tools \(0\)/)).toBeInTheDocument();
     expect(screen.getByText('Daemon')).toBeInTheDocument();
     expect(screen.getByText('Memory')).toBeInTheDocument();
 
@@ -126,7 +126,7 @@ describe('StatusPanel', () => {
     await waitFor(() => {
       expect(screen.getByText(/No services reported/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/No plugins connected/)).toBeInTheDocument();
+    expect(screen.getByText(/No tools exposed/)).toBeInTheDocument();
   });
 
   it('overview: shows error banner when services endpoint fails', async () => {

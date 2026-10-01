@@ -2,15 +2,24 @@
 
 import { apiGet, apiPost } from "./client";
 
-export interface PluginInfo {
+/**
+ * Un tool publicado por el motor de tools.
+ *
+ * OJO: `GET /v1/mcps` NO devuelve servidores plugin registrados sino el
+ * catálogo de tools (`{"plugins": [...]}` en el daemon, ver
+ * `http::list_plugins` → `state.engine.tools.list_specs()`). El shape
+ * anterior (`base_url`, `status`, `health_path`) no existe en la
+ * respuesta real: el daemon computa `mcp_plugins` pero nunca lo incluye
+ * en el JSON, y no hay endpoint `/v1/plugins`. Este tipo refleja lo que
+ * la API devuelve hoy, no lo que se asumía.
+ */
+export interface McpToolSpec {
   name: string;
-  base_url: string;
-  status: "connected" | "disconnected" | "error";
-  tools: string[];
-  skills: string[];
-  health_path: string;
-  registered_at: string | null;
-  last_health_check: string | null;
+  description: string;
+  parameters: Record<string, unknown>;
+  requires_approval: boolean;
+  categories: string[];
+  mode_compatible: string[];
 }
 
 export interface CatalogEntry {
@@ -36,11 +45,15 @@ export interface ReconnectResult {
   error?: string;
 }
 
-/** GET /v1/mcps */
-export async function getPlugins(): Promise<PluginInfo[]> {
-  const data = await apiGet<{ plugins: PluginInfo[] }>("/v1/mcps");
-  return data.plugins;
+/** GET /v1/mcps — catálogo de tools expuestas por el motor. */
+export async function getPlugins(): Promise<McpToolSpec[]> {
+  const data = await apiGet<{ plugins: McpToolSpec[] }>("/v1/mcps");
+  return data.plugins ?? [];
 }
+
+/** Alias con nombre explícito, para no volver a confundirlo con
+ *  servidores plugin. */
+export const getMcpTools = getPlugins;
 
 /** GET /v1/mcps/catalog — list every MCP in the configured registry
  *  plus a flag indicating whether it is currently installed in this

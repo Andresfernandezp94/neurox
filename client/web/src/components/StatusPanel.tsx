@@ -20,11 +20,12 @@ import { Row } from "../shared/components/molecules/Row";
 import { Stack } from "../shared/components/molecules/Stack";
 import { StatPair } from "../shared/components/molecules/StatPair";
 import { Button } from "../shared/components/atoms/Button";
+import { Badge } from "../shared/components/atoms/Badge";
 import { StatusBar } from "../shared/components/StatusBar";
 import { useConnectionState } from "../store/StoreContext";
 import { listServices, type ServiceInfo, type ClientInfo } from "../api/services";
 import { getHealth } from "../api/health";
-import { getPlugins, type PluginInfo } from "../api/mcps";
+import { getPlugins, type McpToolSpec } from "../api/mcps";
 import type { Health } from "../types";
 import {
   IconCpu,
@@ -38,7 +39,7 @@ export function StatusPanel() {
   const [servicesError, setServicesError] = useState<string | null>(null);
   const [, setClients] = useState<ClientInfo[]>([]);
   const [serverTime, setServerTime] = useState<string | null>(null);
-  const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [plugins, setPlugins] = useState<McpToolSpec[]>([]);
   const [healthInfo, setHealthInfo] = useState<Health | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -94,7 +95,7 @@ interface OverviewContentProps {
   health: Health | null;
   services: ServiceInfo[];
   serverTime: string | null;
-  plugins: PluginInfo[];
+  plugins: McpToolSpec[];
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
@@ -229,32 +230,43 @@ function OverviewContent({
         </Stack>
       )}
 
-      {/* ─── MCP plugins ─── */}
+      {/* ─── MCP tools ─── */}
+      {/* OJO: /v1/mcps devuelve el CATÁLOGO DE TOOLS del motor, no
+       * servidores plugin registrados. No hay status ni base_url que
+       * mostrar: lo que existe es el spec de cada tool. */}
       <Row gap="sm" align="center" className="overview-content__section-header">
         <IconIntegrations />
         <h3 className="overview-content__section-title">
-          MCP ({plugins.length})
+          MCP tools ({plugins.length})
         </h3>
       </Row>
       {plugins.length === 0 ? (
-        <p className="muted">No plugins connected.</p>
+        <p className="muted">No tools exposed.</p>
       ) : (
         <Stack gap="sm">
           {plugins.map((p) => (
             <Card key={p.name} className="overview-content__card">
               <Row gap="sm" align="center">
                 <span
-                  className={`overview-content__item-icon overview-content__item-icon--${serviceStatusVariant(p.status)}`}
+                  className={`overview-content__item-icon overview-content__item-icon--${p.requires_approval ? "warn" : "success"}`}
                   aria-hidden="true"
                 >
                   <IconIntegrations />
                 </span>
                 <strong className="overview-content__service-name">{p.name}</strong>
-                <span className="muted text-sm">· {p.tools?.length ?? 0} tools</span>
-                <span className="muted text-sm">· {p.skills?.length ?? 0} skills</span>
+                {p.requires_approval && (
+                  <Badge variant="warn">requiere aprobación</Badge>
+                )}
+                {p.categories.map((c) => (
+                  <span key={c} className="muted text-sm">
+                    · {c}
+                  </span>
+                ))}
               </Row>
-              {p.base_url && (
-                <p className="muted overview-content__service-desc">{p.base_url}</p>
+              {p.description && (
+                <p className="muted overview-content__service-desc">
+                  {p.description}
+                </p>
               )}
             </Card>
           ))}
