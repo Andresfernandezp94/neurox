@@ -3565,9 +3565,12 @@ pub async fn put_env_var(
     }
 
     crate::environments::set_env_var(&key, value).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
-    // EP-0018-05: nudge the env-file watchdog so the next poll picks up
-    // the change immediately (without waiting the full 5s interval).
-    crate::env_watcher::touch_after_write();
+    // No hace falta "nudgar" al watcher: `set_env_var` ya aplico el valor
+    // al proceso con `std::env::set_var`, asi que el cambio es visible para
+    // los consumidores del daemon de inmediato. El watcher solo sirve para
+    // detectar escrituras de OTROS procesos (edicion a mano), y para esas
+    // el plazo real es su intervalo de poll. El `touch_after_write` que se
+    // llamaba aca abria el archivo sin escribir nada.
     Ok(Json(json!({
         "ok": true,
         "key": key,
@@ -4041,7 +4044,8 @@ pub async fn delete_env_var(
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     crate::environments::unset_env_var(&key)
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
-    crate::env_watcher::touch_after_write();
+    // `unset_env_var` ya llama a `std::env::remove_var`, asi que el proceso
+    // queda consistente sin tocar el watcher. Ver la nota del PUT.
     Ok(Json(json!({
         "ok": true,
         "key": key,
