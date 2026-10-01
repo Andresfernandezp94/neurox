@@ -103,6 +103,12 @@ impl Engine {
         crate::providers::settings::ensure_table(&db)
             .await
             .map_err(|e| anyhow::anyhow!("settings migration: {e}"))?;
+        // Preferencias de LLM por usuario. Va aparte de `engine_settings`
+        // porque esa tabla es key/value global: el default de provider es
+        // config DEL USUARIO y dos usuarios no pueden pisarse.
+        crate::providers::user_llm_pref::ensure_table(&db)
+            .await
+            .map_err(|e| anyhow::anyhow!("user_llm_prefs migration: {e}"))?;
 
         let pool = Arc::new(db);
         let providers = Arc::new(ProviderStore::new(pool.clone()));
@@ -163,6 +169,9 @@ impl Engine {
         crate::providers::model_config_store::ensure_table(&db)
             .await
             .map_err(|e| anyhow::anyhow!("model_configs migration: {e}"))?;
+        crate::providers::user_llm_pref::ensure_table(&db)
+            .await
+            .map_err(|e| anyhow::anyhow!("user_llm_prefs migration: {e}"))?;
 
         let pool = Arc::new(db);
         let providers = Arc::new(ProviderStore::new(pool.clone()));

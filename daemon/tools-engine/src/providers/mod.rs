@@ -8,3 +8,4 @@ pub mod models_discovery;
 pub mod provider_store;
 pub mod settings;
 pub mod store;
+pub mod user_llm_pref;

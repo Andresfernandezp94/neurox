@@ -3005,6 +3005,189 @@ pub async fn update_llm_provider(
     })))
 }
 
+/// Body de `PUT /v1/llm/prefs`.
+///
+/// `provider_id` es obligatorio: un default sin provider no es usable
+/// (el modelo depende del provider). `model` es opcional — vacio
+/// significa "usar el `effective_model()` del provider".
+#[derive(Debug, Deserialize)]
+pub struct SetLlmPrefBody {
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
+}
+
+/// Resuelve la preferencia de LLM de un usuario, leyendo providers del
+/// store y su estado `configured`.
+///
+/// Se separa del handler para que los tests puedan ejercitar la
+/// resolucion sin levantar el router.
+pub async fn resolve_user_llm_pref(
+    state: &AppState,
+    user_id: &str,
+) -> Result<
+    tools_engine::providers::user_llm_pref::ResolvedLlmPref,
+    (StatusCode, Json<serde_json::Value>),
+> {
+    use tools_engine::providers::user_llm_pref as pref_mod;
+
+    let providers = state
+        .engine
+        .list_providers()
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("failed to list providers: {e}")})),
+            )
+        })?;
+
+    // El store devuelve providers en orden de insercion. La resolucion
+    // depende del orden alfabetico para el fallback automatico (un
+    // usuario nuevo no deberia obtener un provider distinto segun el
+    // orden de alta), asi que se ordena aca.
+    let mut available: Vec<(String, bool)> = providers
+        .iter()
+        .map(|p| {
+            (
+                p.id.clone(),
+                catalog_is_configured_field(p.api_key_env.as_deref()),
+            )
+        })
+        .collect();
+    available.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let ids: Vec<String> = available.iter().map(|(id, _)| id.clone()).collect();
+    let configured_ids: Vec<String> = available
+        .iter()
+        .filter(|(_, ok)| *ok)
+        .map(|(id, _)| id.clone())
+        .collect();
+    let is_configured = move |id: &str| configured_ids.iter().any(|c| c == id);
+
+    let stored = pref_mod::load(&state.engine.db, user_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": e})),
+            )
+        })?;
+
+    Ok(pref_mod::resolve_llm_pref(
+        stored.as_ref(),
+        &ids,
+        &is_configured,
+        Some(state.config.llm.default_provider.as_str()),
+        state.config.llm.default_model.as_deref(),
+    ))
+}
+
+/// GET /v1/llm/prefs — preferencia efectiva del usuario autenticado.
+///
+/// Se llama al cargar la app para rehidratar: el front no debe pedirle
+/// al usuario que elija provider/modelo cada vez. Incluye `source` para
+/// que la UI distinga "vos elegiste esto" de "esto vino del default".
+pub async fn get_llm_prefs(
+    State(state): State<Arc<AppState>>,
+    user: UserContext,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let resolved = resolve_user_llm_pref(&state, &user.user_id.to_string()).await?;
+    let stored =
+        tools_engine::providers::user_llm_pref::load(&state.engine.db, &user.user_id.to_string())
+            .await
+            .unwrap_or(None);
+
+    Ok(Json(json!({
+        // Lo que el usuario seteo explicitamente (puede ser null).
+        "provider_id": resolved.provider_id,
+        "model": resolved.model,
+        "source": resolved.source.as_str(),
+        // Distingue "nunca seteó" de "seteó y coincidió con el default".
+        "explicit": stored.is_some(),
+        "stored_provider_id": stored.as_ref().and_then(|s| s.provider_id.clone()),
+        "stored_model": stored.and_then(|s| s.model),
+    })))
+}
+
+/// PUT /v1/llm/prefs — setear la preferencia del usuario autenticado.
+///
+/// Valida que el provider exista y tenga key antes de persistir: aceptar
+/// un provider sin key solo difiere el error al primer mensaje del chat,
+/// que es mucho mas dificil de diagnosticar que un 400 aca.
+///
+/// `{provider_id: null}` o vacio borra la preferencia y devuelve el
+/// usuario al default del install.
+pub async fn set_llm_prefs(
+    State(state): State<Arc<AppState>>,
+    user: UserContext,
+    body: Option<Json<SetLlmPrefBody>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use tools_engine::providers::user_llm_pref as pref_mod;
+
+    let user_id = user.user_id.to_string();
+    let body = match body {
+        Some(Json(b)) => b,
+        None => SetLlmPrefBody {
+            provider_id: None,
+            model: None,
+        },
+    };
+    let pref = pref_mod::UserLlmPref::normalize(body.provider_id.as_deref(), body.model.as_deref());
+
+    // Clear explicito: volver al default del install.
+    if pref.provider_id.is_none() {
+        pref_mod::delete(&state.engine.db, &user_id)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+        let resolved = resolve_user_llm_pref(&state, &user_id).await?;
+        return Ok(Json(json!({
+            "provider_id": resolved.provider_id,
+            "model": resolved.model,
+            "source": resolved.source.as_str(),
+            "explicit": false,
+        })));
+    }
+
+    let provider_id = pref.provider_id.clone().unwrap_or_default();
+    let providers = state.engine.list_providers().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("failed to list providers: {e}")})),
+        )
+    })?;
+
+    let Some(provider) = providers.iter().find(|p| p.id == provider_id) else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": format!("provider '{provider_id}' does not exist")})),
+        ));
+    };
+
+    if !catalog_is_configured_field(provider.api_key_env.as_deref()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": format!(
+                    "provider '{provider_id}' has no API key — set its api_key_env first"
+                ),
+                "provider_id": provider_id,
+                "configured": false,
+            })),
+        ));
+    }
+
+    pref_mod::save(&state.engine.db, &user_id, &pref)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))))?;
+
+    Ok(Json(json!({
+        "provider_id": pref.provider_id,
+        "model": pref.model,
+        "source": pref_mod::PrefSource::User.as_str(),
+        "explicit": true,
+    })))
+}
+
 /// DELETE /v1/llm/providers/:id — remove a provider (204/404/409).
 pub async fn delete_llm_provider(
     State(state): State<Arc<AppState>>,

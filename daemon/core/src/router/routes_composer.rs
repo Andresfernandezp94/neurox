@@ -112,6 +112,13 @@ pub fn router(state: AppState) -> axum::Router {
             get(http::list_provider_models),
         )
         .route("/v1/llm/models", get(http::get_llm_models))
+        // Preferencia de LLM POR USUARIO: el default provider/modelo es
+        // config de cada usuario, no del daemon. GET rehidrata al cargar
+        // la app, PUT la persiste.
+        .route(
+            "/v1/llm/prefs",
+            get(http::get_llm_prefs).put(http::set_llm_prefs),
+        )
         .route("/v1/llm/models/local", get(http::list_local_models))
         .route(
             "/v1/llm/models/local/configs",
