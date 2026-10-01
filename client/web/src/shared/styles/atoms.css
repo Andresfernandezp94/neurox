@@ -2929,7 +2929,8 @@
 .providers-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr));
-  gap: 0.75rem;
+  /* > el alcance de --shadow-card, si no las cards se leen pegadas. */
+  gap: var(--gap-card-grid);
   align-items: start;
 }
 .provider-card--active { border-color: var(--accent); }

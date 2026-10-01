@@ -101,9 +101,21 @@ svg {
   --glass-card-bg: color-mix(in oklab, var(--bg-elevated) 45%, transparent);
   --glass-card-blur: blur(6px) saturate(140%);
   /* Rasgo interior superior: la luz que "rebota" en el borde del vidrio.
-   * Es lo que más hace que una superficie se lea como cristal y no como
+   * Es lo que más hace que una superficie se lee como cristal y no como
    * un rectángulo con blur. */
   --glass-card-rim: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+
+  /* Separación entre cards en una grilla.
+   *
+   * No es un espaciado estético: `--shadow-card` proyecta
+   * `0 6px 16px -8px`, así que la sombra se extiende ~8px fuera del
+   * borde. Con un gap de 0.75rem (12px) la sombra de la card de arriba
+   * ocupa casi todo el hueco y las cards se leen pegadas, fundidas en
+   * una masa oscura. El hueco tiene que ser mayor que el alcance de la
+   * sombra para que el fondo se vea entre ellas.
+   *
+   * 0.25rem de aire + ~8px de sombra ≈ 1.25rem de separación real. */
+  --gap-card-grid: 1.25rem;
 
   --rail-content-x: 2.5rem;
   --mode-tag-w: 3.25rem;
