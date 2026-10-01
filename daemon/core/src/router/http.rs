@@ -3543,6 +3543,27 @@ pub async fn put_env_var(
             ))
         }
     };
+    // Las variables de solo lectura se listan en el catalogo pero no se
+    // escriben desde aca: son de infraestructura (las pone el host) o
+    // keys de providers (que se editan en su tab). Aceptarlas haria que
+    // el valor sobreviva hasta el proximo reinicio y despues pierda
+    // contra el entorno real, sin avisar.
+    if let Some(spec) = crate::env_catalog::all()
+        .into_iter()
+        .find(|s| s.key == key)
+    {
+        if spec.read_only {
+            return Err((
+                StatusCode::FORBIDDEN,
+                format!(
+                    "'{key}' es de solo lectura ({}) — se administra en otro lugar",
+                    spec.category.label()
+                )
+                .into(),
+            ));
+        }
+    }
+
     crate::environments::set_env_var(&key, value).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     // EP-0018-05: nudge the env-file watchdog so the next poll picks up
     // the change immediately (without waiting the full 5s interval).
@@ -3554,20 +3575,82 @@ pub async fn put_env_var(
     })))
 }
 
-/// GET /v1/env — list env var names from the daemon env file.
+/// GET /v1/env — catalogo de variables de entorno + estado de cada una.
 ///
-/// Values are never returned — only `{key, set}` pairs where `set` reflects
-/// whether the var is currently present in the process environment.
+/// Antes solo devolvia las keys que YA estaban escritas en el archivo
+/// `env`, lo que hacia imposible agregar una variable desde la UI: no
+/// habia forma de que apareciera algo que nadie hubiera puesto a mano.
+/// Ahora devuelve el catalogo completo (`env_catalog`), con descripcion,
+/// default, categoria y si es editable, mas el estado real de cada
+/// variable.
+///
+/// Los valores NUNCA se devuelven, solo `set: bool`. Para una variable
+/// sensible eso es parte del contrato: el front no puede distinguirlas.
+///
+/// `source` distingue de donde viene el valor efectivo, que no es lo mismo
+/// que "set": una variable puede estar en el archivo y aun asi perder
+/// contra el entorno del proceso.
 pub async fn list_env_vars(State(_state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    let keys = crate::environments::list_env_file_keys().unwrap_or_default();
-    let vars: Vec<serde_json::Value> = keys
+    use crate::env_catalog as cat;
+
+    let file_keys: Vec<String> = crate::environments::list_env_file_keys().unwrap_or_default();
+
+    let vars: Vec<serde_json::Value> = cat::all()
         .into_iter()
-        .map(|k| {
-            let set = std::env::var(&k).is_ok();
-            json!({"key": k, "set": set})
+        .map(|spec| {
+            let in_file = file_keys.iter().any(|k| k == spec.key);
+            let in_env = std::env::var(spec.key).is_ok();
+            json!({
+                "key": spec.key,
+                "set": in_env || in_file,
+                "in_env": in_env,
+                "in_file": in_file,
+                "category": spec.category.as_str(),
+                "category_label": spec.category.label(),
+                "description": spec.description,
+                "default_value": spec.default_value,
+                "sensitive": spec.sensitive,
+                "read_only": spec.read_only,
+            })
         })
         .collect();
-    Json(json!({"vars": vars, "path": crate::environments::env_file_path().to_string_lossy()}))
+
+    // Variables que estan en el archivo pero no son del catalogo: las
+    // puso alguien a mano. Se listan aparte para que el operador vea que
+    // existen (y no las pierda de vista), pero sin metadatos inventados.
+    let known: Vec<&str> = cat::all().iter().map(|s| s.key).collect();
+    let unknown: Vec<serde_json::Value> = file_keys
+        .iter()
+        .filter(|k| !known.contains(&k.as_str()))
+        .map(|k| {
+            json!({
+                "key": k,
+                "set": true,
+                "in_env": std::env::var(k).is_ok(),
+                "in_file": true,
+                "category": "custom",
+                "category_label": "Personalizadas",
+                "description": "No pertenece al catalogo de neurox. Editable igual.",
+                "default_value": serde_json::Value::Null,
+                "sensitive": k.to_uppercase().contains("KEY") || k.to_uppercase().contains("PASSWORD"),
+                "read_only": false,
+            })
+        })
+        .collect();
+
+    Json(json!({
+        "vars": vars,
+        "unknown_vars": unknown,
+        "path": crate::environments::env_file_path().to_string_lossy(),
+        "categories": [
+            {"id": "runtime",           "label": cat::EnvCategory::Runtime.label(),       "description": cat::EnvCategory::Runtime.description()},
+            {"id": "default-llm",       "label": cat::EnvCategory::DefaultLlm.label(),   "description": cat::EnvCategory::DefaultLlm.description()},
+            {"id": "auth",              "label": cat::EnvCategory::Auth.label(),        "description": cat::EnvCategory::Auth.description()},
+            {"id": "integrations",      "label": cat::EnvCategory::Integrations.label(),"description": cat::EnvCategory::Integrations.description()},
+            {"id": "infrastructure",    "label": cat::EnvCategory::Infrastructure.label(), "description": cat::EnvCategory::Infrastructure.description()},
+            {"id": "custom",            "label": "Personalizadas", "description": "Variables escritas a mano, fuera del catalogo de neurox."}
+        ],
+    }))
 }
 
 // ─── EP-0018-05 — Local GGUF model discovery ─────────────────────────────

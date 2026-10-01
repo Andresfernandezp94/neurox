@@ -193,9 +193,17 @@ async fn get_env_var_lists_names_without_values() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    // NP_LISTED_A no es parte del catalogo, asi que va en `unknown_vars`.
+    // Antes aparecia en `vars` porque `vars` era literalmente lo que havia
+    // en el archivo.
     let vars = v["vars"].as_array().unwrap();
-    let listed = vars.iter().find(|item| item["key"] == "NP_LISTED_A");
-    assert!(listed.is_some(), "NP_LISTED_A should be listed");
+    assert!(
+        !vars.iter().any(|item| item["key"] == "NP_LISTED_A"),
+        "catalog vars should only contain known keys"
+    );
+    let unknown = v["unknown_vars"].as_array().unwrap();
+    let listed = unknown.iter().find(|item| item["key"] == "NP_LISTED_A");
+    assert!(listed.is_some(), "NP_LISTED_A should be listed as unknown");
     // Values never appear anywhere in the response.
     let raw = body.to_vec();
     assert!(
@@ -224,5 +232,207 @@ async fn get_env_var_empty_when_no_file() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body = to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(v["vars"].as_array().unwrap().len(), 0);
+    // Con el archivo vacio NO hay unknown_vars (nadie escribio nada a
+    // mano), pero `vars` trae el catalogo completo: es lo que permite
+    // agregar una variable desde la UI.
+    assert_eq!(v["unknown_vars"].as_array().unwrap().len(), 0);
+    assert!(
+        v["vars"].as_array().unwrap().len() > 10,
+        "catalog is always returned, even with an empty env file"
+    );
+}
+
+// ─── Catálogo de env vars (EP-2026-10) ───────────────────────────────────
+//
+// GET /v1/env antes devolvía solo las keys ya escritas en el archivo, lo
+// que hacía imposible agregar una variable desde la UI: no aparecía nada
+// que nadie hubiera puesto a mano. Ahora devuelve el catálogo completo con
+// metadatos, y el PUT rechaza escribir las de solo lectura.
+
+async fn get_env_json(app: &axum::Router) -> serde_json::Value {
+    let resp = app
+        .clone()
+        .oneshot(Request::builder().uri("/v1/env").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = to_bytes(resp.into_body(), 4 * 1024 * 1024).await.unwrap();
+    serde_json::from_slice(&body).unwrap()
+}
+
+#[tokio::test]
+async fn get_env_returns_the_catalog_not_only_written_keys() {
+    let _g = env_lock().await;
+    let _guard = env_guard("catalog");
+    let app = build_app().await;
+
+    let v = get_env_json(&app).await;
+    let vars = v["vars"].as_array().unwrap();
+
+    // El archivo está vacío, y aun así el catálogo trae variables: es lo
+    // que permite agregarlas desde la UI.
+    assert!(
+        vars.len() > 10,
+        "catalog should list known vars even with an empty env file, got {}",
+        vars.len()
+    );
+
+    // Ninguna debe traer el valor, ni siquiera las no sensibles.
+    for var in vars {
+        assert!(var.get("value").is_none(), "{} leaked its value", var["key"]);
+        assert!(var["key"].is_string());
+        assert!(var["category"].is_string());
+        assert!(var["description"].as_str().unwrap().len() > 3);
+    }
+}
+
+#[tokio::test]
+async fn catalog_marks_provider_keys_read_only_and_sensitive() {
+    let _g = env_lock().await;
+    let _guard = env_guard("provkeys");
+    let app = build_app().await;
+
+    let v = get_env_json(&app).await;
+    let find = |k: &str| {
+        v["vars"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["key"] == k)
+            .cloned()
+            .unwrap_or_else(|| panic!("{k} missing from catalog"))
+    };
+
+    for key in ["MINIMAX_API_KEY", "ANTHROPIC_API_KEY", "OPENCODE_API_KEY"] {
+        let s = find(key);
+        assert_eq!(s["read_only"], true, "{key} must be read-only");
+        assert_eq!(s["sensitive"], true, "{key} must be sensitive");
+    }
+
+    // Y una var normal sí es editable.
+    assert_eq!(find("NEUROX_TODO_DIR")["read_only"], false);
+}
+
+#[tokio::test]
+async fn catalog_covers_all_categories() {
+    let _g = env_lock().await;
+    let _guard = env_guard("cats");
+    let app = build_app().await;
+
+    let v = get_env_json(&app).await;
+    let cats: std::collections::HashSet<String> = v["vars"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["category"].as_str().unwrap().to_string())
+        .collect();
+
+    for expected in ["runtime", "default-llm", "auth", "integrations", "infrastructure"] {
+        assert!(cats.contains(expected), "missing category {expected}");
+    }
+    // El bloque de categorías del response, para que el front pueda
+    // rotular sin duplicar los nombres.
+    assert!(v["categories"].as_array().unwrap().len() >= 5);
+}
+
+#[tokio::test]
+async fn put_rejects_read_only_provider_key() {
+    let _g = env_lock().await;
+    let _guard = env_guard("ro-put");
+    let app = build_app().await;
+
+    // Editar una key de provider desde acá la pisaría con la tab Providers
+    // sin avisar. El lugar de escritura es la tab Providers.
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/v1/env/MINIMAX_API_KEY")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"value": "sk-intento"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn put_rejects_read_only_infrastructure_var() {
+    let _g = env_lock().await;
+    let _guard = env_guard("ro-path");
+    let app = build_app().await;
+
+    // Escribir PATH desde la UI tendría efecto hasta el próximo reinicio y
+    // después perdería contra el entorno real del host.
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/v1/env/PATH")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"value": "/tmp/evil"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn put_still_accepts_catalog_var() {
+    let _g = env_lock().await;
+    let _guard = env_guard("ok-put");
+    let app = build_app().await;
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/v1/env/NEUROX_TODO_DIR")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"value": "/tmp/todos"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Y el catálogo lo refleja: ya no está "unset".
+    let v = get_env_json(&app).await;
+    let todo = v["vars"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["key"] == "NEUROX_TODO_DIR")
+        .unwrap();
+    assert_eq!(todo["set"], true);
+    assert_eq!(todo["in_file"], true);
+}
+
+#[tokio::test]
+async fn unknown_vars_are_listed_separately() {
+    let _g = env_lock().await;
+    let _guard = env_guard("unknown");
+    let app = build_app().await;
+
+    // Alguien puso una variable a mano que neurox no conoce.
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/v1/env/MI_VAR_CASERA")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"value": "x"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let v = get_env_json(&app).await;
+    let unknown = v["unknown_vars"].as_array().unwrap();
+    let found = unknown.iter().any(|x| x["key"] == "MI_VAR_CASERA");
+    assert!(found, "hand-written var should be listed as unknown");
+    assert_eq!(unknown[0]["category"], "custom");
 }

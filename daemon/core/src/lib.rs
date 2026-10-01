@@ -2,6 +2,7 @@ pub mod approval;
 pub mod auth;
 pub mod clients;
 pub mod config;
+pub mod env_catalog;
 pub mod env_watcher;
 pub mod errors;
 pub mod environments;
