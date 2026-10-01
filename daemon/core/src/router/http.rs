@@ -3671,6 +3671,9 @@ pub async fn list_local_models(State(_state): State<Arc<AppState>>) -> Json<serd
                 "filename": m.filename,
                 "path": m.path,
                 "size_bytes": m.size_bytes,
+                // La categoria es la carpeta del modelo bajo MODELS_DIR.
+                // `unclassified` = el .gguf esta en la raiz, sin carpeta.
+                "category": m.category_or_unclassified(),
             })
         })
         .collect();
