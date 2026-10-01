@@ -256,3 +256,89 @@ export async function putEnvVar(
 ): Promise<{ ok: boolean; key: string; persisted: boolean }> {
   return apiPut(`/v1/env/${encodeURIComponent(key)}`, { value });
 }
+
+// ─── Preferencia de LLM por usuario ────────────────────────────────────────
+//
+// El provider/modelo por defecto es config de cada usuario, no del daemon:
+// vive en la tabla `user_llm_prefs` y se scopea por `user_id`. Por eso
+// esto son endpoints authed con `UserContext`, y no una key en un store
+// global que dos usuarios se pisarían.
+
+/** De dónde salió la preferencia efectiva. */
+export type LlmPrefSource =
+  | "user"           // el usuario la eligió explícitamente
+  | "env"            // NEUROX_DEFAULT_PROVIDER / _MODEL
+  | "config"         // llm.default_provider del YAML
+  | "auto-configured" // primer provider con key, alfabético
+  | "none-configured"; // ningún provider tiene key
+
+/** `GET /v1/llm/prefs` */
+export interface LlmPrefs {
+  /** Provider efectivo (puede ser null si ningún provider tiene key). */
+  providerId: string | null;
+  /** Modelo efectivo. `null` = usar el `model` del provider. */
+  model: string | null;
+  source: LlmPrefSource;
+  /** El usuario eligió explícitamente (vs. vino de un default). */
+  explicit: boolean;
+  /** Lo que está persistido, que puede diferir del efectivo: si la key
+   *  del provider elegido se borró, el daemon cae al default pero la
+   *  elección sigue guardada. */
+  storedProviderId?: string | null;
+  storedModel?: string | null;
+}
+
+/** `PUT /v1/llm/prefs` */
+export interface LlmPrefsResult {
+  providerId: string | null;
+  model: string | null;
+  source: LlmPrefSource;
+  explicit: boolean;
+}
+
+/**
+ * `GET /v1/llm/prefs` — preferencia efectiva del usuario autenticado.
+ *
+ * Se llama al cargar la app para rehidratar: el usuario no debería tener
+ * que elegir provider/modelo cada vez que entra.
+ */
+export async function getLlmPrefs(): Promise<LlmPrefs> {
+  const raw = await apiGet<Record<string, unknown>>("/v1/llm/prefs");
+  return {
+    providerId: (raw.provider_id as string | null) ?? null,
+    model: (raw.model as string | null) ?? null,
+    source: (raw.source as LlmPrefSource) ?? "none-configured",
+    explicit: Boolean(raw.explicit),
+    storedProviderId: (raw.stored_provider_id as string | null) ?? null,
+    storedModel: (raw.stored_model as string | null) ?? null,
+  };
+}
+
+/**
+ * `PUT /v1/llm/prefs` — persiste la preferencia del usuario.
+ *
+ * `providerId: null` borra la preferencia y devuelve el usuario al default
+ * del install. El daemon rechaza con 400 un provider sin API key y con 404
+ * uno inexistente, en vez de aceptar y diferir el error al primer mensaje
+ * del chat.
+ */
+export async function setLlmPrefs(
+  providerId: string | null,
+  model?: string | null,
+): Promise<LlmPrefsResult> {
+  const raw = await apiPut<Record<string, unknown>>("/v1/llm/prefs", {
+    provider_id: providerId,
+    model: model ?? null,
+  });
+  return {
+    providerId: (raw.provider_id as string | null) ?? null,
+    model: (raw.model as string | null) ?? null,
+    source: (raw.source as LlmPrefSource) ?? "user",
+    explicit: Boolean(raw.explicit),
+  };
+}
+
+/** `DELETE` implícito: volver al default del install. */
+export function clearLlmPrefs(): Promise<LlmPrefsResult> {
+  return setLlmPrefs(null, null);
+}
