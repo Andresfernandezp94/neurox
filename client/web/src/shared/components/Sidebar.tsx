@@ -27,7 +27,7 @@ import {
   IconBell,
   IconPower,
   IconGrid,
-  IconWorkspaces,
+  IconWorkspace,
 } from "./Icons";
 import { UserPlaceholder } from "../../components/UserPlaceholder";
 import { ThemeToggle } from "./ThemeToggle";
@@ -105,10 +105,15 @@ export function Sidebar({ view, onTabChange, hidden = false, onLogout }: Sidebar
   }, [expanded, setExpanded]);
 
   const navItems: NavItem[] = [
+    // Orden deliberado: Overview primero porque es la pantalla default
+    // tras el login y es lo accionable. Workspace antes de Config porque
+    // Config agrupa todo lo de configuracion (providers, keys, usuarios)
+    // y es un destino de tarea puntual, mientras que Workspace es trabajo
+    // en curso; el orden pone primero lo que se consulta a diario.
     { id: "status", label: t("sidebar.overview"), icon: IconGrid },
     { id: "chat", label: t("sidebar.chat"), icon: IconChat },
+    { id: "workspace", label: t("sidebar.workspace"), icon: IconWorkspace },
     { id: "config", label: t("sidebar.config"), icon: IconConfig },
-    { id: "workspace", label: t("sidebar.workspace"), icon: IconWorkspaces },
   ];
 
   return (

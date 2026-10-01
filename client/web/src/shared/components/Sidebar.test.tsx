@@ -50,13 +50,28 @@ describe("Sidebar", () => {
     ).map((el) => el.dataset.testid);
 
     // Overview va primero: es la pantalla default tras el login y lo
-    // accionable tiene que estar arriba. `status` es su NavId (histórico).
+    // accionable tiene que estar arriba. Workspace antes de Config:
+    // Config es configuracion puntual, Workspace es trabajo en curso.
+    // `status` es el NavId histórico de Overview.
     expect(order).toEqual([
       "sidebar-nav-status",
       "sidebar-nav-chat",
-      "sidebar-nav-config",
       "sidebar-nav-workspace",
+      "sidebar-nav-config",
     ]);
+  });
+
+  it("gives workspace an icon distinct from overview", () => {
+    // Regresión: los dos items usaban IconGrid e IconWorkspaces, que
+    // era IconGrid con rx="1" — la misma grilla de 4 cuadrados, con un
+    // redondeo que no se distingue a 1rem. Se comparan los `d`/paths
+    // renderizados, no las clases.
+    const { container } = renderWithProviders(
+      <Sidebar view="status" onTabChange={onTabChange} />,
+    );
+    const overview = container.querySelector('[data-testid="sidebar-nav-status"]');
+    const workspace = container.querySelector('[data-testid="sidebar-nav-workspace"]');
+    expect(overview?.innerHTML).not.toEqual(workspace?.innerHTML);
   });
 
   it("calls onTabChange with the correct id when an item is clicked", () => {

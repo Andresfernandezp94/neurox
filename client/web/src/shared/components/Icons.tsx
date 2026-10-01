@@ -173,8 +173,25 @@ export const IconHome = () => (
   <svg viewBox="0 0 24 24" {...s}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
 );
 
+/* Huerfano: era el icono de Workspace, pero es IconGrid con rx="1", o
+ * sea indistinguible de Overview a 1rem. Reemplazado por IconWorkspace.
+ * Se deja por no borrar codigo deprecado de un tirón; no tiene
+ * consumidores. */
 export const IconWorkspaces = () => (
   <svg viewBox="0 0 24 24" {...s}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
+);
+
+/* Workspace: planos apilados. Distinto de IconGrid (4 cuadrados
+ * sueltos) a propósito: los dos convivían en el sidebar y se confundían
+ * porque IconWorkspaces —que se usaba para workspace— era literalmente
+ * IconGrid con rx="1", una diferencia invisible a 1rem. Capas comunica
+ * "conjunto de espacios", que es lo que es un workspace. */
+export const IconWorkspace = () => (
+  <svg viewBox="0 0 24 24" {...s}>
+    <path d="M12 2 2 7l10 5 10-5-10-5Z" />
+    <path d="m2 17 10 5 10-5" />
+    <path d="m2 12 10 5 10-5" />
+  </svg>
 );
 
 export const IconFlows = () => (
