@@ -9,6 +9,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  type Dispatch,
   type ReactNode,
 } from 'react';
 import type {
@@ -474,6 +475,14 @@ export function useStore(): StoreContextValue {
   const ctx = useContext(StoreContext);
   if (!ctx) throw new Error('useStore must be used within a StoreProvider');
   return ctx;
+}
+
+/** Hook de conveniencia para despachar acciones al store.
+ *  Lo usan las fuentes externas al provider (ej. el modo mock de App.tsx). */
+export function useStoreDispatch(): Dispatch<StoreAction> {
+  const ctx = useContext(StoreContext);
+  if (!ctx) throw new Error('useStoreDispatch must be used within a StoreProvider');
+  return ctx.dispatch;
 }
 
 /** Hook de conveniencia para el indicador de conexión. */
