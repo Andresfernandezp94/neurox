@@ -1,11 +1,15 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import App from "./App";
 
 // Estado del mock hoisted: permite que cada test reconfigure `auth_required`
 // (gate de LoginScreen) sin necesidad de re-mockear el módulo entero.
+// `dispatch` también va hoisted: la factory de vi.mock se evalúa antes
+// que el cuerpo del módulo, así que referenciar una `const` de abajo
+// daría ReferenceError (TDZ).
 const mockState = vi.hoisted(() => ({
   authRequired: false,
+  dispatch: vi.fn(),
 }));
 
 // Mock the store context to avoid real WS connections.
@@ -28,14 +32,15 @@ vi.mock("./store/StoreContext", () => {
           },
         },
         agents: new Map(),
-        sessions: [],
-        approvals: [],
+        sessions: new Map(),
+        approvals: new Map(),
         events: [],
         loaded: { agents: false, sessions: false, approvals: false, health: true },
       },
-      dispatch: () => {},
+      dispatch: mockState.dispatch,
       snapshot: vi.fn(),
     }),
+    useStoreDispatch: () => mockState.dispatch,
     useConnectionState: () => ({
       ws: "open" as const,
       health: {
@@ -59,34 +64,104 @@ vi.mock("./store/StoreContext", () => {
 vi.mock("./api/agents", () => ({
   startAgent: vi.fn(),
   stopAgent: vi.fn(),
-}));
+}))
+
+// El BootGate espera `minMs` aunque el store ya esté listo (para que el
+// loader no parpadee). Con timers reales de jsdom eso nunca avanza dentro
+// del test, así que estos tests exercisean el shell con el gate abierto.
+vi.mock("./shared/mock/mockData", () => ({
+  isMockMode: () => true,
+  mockSnapshots: () => ({
+    health: { service: "neurox", status: "ok", version: "0.4.0-test" },
+    agents: [],
+    sessions: [],
+    approvals: [],
+    latencyMs: 1,
+  }),
+}))
 
 describe("App", () => {
+  // El click dispara un state update en `Landing` (entered: true), así que
+  // va envuelto en act() para que React lo procese antes del assert.
+  const click = (testId: string) =>
+    act(() => {
+      screen.getByTestId(testId).click();
+    });
+
   beforeEach(() => {
     window.localStorage.clear();
     sessionStorage.clear();
     mockState.authRequired = false;
+    // Cada test arranca en la landing: la ruta vive en la URL, así que
+    // hay que resetearla explícitamente.
+    window.history.replaceState({}, "", "/");
   });
 
   afterEach(() => {
     window.localStorage.clear();
     sessionStorage.clear();
     vi.restoreAllMocks();
-    // Limpia el query string para no contaminar otros tests.
-    const url = new URL(window.location.href);
-    url.search = "";
-    window.history.replaceState({}, "", url.toString());
+    window.history.replaceState({}, "", "/");
   });
 
-  it("renders without crashing", () => {
+  it("shows the landing at /", () => {
     const { container } = render(<App />);
-    expect(container.querySelector(".app")).toBeInTheDocument();
+    expect(screen.getByTestId("home")).toBeInTheDocument();
+    expect(container.querySelector(".app")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("login-submit")).not.toBeInTheDocument();
   });
 
-  it("renders Sidebar with navigation items", () => {
+  it("navigates to /login from the landing entry button", () => {
     render(<App />);
-    expect(screen.getByTestId("sidebar-nav-chat")).toBeInTheDocument();
+    click("home-enter");
+    expect(window.location.pathname).toBe("/login");
+  });
+
+  it("shows the login screen at /login directly", () => {
+    // Deep link: /login tiene que renderizar el login sin pasar por la
+    // landing. Antes esto era imposible (todo vivía en la misma URL).
+    window.history.replaceState({}, "", "/login");
+    render(<App />);
+    expect(screen.getByTestId("login-submit")).toBeInTheDocument();
+    expect(screen.queryByTestId("home")).not.toBeInTheDocument();
+  });
+
+  it("returns to the landing from /login via the back button", () => {
+    window.history.replaceState({}, "", "/login");
+    render(<App />);
+    click("login-back");
+    expect(window.location.pathname).toBe("/");
+    expect(screen.getByTestId("home")).toBeInTheDocument();
+  });
+
+  it("shows the login when deep-linking to /app without a session", () => {
+    // Guarda: /app sin token no debe dejar el panel a medias pidiendo
+    // datos que van a fallar con 401.
+    mockState.authRequired = true;
+    window.history.replaceState({}, "", "/app");
+    render(<App />);
+    expect(screen.getByTestId("login-submit")).toBeInTheDocument();
+  });
+
+  it("falls back to the landing for an unknown route", () => {
+    window.history.replaceState({}, "", "/no-existe");
+    render(<App />);
+    expect(screen.getByTestId("home")).toBeInTheDocument();
+  });
+
+  it("renders the admin shell at /app when auth is not required", async () => {
+    window.history.replaceState({}, "", "/app");
+    render(<App />);
+    await screen.findByTestId("sidebar-nav-chat");
     expect(screen.getByTestId("sidebar-nav-config")).toBeInTheDocument();
+    expect(screen.getByTestId("status-panel")).toBeInTheDocument();
+  });
+
+  it("offers a way back to the landing from the login", () => {
+    mockState.authRequired = true;
+    window.history.replaceState({}, "", "/login");
+    render(<App />);
+    expect(screen.getByTestId("login-back")).toBeInTheDocument();
   });
 
   it("does not render a separate AppHeader anymore", () => {
@@ -113,25 +188,25 @@ describe("App", () => {
         }) as unknown as MediaQueryList,
     );
 
+    window.history.replaceState({}, "", "/app");
     render(<App />);
     expect(screen.queryByTestId("app-header")).not.toBeInTheDocument();
   });
 
   it("hides the AppHeader when ?hideHeader=1 is in the URL", () => {
-    const url = new URL(window.location.href);
-    url.search = "?hideHeader=1";
-    window.history.replaceState({}, "", url.toString());
+    window.history.replaceState({}, "", "/app?hideHeader=1");
 
     render(<App />);
     expect(screen.queryByTestId("app-header")).not.toBeInTheDocument();
   });
 
-  it("renders LoginScreen when auth_required is true and there's no token", () => {
-    // Regresión para "Rendered fewer hooks than expected": useHideHeader
-    // debe ejecutarse antes del early return de LoginScreen. Si no lo
-    // hace, React tira el error porque el conteo de hooks cambia entre
-    // renders (auth_required=true vs false).
+  it("does not break the Rules of Hooks when auth_required is true", async () => {
+    // Regresión para "Rendered fewer hooks than expected": los hooks del
+    // Admin deben ejecutarse antes del early return de LoginScreen.
+    // Antes esto se disparaba entrando directo al admin; ahora hay que
+    // deep-linkear a /app sin sesión.
     mockState.authRequired = true;
+    window.history.replaceState({}, "", "/app");
 
     // Suprime el error boundary que React dispararía si la regla de
     // hooks se rompe. Si el error aparece, el test falla.
@@ -140,11 +215,7 @@ describe("App", () => {
       .mockImplementation(() => {});
 
     render(<App />);
-
-    // No debe haber AppHeader (estamos en LoginScreen, fuera del shell).
-    expect(screen.queryByTestId("app-header")).not.toBeInTheDocument();
-    // El botón submit de LoginScreen debe estar presente (form de auth).
-    expect(screen.getByTestId("login-submit")).toBeInTheDocument();
+    await screen.findByTestId("login-submit");
 
     // Si hubo violación de Rules of Hooks, React loggea el error a
     // console.error. Verificamos que no se haya disparado.

@@ -1,0 +1,350 @@
+/* ============================================================
+ * home.css — página inicial (HomePage).
+ *
+ * Estructura de página completa: header, hero, main, footer.
+ * Fondo #020202 (igual que el BootLoader) para que la transición
+ * loader → home no se note como un cambio de fondo.
+ * ============================================================ */
+
+/* ============================================================
+ * home.css — página inicial (HomePage).
+ *
+ * Estructura: header fijo · main scrolleable · footer fijo.
+ *
+ * Modelo de scroll: `.home` NO scrollea; es un viewport de pantalla
+ * completa (`overflow: hidden`) con tres filas en flex column. El único
+ * scroller es `.home__main`. Así el header y el footer quedan fijos de
+ * verdad — si scrolleara `.home`, el footer se iría con el contenido.
+ *
+ * Esto es necesario porque la landing vive fuera del shell admin y
+ * `body`/`#root` ya son `100dvh` con `overflow: hidden` (pensados para
+ * el admin fullscreen), así que no hay scroll a nivel de documento.
+ *
+ * `--app-h` lo sincroniza useVisualViewportHeight con el visual
+ * viewport; el 100dvh es el fallback para antes de que corra el hook.
+ *
+ * Header y footer son translúcidos, pero con alpha alto (0.82) y blur
+ * bajo (6px): al ser fijos sobre contenido scrolleable, un alpha bajo
+ * dejaba el texto de la barra peleando con el que pasaba por debajo, y
+ * un blur alto lo deformaba hasta volverlo ilegible.
+ * ============================================================ */
+
+.home {
+  /* Superficie transparente a propósito: el fondo (base → grilla →
+   * cristal) vive en la raíz de la app como capas fijas. Si `.home`
+   * tuviera fondo propio, taparía la grilla y el cristal.
+   * El scroll lo gestiona `.home__main` (el único scroller). */
+  height: var(--app-h, 100dvh);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Header ─── */
+
+/* Fijo por layout flex, no por `position: sticky`: `.home` no scrollea,
+ * así que el header simplemente no se mueve. `flex-shrink: 0` evita que
+ * lo aplaste el main cuando hay poco espacio vertical. */
+/* Fondo opaco, sin backdrop-filter. El header va fijo sobre contenido
+ * scrolleable: con vidrio, el texto que pasa por debajo se transparentaba
+ * y lo emborronaba el blur, lo que rompía la lectura justo en la barra
+ * que contiene la navegación. Opaco se lee siempre igual. */
+.home__header {
+  flex-shrink: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.875rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  /* Translúcido: se nota el contenido al pasar, sin emborronarlo.
+   * Dos decisiones juntas:
+   *  - alpha 0.82 (no los 0.45 de --bg-glass): con el contenido
+   *    scrolleando justo debajo, un alpha tan bajo deja el texto
+   *    peleando con el de la barra y no se lee ninguno.
+   *  - blur(6px): suficiente para suavizar el borde de la barra, no
+   *    para deformar la tipografía de lo que pasa por debajo. Con 40px
+   *    el texto que scrolleaba quedaba ilegible.
+   */
+  background: var(--landing-chrome);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.home__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.home__brand-logo {
+  width: 1.375rem;
+  height: 1.375rem;
+  color: var(--accent);
+}
+
+.home__brand-name {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  letter-spacing: 0.16em;
+  text-transform: lowercase;
+  color: var(--text-primary);
+}
+
+/* Grupo de navegación, pegado a la derecha del header. El brand queda
+ * solo a la izquierda porque el flex padre usa space-between. */
+.home__nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* Botón "Entrar" del header: sólo ícono, sin borde visible.
+ * Eveniente con `.theme-toggle`: son controles planos que acompañan a los
+ * links. El label accesible lo pone el aria-label del <Button>. */
+/* El botón "Entrar" usa la clase del átomo `.icon-btn-flat` (la misma
+ * que el theme toggle), así que no necesita reglas propias acá. */
+
+.home__nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.home__nav-link {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.home__nav-link:hover {
+  color: var(--accent);
+}
+
+/* ─── Hero ─── */
+
+/* El hero vive dentro de `<main>`, que ya pone el padding lateral. Acá
+ * solo el vertical: sin padding horizontal, o los márgenes se duplican
+ * (1.5rem del main + 1.5rem del hero = 3rem por lado). */
+.home__hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.875rem;
+  padding: 3.5rem 0 3rem;
+}
+
+.home__logo {
+  width: 4.5rem;
+  height: 4.5rem;
+  color: var(--accent);
+}
+
+.home__title {
+  font-family: var(--font-mono);
+  font-size: 1.75rem;
+  font-weight: 500;
+  letter-spacing: 0.28em;
+  /* Compensa el tracking final para centrar ópticamente. */
+  text-indent: 0.28em;
+  text-transform: lowercase;
+  color: var(--text-primary);
+}
+
+.home__tagline {
+  max-width: 36rem;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.home__hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.625rem;
+  margin-top: 0.5rem;
+}
+
+/* ─── Main — el único scroller ─── */
+
+.home__main {
+  /* `flex: 1` + `min-height: 0` es lo que permite scrollear dentro de
+   * una columna flex. Sin `min-height: 0`, el flex item crece hasta su
+   * contenido en vez de restricting, y el scroll nunca aparece —
+   * es el clásico desbordamiento de flex column. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 2.75rem;
+  width: 100%;
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem;
+}
+
+.home__section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  /* Compensa el header fijo al saltar a un ancla (#capacidades). */
+  scroll-margin-top: 1.5rem;
+}
+
+/* ─── Stats ─── */
+
+.home__stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.home__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.875rem 1rem;
+}
+
+.home__stat-value {
+  font-family: var(--font-mono);
+  font-size: 1.125rem;
+  color: var(--text-primary);
+  /* Trunca versiones largas y valores numéricos grandes. */
+  overflow-wrap: anywhere;
+}
+
+.home__stat-label {
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ─── Cards de capacidades ─── */
+
+.home__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.75rem;
+}
+
+.home__card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1.125rem;
+}
+
+.home__card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  color: var(--accent);
+}
+
+.home__card-icon svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.home__card-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.home__card-text {
+  font-size: 0.75rem;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
+/* ─── Accesos ─── */
+
+.home__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+}
+
+/* ─── Footer ─── */
+
+/* Footer fijo: última fila del flex column, siempre visible. No usa
+ * `position: fixed` a propósito — eso lo sacaría del flujo y hay que
+ * compensarlo a mano con padding; como hermano del scroller en flex ya
+ * queda anclado sin hacks. */
+.home__footer {
+  flex-shrink: 0;
+  padding: 1.25rem 1.5rem;
+  border-top: 1px solid var(--border);
+  /* Mismo tratamiento que el header: translúcido con alpha alto y blur
+   * bajo. Ver nota en .home__header. */
+  background: var(--landing-chrome-strong);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+/* Flex con space-between: como es un div (no el átomo <Row>), sin esto
+ * los dos <span> quedan inline y el texto se pega con la versión
+ * ("127.0.0.1:7878v0.4.0"). */
+.home__footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  width: 100%;
+  max-width: 68rem;
+  margin: 0 auto;
+}
+
+/* ─── Responsive ─── */
+
+@media (max-width: 640px) {
+  .home__header {
+    padding: 0.75rem 1rem;
+  }
+
+  /* El nav de anchors no aporta en mobile: se oculta para que el
+     header no se desborde en dos líneas. */
+  .home__nav {
+    display: none;
+  }
+
+  .home__hero {
+    padding: 2.5rem 1rem 2.25rem;
+  }
+
+  .home__title {
+    font-size: 1.375rem;
+  }
+
+  .home__main {
+    gap: 2.25rem;
+    padding: 2rem 1rem;
+  }
+
+  .home__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .home__actions > * {
+    flex: 1 1 100%;
+  }
+
+  .home__hero-actions > * {
+    flex: 1 1 100%;
+  }
+}
