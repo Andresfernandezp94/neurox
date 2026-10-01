@@ -32,10 +32,13 @@ import * as llmApi from "../api/llm";
 import { ModelsTab } from "./ModelsTab";
 import type { LlmProviderStatus } from "../api/llm";
 
+// La categoria viene del daemon: es la carpeta del modelo bajo
+// MODELS_DIR. Un GGUF en la raiz llega como "unclassified".
 const localModel = {
   filename: "qwen2.5-1.5b-instruct-Q4_K_M.gguf",
-  path: "/models/qwen2.5-1.5b-instruct-Q4_K_M.gguf",
+  path: "/models/chat/qwen2.5-1.5b-instruct-Q4_K_M.gguf",
   size_bytes: 1_100_000_000,
+  category: "chat",
 };
 
 const ollamaStopped: LlmProviderStatus = {
@@ -170,5 +173,108 @@ describe("ModelsTab", () => {
     render(<ModelsTab />);
     expect(await screen.findByText("ollama")).toBeInTheDocument();
     expect(await screen.findByTestId("local-svc-toggle")).toBeInTheDocument();
+  });
+});
+// ─── Categorías por carpeta (EP-2026-10) ──────────────────────────────
+//
+// La carpeta del modelo bajo MODELS_DIR ES la categoría. El listado del
+// daemon ya viene agrupado y ordenado, así que la UI agrupa sin reordenar.
+
+describe("ModelsTab categories", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    vi.mocked(modelsApi.searchHfModels).mockResolvedValue({ models: [] } as never);
+    vi.mocked(llmApi.getProviders).mockResolvedValue({
+      providers: [],
+      default_provider: "",
+      default_model: "",
+    } as never);
+  });
+
+  function mockLocal(dir: string | null, models: unknown[]) {
+    vi.mocked(modelsApi.getLocalModels).mockResolvedValue({
+      dir,
+      env_var: "NEUROX_MODELS_DIR",
+      models,
+    } as never);
+  }
+
+  const m = (filename: string, category: string, size = 100) => ({
+    filename,
+    path: `/models/${category}/${filename}`,
+    size_bytes: size,
+    category,
+  });
+
+  it("groups models by their folder category", async () => {
+    mockLocal("/models", [
+      m("qwen.gguf", "chat", 2_382_000_000),
+      m("bge-m3.gguf", "embedding", 581_000_000),
+      m("bge-large.gguf", "embedding", 639_000_000),
+    ]);
+    render(<ModelsTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText("qwen.gguf")).toBeInTheDocument();
+    });
+    expect(screen.getByText("bge-m3.gguf")).toBeInTheDocument();
+    expect(screen.getByText("bge-large.gguf")).toBeInTheDocument();
+
+    // Un header por categoría, con su conteo.
+    expect(screen.getByText("Chat")).toBeInTheDocument();
+    expect(screen.getByText("Embedding")).toBeInTheDocument();
+    // 3 modelos en 2 categorías.
+    expect(screen.getByText("3 in 2 categories")).toBeInTheDocument();
+  });
+
+  it("labels a root-level gguf as unclassified, not as a real category", async () => {
+    // El operador tiene que poder distinguir "no lo organicé" de una
+    // categoría de verdad; mostrarlo como categoría lo disimula.
+    mockLocal("/models", [m("suelto.gguf", "unclassified")]);
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(screen.getByText("Sin categoria")).toBeInTheDocument();
+    });
+  });
+
+  it("shows a category the UI has no label for, verbatim", async () => {
+    // El operador puede crear las carpetas que quiera. La UI respeta su
+    // nomenclatura en vez de deformarla a un set cerrado.
+    mockLocal("/models", [m("x.gguf", "vision-special")]);
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(screen.getByText("vision-special")).toBeInTheDocument();
+    });
+  });
+
+  it("says the directory is missing instead of claiming it is empty", async () => {
+    // `dir: null` = el directorio no existe. Decir "vacío, descargá uno"
+    // manda al operador a una descarga de 4GB cuando el problema es un path.
+    mockLocal(null, []);
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(screen.getByText("Models directory not found")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/does not exist/i)).toBeInTheDocument();
+    expect(screen.queryByText("No local models")).toBeNull();
+  });
+
+  it("says the directory is empty only when it exists", async () => {
+    mockLocal("/models", []);
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(screen.getByText("No local models")).toBeInTheDocument();
+    });
+    // El hint del empty state dice qué hacer, en vez de repetir el path.
+    expect(screen.getByText(/has no \.gguf files/i)).toBeInTheDocument();
+  });
+
+  it("shows the resolved directory path", async () => {
+    mockLocal("/home/u/tools/models", [m("a.gguf", "chat")]);
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(screen.getByText("/home/u/tools/models")).toBeInTheDocument();
+    });
   });
 });

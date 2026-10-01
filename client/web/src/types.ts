@@ -160,10 +160,25 @@ export interface LocalModel {
   filename: string;
   path: string;
   size_bytes: number;
+  /**
+   * Categoría del modelo: el subdirectorio bajo `NEUROX_MODELS_DIR` más
+   * cercano al archivo (`chat`, `embedding`, …). `unclassified` cuando el
+   * `.gguf` está en la raíz, sin carpeta que lo organice.
+   *
+   * La carpeta ES la categoría: es la organización que el operador ya tiene
+   * en disco, y es más fiable que inferir del nombre del archivo (`bge-m3`
+   * no dice "embedding": hay que saberlo).
+   */
+  category: string;
 }
 
 export interface LocalModelsResponse {
-  dir: string;
+  /**
+   * Directorio resuelto, o `null` si no existe. Distinguir esto de "vacío"
+   * importa: si el directorio no existe, el consejo correcto es crearlo o
+   * corregir `NEUROX_MODELS_DIR`, no descargar un modelo de 4GB.
+   */
+  dir: string | null;
   env_var: string;
   models: LocalModel[];
 }

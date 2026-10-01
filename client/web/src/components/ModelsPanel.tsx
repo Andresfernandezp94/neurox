@@ -33,7 +33,10 @@ function formatSize(bytes: number): string {
 export function ModelsPanel() {
   const [tab, setTab] = useState<Tab>("local");
   const [local, setLocal] = useState<LocalModel[]>([]);
-  const [dir, setDir] = useState<string>("");
+  // `null` cuando MODELS_DIR no existe. Antes se tipaba `string` con `""` de
+  // default, pero el daemon devuelve `null` si el directorio no esta: el
+  // tipo mentia y el primer consumidor que lo leyera se crasharia.
+  const [dir, setDir] = useState<string | null>(null);
   const [hf, setHf] = useState<HfModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

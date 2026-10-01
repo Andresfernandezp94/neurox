@@ -3,7 +3,7 @@
 // 2026-09: mismo look and feel que Providers (lista de .provider-card) +
 // control Start/Stop del servicio local (ollama serve) via /start /stop.
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Card } from "../shared/components/molecules/Card";
 import { Row } from "../shared/components/molecules/Row";
 import { Stack } from "../shared/components/molecules/Stack";
@@ -42,8 +42,36 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+/** Categoría `unclassified`: el .gguf está en la raíz, sin carpeta que lo
+ *  organice. No es una categoría de verdad: es el estado "el operador todavía
+ *  no lo organizó", y tiene que leerse distinto en la UI. */
+const UNCLASSIFIED = "unclassified";
+
+const CATEGORY_LABELS: Record<string, string> = {
+  chat: "Chat",
+  embedding: "Embedding",
+  rerank: "Rerank",
+  vision: "Vision",
+  code: "Code",
+  audio: "Audio",
+  tts: "TTS",
+  transcription: "Transcription",
+};
+
+/** Label legible de una categoría. Una desconocida se muestra tal cual:
+ *  el operador puede crear las carpetas que quiera y la UI tiene que
+ *  respetar su nomenclatura en vez deforcerla a un set cerrado. */
+function categoryLabel(category: string): string {
+  if (category === UNCLASSIFIED) return "Sin categoria";
+  return CATEGORY_LABELS[category] ?? category;
+}
+
 export function ModelsTab() {
   const [local, setLocal] = useState<LocalModel[]>([]);
+  // `null` = el directorio de MODELS_DIR no existe. No es lo mismo que
+  // "vacío": cambia por completo el consejo al operador.
+  const [modelsDir, setModelsDir] = useState<string | null>(null);
+  const [modelsEnvVar, setModelsEnvVar] = useState("NEUROX_MODELS_DIR");
   const [hf, setHf] = useState<HfModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,12 +86,31 @@ export function ModelsTab() {
   const [activeLocalPath, setActiveLocalPath] = useState<string | null>(null);
   const [setting, setSetting] = useState<string | null>(null);
 
+  // Agrupa por categoría. El daemon ya devuelve los resultados ordenados
+  // por categoría, así que el orden de aparición respeta el del daemon sin
+  // volver a ordenar acá.
+  const localByCategory = useMemo(() => {
+    const map = new Map<string, LocalModel[]>();
+    for (const m of local) {
+      const cat = m.category || UNCLASSIFIED;
+      const arr = map.get(cat) ?? [];
+      arr.push(m);
+      map.set(cat, arr);
+    }
+    return Array.from(map.entries()).map(([category, items]) => ({
+      category,
+      items,
+    }));
+  }, [local]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const data = await getLocalModels();
       setLocal(data.models);
+      setModelsDir(data.dir);
+      setModelsEnvVar(data.env_var);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -284,66 +331,107 @@ export function ModelsTab() {
       {/* ─── Local GGUF models ─── */}
       <div className="providers-list__section-head">
         <h4 className="muted">Local GGUF models</h4>
-        <span className="muted text-sm">Models: {local.length}</span>
+        <span className="muted text-sm">
+          {localByCategory.length > 0
+            ? `${local.length} in ${localByCategory.length} ${localByCategory.length === 1 ? "category" : "categories"}`
+            : `Models: 0`}
+        </span>
       </div>
+
+      {modelsDir && (
+        <p className="muted text-sm providers-panel__description">
+          <code>{modelsDir}</code> · category = subfolder
+        </p>
+      )}
+
       {loading && <p className="muted">Loading local models…</p>}
+
       {!loading && local.length === 0 && (
         <EmptyState>
-          <EmptyState.Title>No local models</EmptyState.Title>
-          <EmptyState.Hint>
-            The MODELS_DIR is empty. Download a model from Hugging Face.
-          </EmptyState.Hint>
+          {modelsDir === null ? (
+            <>
+              <EmptyState.Title>Models directory not found</EmptyState.Title>
+              <EmptyState.Hint>
+                <code>{modelsEnvVar}</code> points at a directory that does not
+                exist. Create it, or point it at an existing one from the
+                Environment tab. This is NOT the same as an empty directory:
+                downloading a model would fail.
+              </EmptyState.Hint>
+            </>
+          ) : (
+            <>
+              <EmptyState.Title>No local models</EmptyState.Title>
+              <EmptyState.Hint>
+                <code>{modelsDir}</code> has no .gguf files. Download one from
+                Hugging Face below, or organize existing ones into
+                subfolders to categorize them.
+              </EmptyState.Hint>
+            </>
+          )}
         </EmptyState>
       )}
-      {local.map((m) => {
-        const isActive = m.path === activeLocalPath;
-        const fam = familyOf(m.filename);
-        return (
-          <Card
-            key={m.filename}
-            className={`provider-card ${isActive ? "provider-card--active" : ""}`}
-          >
-            <header className="provider-card__header">
-              <div className="provider-card__identity">
-                {fam ? (
-                  <FamilyLogo id={fam} className="provider-logo" />
-                ) : (
-                  <ProviderLogo id={m.filename} kind="local" className="provider-logo" />
-                )}
-                <strong className="strong">{m.filename}</strong>
-              </div>
-              <div className="provider-card__actions">
-                {!isActive && (
-                  <button
-                    type="button"
-                    disabled={setting === m.filename}
-                    className="provider-action provider-action--save"
-                    title="Set as active model"
-                    data-testid="set-active-button"
-                    onClick={() => handleSetActive(m.filename, m.path)}
-                  >
-                    {setting === m.filename ? <span>…</span> : <IconCheck />}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="provider-action"
-                  title="Configure model"
-                  onClick={() => setEditing(m)}
-                >
-                  <IconEdit />
-                </button>
-                {isActive && (
-                  <Badge className="badge--active">ACTIVE</Badge>
-                )}
-              </div>
-            </header>
-            <hr className="provider-card__divider" />
 
-            <div className="provider-meta provider-meta--right">{formatSize(m.size_bytes)}</div>
-          </Card>
-        );
-      })}
+      {/* Un grupo por categoría. El orden y el label vienen del daemon, que
+          ya los ordena por categoria para que la UI no reshuffle. */}
+      {localByCategory.map(({ category, items }) => (
+        <Fragment key={category}>
+          {items.length > 0 && (
+            <div className="providers-list__section-head">
+              <h5 className="muted models-tab__category">{categoryLabel(category)}</h5>
+              <span className="muted text-sm">{items.length}</span>
+            </div>
+          )}
+          {items.map((m) => {
+            const isActive = m.path === activeLocalPath;
+            const fam = familyOf(m.filename);
+            return (
+              <Card
+                key={m.path}
+                className={`provider-card ${isActive ? "provider-card--active" : ""}`}
+              >
+                <header className="provider-card__header">
+                  <div className="provider-card__identity">
+                    {fam ? (
+                      <FamilyLogo id={fam} className="provider-logo" />
+                    ) : (
+                      <ProviderLogo id={m.filename} kind="local" className="provider-logo" />
+                    )}
+                    <strong className="strong">{m.filename}</strong>
+                  </div>
+                  <div className="provider-card__actions">
+                    {!isActive && (
+                      <button
+                        type="button"
+                        disabled={setting === m.filename}
+                        className="provider-action provider-action--save"
+                        title="Set as active model"
+                        data-testid="set-active-button"
+                        onClick={() => handleSetActive(m.filename, m.path)}
+                      >
+                        {setting === m.filename ? <span>…</span> : <IconCheck />}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="provider-action"
+                      title="Configure model"
+                      onClick={() => setEditing(m)}
+                    >
+                      <IconEdit />
+                    </button>
+                    {isActive && (
+                      <Badge className="badge--active">ACTIVE</Badge>
+                    )}
+                  </div>
+                </header>
+                <hr className="provider-card__divider" />
+
+                <div className="provider-meta provider-meta--right">{formatSize(m.size_bytes)}</div>
+              </Card>
+            );
+          })}
+        </Fragment>
+      ))}
 
       {/* ─── Hugging Face search ─── */}
       <div className="providers-list__section-head">
