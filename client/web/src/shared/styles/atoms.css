@@ -345,8 +345,14 @@
   font-family: var(--font-mono);
   font-size: 0.8125rem;
 }
-/* Internal vertical rhythm: 6px between the data rows, matching the
- * sidebar's spacing: 6 (set via .provider-card's flex gap above). */
+/* Internal vertical rhythm between the data rows. El gap lo pone el
+ * <Card gap="md"> del componente (0.5rem); acá solo se fija el
+ * line-height, que es lo que hace que un bloque de texto y el input de
+ * abajo no queden a la misma altura y se lean pegados.
+ *
+ * OJO: el comentario anterior decía "6px set via .provider-card's flex
+ * gap", pero gap="sm" aplica 0.25rem. La cifra nunca estuvo garantizada
+ * por el CSS, por eso ahora vive en el <Card> y no en un comentario. */
 .provider-card .provider-meta,
 .provider-card .provider-endpoint { line-height: 1.3; }
 

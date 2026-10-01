@@ -210,7 +210,10 @@ function ProviderCardSB({ provider: p, busy, onSaveKey, onClearKey }: ProviderCa
   };
 
   return (
-    <Card gap="sm" className={`provider-card ${p.active ? "provider-card--active" : ""}`}>
+    // gap="md" (0.5rem), no "sm": con 4px los tres bloques —header,
+    // endpoint y keyrow— se leen pegados. La nota del CSS que decía
+    // "6px" describía la intención, no lo que gap-sm realmente aplica.
+    <Card gap="md" className={`provider-card ${p.active ? "provider-card--active" : ""}`}>
       {/* Header: logo + name + ACTIVE badge */}
       <Row gap="sm" align="center">
         <ProviderLogo id={p.id} kind={p.kind} className="provider-logo" />

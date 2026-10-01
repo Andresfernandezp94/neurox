@@ -11,9 +11,20 @@ export interface CardProps extends HTMLAttributes<HTMLElement> {
   gap?: CardGap;
 }
 
+/**
+ * Cada variante de gap incluye `stack` (display:flex; column).
+ *
+ * Antes `sm` devolvía sólo `stack--gap-sm`, sin `stack`: la card quedaba
+ * en el `display: block` por default de `.card` y `gap` no tenía efecto,
+ * porque gap no aplica a block. Los hijos se veían pegados y el síntoma
+ * era invisible en el código, que parecía tener el gap puesto.
+ *
+ * `stack` va en todas las variantes salvo `none`, que es el único caso
+ * donde el llamador quiere el block plano de `.card`.
+ */
 const gapClass: Record<CardGap, string> = {
   none: "",
-  sm: "stack--gap-sm",
+  sm: "stack stack--gap-sm",
   md: "stack stack--gap-md",
   lg: "stack stack--gap-lg",
 };
