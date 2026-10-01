@@ -11,6 +11,7 @@ import googleUrl from "../assets/providers/google-color.svg?url";
 import grokUrl from "../assets/providers/grok.svg?url";
 import minimaxUrl from "../assets/providers/minimax-color.svg?url";
 import openrouterUrl from "../assets/providers/openrouter-color.svg?url";
+import opencodeUrl from "../assets/providers/opencode.svg?url";
 import ollamaUrl from "../assets/providers/ollama.svg?url";
 import localUrl from "../assets/providers/local-color.svg?url";
 
@@ -30,6 +31,10 @@ function matchLogo(id: string, kind?: string): string | null {
   }
   if (lower.startsWith("minimax")) return minimaxUrl;
   if (lower.startsWith("openrouter")) return openrouterUrl;
+  // `opencode` ANTES de `openai`: es el único prefijo que comparte. Hoy
+  // funciona por orden alfabético del `if`, lo cual es frágil — si
+  // alguien reordena las líneas, opencode cae al logo de OpenAI.
+  if (lower === "opencode" || lower.startsWith("opencode-")) return opencodeUrl;
   if (lower.startsWith("openai")) return openaiUrl;
   if (lower.startsWith("claude")) return claudeUrl;
   if (lower.startsWith("mistral")) return mistralUrl;
@@ -47,9 +52,16 @@ export function ProviderLogo({ id, kind, className }: ProviderLogoProps): ReactN
   const url = matchLogo(id, kind);
   if (!url) return <IconDefaultAgent />;
   const lower = id.toLowerCase();
-  // openai / grok assets are single-color black SVGs — render them white.
+  // Assets con `fill="currentColor"` (openai, grok, opencode). Dentro de
+  // un <img> el SVG es un documento aparte: `currentColor` NO hereda el
+  // color del texto de la página, resuelve al negro inicial, así que el
+  // logo desaparece contra el fondo oscuro. Se invertir a blanco con
+  // filter, que es lo que hace `.provider-logo--white`.
   const white =
-    lower.startsWith("openai") || lower.startsWith("grok");
+    lower.startsWith("openai") ||
+    lower.startsWith("grok") ||
+    lower === "opencode" ||
+    lower.startsWith("opencode-");
   const cls = `${className ?? "provider-logo"}${white ? " provider-logo--white" : ""}`;
   return <img src={url} alt={`${id} logo`} className={cls} />;
 }
