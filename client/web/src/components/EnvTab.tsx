@@ -1,11 +1,19 @@
-// EnvTab — list/set env vars via /v1/env. EP-0020-02.
-// Convention: values are NEVER returned by the backend (security).
-// Migrado al look and feel de MCP/General (sesión 2026-08-14):
-//   - Container con padding y gap consistente
-//   - Header con título + Refresh button (icon)
-//   - Cards por env var (no tabla)
-//   - Iconos en section header + key icon + Save button
-//   - Env vars agrupadas en categorías (daemon / web / mcp) con toggle
+// EnvTab — catalogo de variables de entorno del daemon. EP-0020-02.
+//
+// Los valores NUNCA se devuelven por API (solo `set`), asi que cada input
+// arranca vacio y el placeholder dice si la variable ya esta seteada.
+//
+// Las API keys de providers NO se editan aca: cada provider declara su
+// `api_key_env` y se edita en la tab Providers. Aparecen listadas en modo
+// solo lectura, con un link a esa tab, para que el operador sepa que
+// existen y donde viven sin tener dos lugares de escritura que se pisen.
+//
+// Las variables de infraestructura (HOME, PATH, XDG_*) tambien son solo
+// lectura: las pone el host y escribir una ganaria hasta el proximo
+// reinicio, y despues perderia contra el valor real sin avisar.
+//
+// Orden de las categorias segun las devuelve el daemon, no hardcodeado aca:
+// si el catalogo gana una categoria nueva, aparece sola.
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Card } from "../shared/components/molecules/Card";
@@ -14,48 +22,54 @@ import { Input } from "../shared/components/atoms/Input";
 import { IconButton } from "../shared/components/atoms/IconButton";
 import { ErrorBanner } from "../shared/components/molecules/ErrorBanner";
 import { EmptyState } from "../shared/components/molecules/EmptyState";
+import { Badge } from "../shared/components/atoms/Badge";
 import {
-  IconCode,
   IconCpu,
+  IconPlug,
+  IconShield,
+  IconCode,
   IconGlobe,
 } from "../shared/components/Icons";
-import { getEnv, putEnvVar, deleteEnvVar, type EnvVar } from "../api/env";
+import {
+  getEnv,
+  putEnvVar,
+  deleteEnvVar,
+  type EnvVar,
+  type EnvResponse,
+} from "../api/env";
 
-type Category = "daemon" | "web" | "mcp";
+/** Icono por categoría. El fallback cubre categorías nuevas que el daemon
+ *  agregue después: sin icono, pero visible. */
+const CATEGORY_ICON: Record<string, React.ReactNode> = {
+  runtime: <IconCpu />,
+  "default-llm": <IconPlug />,
+  auth: <IconShield />,
+  integrations: <IconCode />,
+  infrastructure: <IconGlobe />,
+  custom: <IconCode />,
+};
 
-const CATEGORY_META: Record<Category, { label: string; icon: React.ReactNode }> =
-  {
-    daemon: { label: "Daemon", icon: <IconCpu /> },
-    web: { label: "Web", icon: <IconGlobe /> },
-    mcp: { label: "MCP", icon: <IconCode /> },
-  };
-
-const CATEGORY_ORDER: Category[] = ["daemon", "web", "mcp"];
-
-function categorizeKey(key: string): Category {
-  const k = key.toUpperCase();
-  if (
-    k.startsWith("VITE_") ||
-    k.startsWith("WEB_") ||
-    k.startsWith("CF_") ||
-    k.startsWith("CLOUDFLARE_")
-  ) {
-    return "web";
-  }
-  if (
-    k.startsWith("MEMORY_") ||
-    k.startsWith("VOICE_") ||
-    k.startsWith("LLMD_") ||
-    k.startsWith("CLICKUP_") ||
-    k.startsWith("MCP_")
-  ) {
-    return "mcp";
-  }
-  return "daemon";
-}
+/** Texto de ayuda por variable que necesita más contexto del que cabe en
+ *  una línea. El resto usa el `description` del daemon. */
+const EXTRA_HINT: Record<string, string> = {
+  NEUROX_ADMIN_PASSWORD:
+    "Solo se lee al crear el usuario admin inicial, si no existe users.json. Después el cambio no aplica: usá la tab Users.",
+  NEUROX_DEFAULT_PROVIDER:
+    "Aplica solo si el usuario no eligió provider desde el selector. Si lo eligió, su elección gana.",
+  NEUROX_WORKSPACE:
+    "Reinicia el daemon para que tome efecto.",
+  NEUROX_ENV_FILE:
+    "Reinicia el daemon para que tome efecto. Afecta dónde se leen y escriben TODAS las variables.",
+  NEUROX_MAX_TOOL_ITERATIONS:
+    "Aplica al próximo subproceso de sesión.",
+  NEUROX_MODELS_DIR:
+    "Reinicia el daemon para que tome efecto.",
+  NEUROX_LOG_FORMAT:
+    "Reinicia el daemon para que tome efecto.",
+};
 
 export function EnvTab() {
-  const [vars, setVars] = useState<EnvVar[]>([]);
+  const [data, setData] = useState<EnvResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
@@ -65,8 +79,7 @@ export function EnvTab() {
     setLoading(true);
     setError(null);
     try {
-      const data = await getEnv();
-      setVars(data.vars);
+      setData(await getEnv());
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -81,7 +94,7 @@ export function EnvTab() {
   const handleSave = useCallback(
     async (key: string) => {
       const value = drafts[key];
-      if (value === undefined) return;
+      if (value === undefined || value === "") return;
       setPending(key);
       setError(null);
       try {
@@ -117,92 +130,166 @@ export function EnvTab() {
     [load],
   );
 
-  // Agrupa las env vars por categoría. Se recalcula solo cuando cambian vars.
-  const grouped = useMemo(() => {
-    const result: Record<Category, EnvVar[]> = {
-      daemon: [],
-      web: [],
-      mcp: [],
-    };
-    for (const v of vars) {
-      result[categorizeKey(v.key)].push(v);
+  /** Agrupa por categoría respetando el orden del daemon. `unknownVars` se
+   *  suma al final, bajo "Personalizadas". */
+  const groups = useMemo(() => {
+    if (!data) return [] as { id: string; label: string; description: string; items: EnvVar[] }[];
+    const order = data.categories.map((c) => c.id);
+    const byId = new Map<string, EnvVar[]>();
+    for (const v of [...data.vars, ...data.unknownVars]) {
+      const arr = byId.get(v.category) ?? [];
+      arr.push(v);
+      byId.set(v.category, arr);
     }
-    return result;
-  }, [vars]);
+    // Categorías con items, en el orden que declara el daemon. Cualquier
+    // categoría no declarada va al final, para no perderla.
+    const ids = [
+      ...order.filter((id) => byId.has(id)),
+      ...Array.from(byId.keys()).filter((id) => !order.includes(id)),
+    ];
+    return ids
+      .filter((id) => (byId.get(id) ?? []).length > 0)
+      .map((id) => {
+        const meta = data.categories.find((c) => c.id === id);
+        return {
+          id,
+          label: meta?.label ?? id,
+          description: meta?.description ?? "",
+          items: byId.get(id) ?? [],
+        };
+      });
+  }, [data]);
+
+  const editableCount = useMemo(
+    () => (data ? [...data.vars, ...data.unknownVars].filter((v) => !v.readOnly).length : 0),
+    [data],
+  );
 
   return (
     <div className="providers-list" data-testid="config-env-tab">
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
       <p className="muted text-sm providers-panel__description">
-        Environment variables live in the daemon's env file — values are never
-        returned for security.
+        Variables de entorno del daemon. Los valores nunca se devuelven: solo si
+        están seteadas. Las API keys de providers se editan en la tab Providers.
       </p>
+
+      {data && (
+        <p className="muted text-sm providers-panel__description">
+          <code>{data.path}</code> · {editableCount} editables
+        </p>
+      )}
 
       {loading ? (
         <p className="muted">Loading env vars…</p>
-      ) : vars.length === 0 ? (
+      ) : groups.length === 0 ? (
         <EmptyState>
-          <EmptyState.Title>No env vars configured</EmptyState.Title>
-          <EmptyState.Hint>{error ?? "The env file is empty."}</EmptyState.Hint>
+          <EmptyState.Title>No env vars</EmptyState.Title>
+          <EmptyState.Hint>The daemon reported no variables.</EmptyState.Hint>
         </EmptyState>
       ) : (
-        CATEGORY_ORDER.map((cat) => {
-          const items = grouped[cat];
-          if (items.length === 0) return null;
-          const meta = CATEGORY_META[cat];
-          return (
-            <Fragment key={cat}>
-              <div className="providers-list__section-head">
-                <h4 className="muted">
-                  <span className="env-tab__category-icon">{meta.icon}</span>
-                  {meta.label}
-                </h4>
-                <span className="muted text-sm">{items.length}</span>
-              </div>
-              {items.map((v) => (
+        groups.map((group) => (
+          <Fragment key={group.id}>
+            <div className="providers-list__section-head">
+              <h4 className="muted">
+                <span className="env-tab__category-icon">
+                  {CATEGORY_ICON[group.id] ?? <IconCode />}
+                </span>
+                {group.label}
+              </h4>
+              <span className="muted text-sm">{group.items.length}</span>
+            </div>
+
+            {group.description && (
+              <p className="muted text-sm providers-panel__description">
+                {group.description}
+              </p>
+            )}
+
+            {group.items.map((v) => {
+              const hint = EXTRA_HINT[v.key];
+              const dirty = drafts[v.key] !== undefined && drafts[v.key] !== "";
+              return (
                 <Card key={v.key} className="provider-card">
                   <Row justify="between" align="center" gap="sm">
-                    <strong className="strong">{v.key}</strong>
+                    <Row gap="sm" align="center">
+                      <strong className="strong">{v.key}</strong>
+                      {v.sensitive && (
+                        <Badge variant="neutral" className="badge--active">
+                          secret
+                        </Badge>
+                      )}
+                      {v.readOnly && (
+                        <Badge variant="neutral">solo lectura</Badge>
+                      )}
+                    </Row>
                     <span
                       className={`env-tab__state-badge env-tab__state-badge--${v.set ? "set" : "unset"}`}
                     >
                       {v.set ? "set" : "unset"}
                     </span>
                   </Row>
-                  <Row gap="sm" align="stretch" className="provider-keyrow">
-                    <Input
-                      type="password"
-                      placeholder={v.set ? "(set)" : "(unset)"}
-                      value={drafts[v.key] ?? ""}
-                      onChange={(e) =>
-                        setDrafts((d) => ({ ...d, [v.key]: e.target.value }))
-                      }
-                      className="env-tab__input"
-                    />
-                    <IconButton
-                      icon="IconSave"
-                      aria-label={`Save ${v.key}`}
-                      title="Save"
-                      disabled={pending === v.key || drafts[v.key] === undefined}
-                      onClick={() => void handleSave(v.key)}
-                    />
-                    {v.set && (
-                      <IconButton
-                        icon="IconTrash"
-                        aria-label={`Clear ${v.key}`}
-                        title="Clear"
-                        variant="danger"
-                        disabled={pending === v.key}
-                        onClick={() => void handleClear(v.key)}
+
+                  <p className="muted provider-endpoint">{v.description}</p>
+
+                  {hint && <p className="muted text-sm">{hint}</p>}
+
+                  {v.defaultValue !== null && !v.set && (
+                    <p className="muted text-sm">
+                      Default: <code>{v.defaultValue}</code>
+                    </p>
+                  )}
+
+                  {v.readOnly ? (
+                    <p className="muted text-sm">
+                      {group.id === "default-llm"
+                        ? "Se edita en la tab Providers."
+                        : group.id === "infrastructure"
+                          ? "La define el host. Neurox no la escribe."
+                          : "No se edita desde acá."}
+                    </p>
+                  ) : (
+                    <Row gap="sm" align="stretch" className="provider-keyrow">
+                      <Input
+                        type="password"
+                        placeholder={v.set ? "•••••••• (set — escribí para reemplazar)" : "(unset)"}
+                        value={drafts[v.key] ?? ""}
+                        onChange={(e) =>
+                          setDrafts((d) => ({ ...d, [v.key]: e.target.value }))
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && dirty) void handleSave(v.key);
+                        }}
+                        className="env-tab__input"
+                        aria-label={v.key}
+                        data-testid={`env-input-${v.key}`}
                       />
-                    )}
-                  </Row>
+                      <IconButton
+                        icon="IconSave"
+                        aria-label={`Save ${v.key}`}
+                        title="Save"
+                        disabled={pending === v.key || !dirty}
+                        onClick={() => void handleSave(v.key)}
+                        data-testid={`env-save-${v.key}`}
+                      />
+                      {v.set && (
+                        <IconButton
+                          icon="IconTrash"
+                          aria-label={`Clear ${v.key}`}
+                          title="Clear"
+                          variant="danger"
+                          disabled={pending === v.key}
+                          onClick={() => void handleClear(v.key)}
+                          data-testid={`env-clear-${v.key}`}
+                        />
+                      )}
+                    </Row>
+                  )}
                 </Card>
-              ))}
-            </Fragment>
-          );
-        })
+              );
+            })}
+          </Fragment>
+        ))
       )}
     </div>
   );

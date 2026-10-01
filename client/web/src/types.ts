@@ -206,15 +206,48 @@ export interface SandboxConfig {
   max_recursion_depth: number;
 }
 
-/** `GET /v1/env` — env vars stored on disk. Values are NEVER returned. */
+/**
+ * `GET /v1/env` — catálogo de env vars del daemon, con el estado de cada
+ * una. Los valores NUNCA se devuelven.
+ *
+ * `vars` es el catálogo: las variables que neurox reconoce, estén o no
+ * escritas. Eso es lo que permite agregar una desde la UI — antes el
+ * endpoint solo listaba lo que ya estaba en el archivo, así que no había
+ * nada que agregar. `unknown_vars` son las que alguien puso a mano, fuera
+ * del catálogo, y se editan igual.
+ */
 export interface EnvVar {
   key: string;
+  /** ¿Está presente en el archivo o en el proceso? */
   set: boolean;
+  /** Solo lectura: son de infraestructura o keys de providers. */
+  readOnly: boolean;
+  /** Guarda un secreto → input tipo password, y jamás se devuelve. */
+  sensitive: boolean;
+  /** Id de categoría. Ver `EnvResponse.categories`. */
+  category: string;
+  /** Nombre legible de la categoría, para el header del grupo. */
+  categoryLabel: string;
+  description: string;
+  /** Default con el que arranca el daemon si no se setea. */
+  defaultValue: string | null;
+  /** ¿Está en el archivo? Distingue "set" de "hereda del host". */
+  inFile: boolean;
+  /** ¿Está en el entorno del proceso? */
+  inEnv: boolean;
+}
+
+export interface EnvCategory {
+  id: string;
+  label: string;
+  description: string;
 }
 
 export interface EnvResponse {
   path: string;
   vars: EnvVar[];
+  unknownVars: EnvVar[];
+  categories: EnvCategory[];
 }
 
 /** `GET /v1/services` — external services the daemon is monitoring. */
