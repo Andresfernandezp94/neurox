@@ -6,13 +6,26 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  getProviders,
-  listModels,
+  getModelCatalog,
+  setLlmPrefs,
+  getLlmPrefs,
   setSessionModel,
   type CatalogModel,
+  type LlmPrefSource,
 } from "../api/llm";
 import { ProviderLogo } from "../shared/components/ProviderLogo";
 import { FamilyLogo } from "../shared/components/FamilyLogo";
+
+/** Qué le dice al operador el origen de la preferencia rehidratada. */
+const PREF_SOURCE_HINT: Record<LlmPrefSource, string> = {
+  user: "Elegiste vos. Se guarda como tu preferencia.",
+  env: "Viene de NEUROX_DEFAULT_PROVIDER (override del operador).",
+  config: "Viene de llm.default_provider en config.yaml.",
+  "auto-configured":
+    "Primer provider con key, en orden alfabético. Elegí uno para fijar tu preferencia.",
+  "none-configured":
+    "Ningún provider tiene API key. Configurala en Config → Providers.",
+};
 
 // Model families with local GGUF availability (matches the HF_FAMILIES
 // list in ModelsTab). Used to render the model's family logo instead of
@@ -97,6 +110,10 @@ export function ModelSelector({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [userSelection, setUserSelection] = useState<string | null>(null);
+  /** De dónde salió la preferencia rehidratada. Solo para el título del
+   *  trigger: el operador tiene poder distinguir "lo elegiste vos" de "te
+   *  vino del default". */
+  const [prefSource, setPrefSource] = useState<LlmPrefSource | null>(null);
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   /** EP-0024: which provider groups are expanded in the dropdown. Empty
@@ -120,30 +137,22 @@ export function ModelSelector({
       setLoading(true);
       setError(null);
       try {
-        const providersResp = await getProviders();
-        // Discover models per configured provider (same strategy as
-        // ProvidersPanel → handleRefreshModels). The global
-        // /v1/llm/models catalog only returns models for one provider
-        // (verified 2026-08-13), so we fetch per-provider and merge.
-        const configured = providersResp.providers.filter((p) => p.configured);
-        const perProvider = await Promise.all(
-          configured.map(async (p) => {
-            const discovered = await listModels(p.id);
-            return discovered.map(
-              (m) =>
-                ({
-                  provider_id: p.id,
-                  model_id: m.id,
-                  kind: p.kind,
-                  base_url: p.base_url,
-                  capability: m.capability,
-                  supports_tools: (m as { supports_tools?: boolean }).supports_tools,
-                  is_free: (m as { is_free?: boolean }).is_free,
-                }) satisfies CatalogModel,
-            );
-          }),
-        );
-        setModels(perProvider.flat());
+        // Catálogo agregado del daemon (`GET /v1/llm/models`), NO un fetch
+        // por provider.
+        //
+        // Antes esto hacía `listModels(p.id)` en paralelo por cada provider
+        // configurado: con 8 providers son 8 requests a APIs de terceros
+        // cada vez que se abre la vista. Es el rate limit del proveedor,
+        // no el nuestro, y el fallo se manifestaba como "el modelo de X no
+        // aparece". El endpoint agregado hace una sola vez y lo cachea el
+        // daemon 300s.
+        //
+        // El comentario anterior decía que el catálogo "solo devuelve
+        // modelos de un provider (verificado 2026-08-13)": era verdad
+        // entonces, y dejó de serlo cuando el daemon migró el catálogo al
+        // store. Por eso el selector nunca se actualizó.
+        const catalog = await getModelCatalog();
+        setModels(catalog.models ?? []);
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -156,26 +165,11 @@ export function ModelSelector({
   const refreshCatalog = useCallback(async () => {
     setLoading(true);
     try {
-      const providersResp = await getProviders();
-      const configured = providersResp.providers.filter((p) => p.configured);
-      const perProvider = await Promise.all(
-        configured.map(async (p) => {
-          const discovered = await listModels(p.id);
-          return discovered.map(
-            (m) =>
-              ({
-                provider_id: p.id,
-                model_id: m.id,
-                kind: p.kind,
-                base_url: p.base_url,
-                capability: m.capability,
-                supports_tools: (m as { supports_tools?: boolean }).supports_tools,
-                is_free: (m as { is_free?: boolean }).is_free,
-              }) satisfies CatalogModel,
-          );
-        }),
-      );
-      setModels(perProvider.flat());
+      // Catálogo agregado, cacheado por el daemon. Antes esto re-fetchaba
+      // por provider cada vez que se abría el dropdown: abrir y cerrar el
+      // selector unas veces ya eran decenas de requests a APIs de terceros.
+      const catalog = await getModelCatalog();
+      setModels(catalog.models ?? []);
     } catch {
       // Silencioso: la carga inicial ya maneja errores visibles.
     } finally {
@@ -188,6 +182,46 @@ export function ModelSelector({
       void refreshCatalog();
     }
   }, [open, refreshCatalog]);
+
+  // Rehidratación: la preferencia vive en la DB del daemon, scopeada al
+  // usuario (`user_llm_prefs`). Antes vivía en `userSelection`
+  // (`useState`), así que se perdía al recargar: el operador elegía un
+  // modelo, abría otra pestaña, y tenía que elegirlo de nuevo.
+  //
+  // Se rehidrata incluso si la sesión ya trae `currentModel`: el
+  // operador puede haber cambiado la preferencia en otra pestaña, y lo que
+  // él eligió tiene que ganarle al default de la sesión.
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const prefs = await getLlmPrefs();
+        if (cancelled) return;
+        setPrefSource(prefs.source);
+        if (prefs.providerId) {
+          // Sin modelo explícito, el provider usa el suyo: el `model`
+          // vacío se representa como null para que `selected` no quede
+          // apuntando a un id inexistente.
+          setUserSelection(
+            encodeValue(prefs.providerId, prefs.model ?? ""),
+          );
+          if (prefs.model) {
+            onChange?.({
+              provider_id: prefs.providerId,
+              model: prefs.model,
+            });
+          }
+        }
+      } catch {
+        // Silencioso: la preferencia es una comodidad, no un requisito.
+        // Si falla, el operador elige a mano y el chat sigue funcionando.
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [onChange]);
 
   useEffect(() => {
     if (!open) return;
@@ -239,6 +273,10 @@ export function ModelSelector({
       setError(null);
       try {
         await setSessionModel(sessionId, parsed.provider_id, parsed.model);
+        // Persiste como preferencia del usuario (`/v1/llm/prefs`), no solo
+        // en la sesión. Sin esto, abrir otra pestaña pierde la elección.
+        await setLlmPrefs(parsed.provider_id, parsed.model);
+        setPrefSource("user");
         onChange?.(parsed);
         setOpen(false);
       } catch (err) {
@@ -288,6 +326,21 @@ export function ModelSelector({
             />
           ))}
         <span className="model-selector__trigger-label">{activeLabel}</span>
+        {/* Origen de la preferencia, en el title del trigger (no como
+            badge): el operador necesita poder distinguir "esto lo elegiste
+            vos" de "te vino del default" sin que el trigger crezca. Un
+            default silencioso es indistinguible de una elección propia, y
+            por eso parece un bug cuando cambia solo. */}
+        {activeModel && prefSource && prefSource !== "user" && (
+          <span
+            className="model-selector__trigger-source"
+            title={PREF_SOURCE_HINT[prefSource]}
+            aria-label={PREF_SOURCE_HINT[prefSource]}
+            data-testid="model-selector-pref-source"
+          >
+            default
+          </span>
+        )}
         <span className={`model-selector__caret${open ? " model-selector__caret--open" : ""}`}>▾</span>
       </button>
 

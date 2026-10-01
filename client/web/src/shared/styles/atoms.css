@@ -3164,6 +3164,23 @@
   transform: rotate(180deg);
 }
 
+/* Marca de "esto no lo elegiste vos". Chapa mínima, no un badge: el
+ * trigger ya tiene logo + label + caret, y un badge completo lo
+ * convertiría en una fila de tres elementos. Va en muted para que se lea
+ * como anotación y no como estado. El detalle está en el title. */
+.model-selector__trigger-source {
+  flex-shrink: 0;
+  padding: 0 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: 0.5625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  cursor: help;
+  line-height: 1.4;
+}
+
 .model-selector__dropdown {
   position: absolute;
   bottom: calc(100% + 0.25rem);
