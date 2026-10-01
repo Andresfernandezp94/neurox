@@ -755,7 +755,19 @@ impl CoreConfig {
         if path.exists() {
             let text = std::fs::read_to_string(path)?;
             let expanded = expand_env_vars(&text);
-            Ok(serde_yml::from_str(&expanded)?)
+            // `${env:VAR}` apunta a algo que el operador decidió que tiene
+            // que estar. Si no está, el daemon NO levanta: es preferible a
+            // arrancar con el valor vacío y que el primer mensaje de chat
+            // reviente con un 401 que no señala la causa.
+            if !expanded.missing_required.is_empty() {
+                anyhow::bail!(
+                    "config {}: missing required env var(s): {}. \
+                     Set them in ~/.config/neurox/env or the systemd EnvironmentFile.",
+                    path.display(),
+                    expanded.missing_required.join(", ")
+                );
+            }
+            Ok(serde_yml::from_str(&expanded.text)?)
         } else {
             tracing::info!("config {:?} not found, using defaults", path);
             Ok(Self::default())
@@ -777,46 +789,130 @@ impl CoreConfig {
     }
 }
 
-/// Expand `${env:VAR}` and `$VAR` references in a string using process
-/// environment variables. Unknown variables expand to empty string with a
-/// warning logged. This lets users keep secrets in env vars instead of
-/// baking them into config.yaml.
+/// Resultado de expandir las referencias de env vars de un config.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Expanded {
+    pub text: String,
+    /// Referencias `${env:VAR}` que no existen. Es un ERROR, no un warning:
+    /// ver [`expand_env_vars`].
+    pub missing_required: Vec<String>,
+}
+
+/// Expande `${env:VAR}` y `$VAR` contra el entorno del proceso.
 ///
-/// Multibyte UTF-8 is preserved by iterating over chars (not bytes).
-fn expand_env_vars(input: &str) -> String {
+/// ## `${env:VAR}` es estricto
+///
+/// Si la variable no existe, la carga del config falla. Antes expandía a
+/// cadena vacía con un warning, y para un valor que debe estar presente
+/// (una API key, un password) eso es lo peor que puede pasar: el daemon
+/// levanta bien, el config parsea, y el primer mensaje de chat revienta con
+/// un 401 que no señala la causa. Fallar al arrancar dice exactamente qué
+/// falta.
+///
+/// La forma laxa `$VAR` sigue expandiendo a vacío: sirve para placeholders
+/// opcionales y para texto que sí tiene `$` al principio de una palabra.
+///
+/// ## Escapes de shell
+///
+/// `\$` produce un `$` literal y `$$` también. Sin esto, un password que
+/// contiene `$` se come el resto de la línea como nombre de variable, y
+/// `p4ss$w0rd!` se expande a `p4ss` con un warning sobre una variable
+/// llamada `w0rd`. Igual que en shell: `\` escapa, el resto es literal.
+///
+/// Multibyte UTF-8 se preserva iterando sobre `char`, no sobre bytes.
+fn expand_env_vars(input: &str) -> Expanded {
     let mut out = String::with_capacity(input.len());
+    let mut missing_required: Vec<String> = Vec::new();
+
+    // Se procesa linea por linea porque una linea de comentario NO se
+    // expande: su contenido nunca llega al YAML parseado.
+    //
+    // Sin esto, la cabecera de documentacion del propio config.example
+    // reportaba `VAR` como variable faltante y el daemon no arrancaba, con
+    // un error que senalaba una linea que nunca se expande. Un comentario
+    // de documentacion no puede romper el arranque: no es un valor.
+    for line in input.split('\n') {
+        let is_comment = line.trim_start().starts_with('#');
+        if is_comment {
+            out.push_str(line);
+        } else {
+            expand_line(line, &mut out, &mut missing_required);
+        }
+        out.push('\n');
+    }
+    // El split '\n' agrega un salto final que el input puede no tener.
+    if !input.ends_with('\n') {
+        out.pop();
+    }
+
+    Expanded {
+        text: out,
+        missing_required,
+    }
+}
+
+/// Expande una linea que NO es comentario.
+fn expand_line(input: &str, out: &mut String, missing_required: &mut Vec<String>) {
     let chars: Vec<char> = input.chars().collect();
     let mut i = 0;
     while i < chars.len() {
+        // Escape de shell: `\\$` y `$$` dan un `$` literal. Sin esto, un
+        // password con `$` se come el resto de la linea.
+        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == '$' {
+            out.push('$');
+            i += 2;
+            continue;
+        }
+
         if chars[i] != '$' {
             out.push(chars[i]);
             i += 1;
             continue;
         }
+
+        // `$$` -> `$` literal.
+        if i + 1 < chars.len() && chars[i + 1] == '$' {
+            out.push('$');
+            i += 2;
+            continue;
+        }
+
         // Try ${...}
         if i + 1 < chars.len() && chars[i + 1] == '{' {
             // Find matching '}'
             let close = chars[i + 2..].iter().position(|c| *c == '}');
             if let Some(close_off) = close {
                 let inner: String = chars[i + 2..i + 2 + close_off].iter().collect();
-                let var_name = inner.strip_prefix("env:").unwrap_or(&inner);
+                // El prefijo `env:` marca el modo estricto. Sin el, sigue
+                // la forma laxa (placeholder opcional).
+                let (var_name, strict) = match inner.strip_prefix("env:") {
+                    Some(rest) => (rest, true),
+                    None => (inner.as_str(), false),
+                };
                 match std::env::var(var_name) {
                     Ok(v) => out.push_str(&v),
-                    Err(_) => tracing::warn!(
-                        var = var_name,
-                        "config: env var not set, expanding to empty"
-                    ),
+                    Err(_) => {
+                        if strict {
+                            missing_required.push(var_name.to_string());
+                        } else {
+                            tracing::warn!(
+                                var = var_name,
+                                "config: env var not set, expanding to empty"
+                            );
+                        }
+                    }
                 }
                 i += 2 + close_off + 1;
                 continue;
             }
-            // No closing brace — treat literal
+            // No closing brace - treat literal
             out.push('$');
             out.push('{');
             i += 2;
             continue;
         }
-        // Try $VAR
+
+        // Try $VAR (forma laxa: nunca es un error)
         if i + 1 < chars.len() && (chars[i + 1].is_alphabetic() || chars[i + 1] == '_') {
             let start = i + 1;
             let mut end = start;
@@ -841,67 +937,193 @@ fn expand_env_vars(input: &str) -> String {
             i = end;
             continue;
         }
+
         // Lone '$'
         out.push('$');
         i += 1;
     }
-    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // `expand_env_vars` muta el entorno del proceso, compartido por todos
+    // los tests del binario: sin lock, dos tests con la misma key se pisan.
+    static EXPAND_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock() -> std::sync::MutexGuard<'static, ()> {
+        EXPAND_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn expand_simple_var() {
+        let _g = lock();
         std::env::set_var("NEURO_TEST_VAR", "hello");
         let r = expand_env_vars("api_key: $NEURO_TEST_VAR");
-        assert_eq!(r, "api_key: hello");
+        assert_eq!(r.text, "api_key: hello");
+        assert!(r.missing_required.is_empty());
     }
 
     #[test]
     fn expand_braced_env() {
+        let _g = lock();
         std::env::set_var("NEURO_TEST_VAR2", "world");
         let r = expand_env_vars("api_key: ${env:NEURO_TEST_VAR2}");
-        assert_eq!(r, "api_key: world");
+        assert_eq!(r.text, "api_key: world");
+        assert!(r.missing_required.is_empty());
     }
 
     #[test]
     fn expand_braced_no_prefix() {
+        let _g = lock();
         std::env::set_var("NEURO_TEST_VAR3", "x");
+        // Sin prefijo `env:` sigue siendo la forma laxa.
         let r = expand_env_vars("api_key: ${NEURO_TEST_VAR3}");
-        assert_eq!(r, "api_key: x");
+        assert_eq!(r.text, "api_key: x");
+        assert!(r.missing_required.is_empty());
     }
 
     #[test]
-    fn expand_missing_var_becomes_empty() {
+    fn expand_missing_strict_var_is_reported_not_silently_empty() {
+        let _g = lock();
+        // El cambio de comportamiento: `${env:VAR}` inexistente ya no
+        // expande a vacio en silencio. Antes el daemon levantaba y el
+        // primer mensaje de chat fallaba con un 401 sin relacion con la
+        // causa.
         let r = expand_env_vars("api_key: ${env:NEURO_TEST_MISSING_XYZ}");
-        assert_eq!(r, "api_key: ");
+        assert_eq!(r.text, "api_key: ");
+        assert_eq!(
+            r.missing_required,
+            vec!["NEURO_TEST_MISSING_XYZ".to_string()]
+        );
+    }
+
+    #[test]
+    fn expand_missing_lax_var_stays_empty_without_error() {
+        let _g = lock();
+        // La forma laxa se usa para placeholders opcionales: no debe romper
+        // la carga.
+        let r = expand_env_vars("note: ${NEURO_TEST_MISSING_LAX}");
+        assert_eq!(r.text, "note: ");
+        assert!(r.missing_required.is_empty());
+    }
+
+    #[test]
+    fn expand_collects_every_missing_strict_var() {
+        let _g = lock();
+        // El error tiene que nombrar TODAS las que faltan, no la primera:
+        // si no, arreglar una y reiniciar muestra la siguiente.
+        let r = expand_env_vars("${env:NEURO_TEST_MISS_A} x ${env:NEURO_TEST_MISS_B}");
+        assert_eq!(
+            r.missing_required,
+            vec![
+                "NEURO_TEST_MISS_A".to_string(),
+                "NEURO_TEST_MISS_B".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn expand_escaped_dollar_is_literal() {
+        let _g = lock();
+        // Sin escape, `p4ss$w0rd` se comia `w0rd` como nombre de variable.
+        let r = expand_env_vars(r"key: p4ss\$w0rd");
+        assert_eq!(r.text, "key: p4ss$w0rd");
+    }
+
+    #[test]
+    fn expand_double_dollar_is_literal() {
+        let _g = lock();
+        let r = expand_env_vars("price: $$5");
+        assert_eq!(r.text, "price: $5");
+    }
+
+    #[test]
+    fn expand_escaped_dollar_does_not_expand() {
+        let _g = lock();
+        std::env::set_var("NEURO_TEST_SECRET", "should-not-appear");
+        // `\${env:VAR}` = literal, sin expandir ni registrar como faltante.
+        let r = expand_env_vars(r"raw: \${env:NEURO_TEST_SECRET}");
+        assert_eq!(r.text, "raw: ${env:NEURO_TEST_SECRET}");
+        assert!(r.missing_required.is_empty());
+    }
+
+    #[test]
+    fn expand_password_with_dollar_roundtrips() {
+        let _g = lock();
+        // El caso real: un password con `$` tiene que poder ir en el
+        // config sin comillas (el formato del env file no parsea comillas).
+        std::env::set_var("NEURO_TEST_PW", r"p4ss$w0rd!");
+        let r = expand_env_vars("password: ${env:NEURO_TEST_PW}");
+        assert_eq!(r.text, "password: p4ss$w0rd!");
     }
 
     #[test]
     fn expand_non_var_preserved() {
+        let _g = lock();
         let r = expand_env_vars("plain text without vars");
-        assert_eq!(r, "plain text without vars");
+        assert_eq!(r.text, "plain text without vars");
     }
 
     #[test]
     fn expand_dollar_at_end_preserved() {
+        let _g = lock();
+        // `$5`: el `5` no es alfanumerico inicial valido, asi que `$` queda.
         let r = expand_env_vars("price: $5");
-        assert_eq!(r, "price: $5");
+        assert_eq!(r.text, "price: $5");
+    }
+
+    #[test]
+    fn expand_ignores_strict_refs_inside_comments() {
+        let _g = lock();
+        // Caso real, encontrado al instalar: la cabecera del
+        // config.example documenta la sintaxis con un ejemplo, y eso
+        // reportaba `VAR` como faltante y hacia fallar el arranque. Un
+        // comentario no se expande, asi que no puede exigir variables.
+        std::env::remove_var("VAR");
+        let input = concat!(
+            "# neurox config\n",
+            "#\n",
+            "#   ${env:VAR} - reemplazado al cargar.\n",
+            "bind_addr: \"127.0.0.1:7878\"\n",
+        );
+        let r = expand_env_vars(input);
+        assert!(
+            r.missing_required.is_empty(),
+            "comment must not require env vars, got {:?}",
+            r.missing_required
+        );
+        // Y el comentario se conserva literal, con la sintaxis visible.
+        assert!(r.text.contains("${env:VAR}"));
+    }
+
+    #[test]
+    fn expand_still_enforces_strict_refs_in_values() {
+        let _g = lock();
+        // La excepcion es solo para comentarios: un valor con la forma
+        // estricta sigue fallando.
+        std::env::remove_var("NEURO_TEST_STRICT_IN_VALUE");
+        let r = expand_env_vars("key: ${env:NEURO_TEST_STRICT_IN_VALUE}\n");
+        assert_eq!(r.missing_required.len(), 1);
     }
 
     #[test]
     fn expand_preserves_multibyte_utf8() {
-        // em dash, accents, emoji — must not corrupt UTF-8 sequences
+        let _g = lock();
+        // em dash, accents, emoji, CJK - no debe corromper UTF-8
         std::env::set_var("NEURO_TEST_HOST", "example.com");
-        let r = expand_env_vars(
-            "# neurox — cross-platform (€5/mes) — host: $NEURO_TEST_HOST\n# ñoño 中文 🎉",
-        );
-        assert!(r.contains("neurox — cross-platform"));
-        assert!(r.contains("(€5/mes)"));
-        assert!(r.contains("host: example.com"));
-        assert!(r.contains("ñoño 中文 🎉"));
+        // La línea con la ref NO es comentario: si lo fuera, ya no se
+        // expandiría y el assert de "example.com" no tendría sentido.
+        let r = expand_env_vars(concat!(
+            "neurox - cross-platform (5 EUR/mes) - host: $NEURO_TEST_HOST\n",
+            "# ñoño 中文 🎉\n",
+        ));
+        assert!(r.text.contains("neurox - cross-platform"));
+        assert!(r.text.contains("(5 EUR/mes)"));
+        assert!(r.text.contains("host: example.com"));
+        // El comentario con CJK y emoji sobrevive literal.
+        assert!(r.text.contains("ñoño 中文 🎉"));
     }
 
     fn spec_with_secret() -> PersistentAgentSpec {

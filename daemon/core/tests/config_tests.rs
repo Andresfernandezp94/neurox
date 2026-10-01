@@ -148,3 +148,66 @@ fn config_example_providers_have_valid_kinds() {
         );
     }
 }
+
+/// La forma estricta `env:VAR` entre llaves y signo de peso que no existe
+/// debe hacer fallar la carga del config.
+///
+/// El síntoma que viene de expanding a vacío: el daemon levanta, el config
+/// parsea, y el primer mensaje de chat falla con un 401 que no señala la
+/// causa. El error de arranque dice exactamente qué falta.
+#[test]
+fn load_fails_when_required_env_var_is_missing() {
+    std::env::remove_var("NEURO_TEST_REQ_MISSING");
+    let dir = std::env::temp_dir().join(format!("neurox-cfg-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.yaml");
+    std::fs::write(
+        &path,
+        "bind_addr: \"127.0.0.1:7878\"\nlog_level: \"info\"\n\
+         session_agents:\n  agents:\n    default:\n      command: \"/bin/true\"\n",
+    )
+    .unwrap();
+
+    // Con la var presente, carga bien.
+    std::env::set_var("NEURO_TEST_REQ_MISSING", "valor");
+    let yaml = std::fs::read_to_string(&path).unwrap().replace(
+        "bind_addr",
+        &format!("extra: \"${{env:NEURO_TEST_REQ_MISSING}}\"\nbind_addr"),
+    );
+    std::fs::write(&path, &yaml).unwrap();
+    assert!(
+        neurox::config::CoreConfig::load(&path).is_ok(),
+        "config with a satisfied env ref must load"
+    );
+
+    // Sin la var, falla nombrando la variable.
+    std::env::remove_var("NEURO_TEST_REQ_MISSING");
+    let err = neurox::config::CoreConfig::load(&path)
+        .expect_err("missing env ref must fail the load");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("NEURO_TEST_REQ_MISSING"),
+        "error must name the missing var, got: {msg}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// La forma laxa `${VAR}` no debe romper la carga: existe para
+/// placeholders opcionales.
+#[test]
+fn load_okays_when_lax_var_is_missing() {
+    std::env::remove_var("NEURO_TEST_LAX_OPTIONAL");
+    let dir = std::env::temp_dir().join(format!("neurox-cfg-lax-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.yaml");
+    std::fs::write(
+        &path,
+        "bind_addr: \"127.0.0.1:${NEURO_TEST_LAX_OPTIONAL}\"\nlog_level: \"info\"\n",
+    )
+    .unwrap();
+
+    // Carga: la forma laxa expande a vacío sin error.
+    assert!(neurox::config::CoreConfig::load(&path).is_ok());
+    std::fs::remove_dir_all(&dir).ok();
+}
