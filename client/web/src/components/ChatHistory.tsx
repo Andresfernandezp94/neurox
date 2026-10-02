@@ -47,7 +47,10 @@ export function ChatHistory({
 
   const refresh = useCallback(async () => {
     try {
-      await listSessions();
+      // `includeInactive`: el historial tiene que traer tambien las
+      // sesiones cerradas. Sin esto solo llegaba las activas y el panel
+      // mostraba "No previous chats" con 4 sesiones en la base.
+      await listSessions({ includeInactive: true });
     } catch {
       // silent
     }

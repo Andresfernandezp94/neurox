@@ -242,6 +242,35 @@ export function useChatTabs(defaultAgentId: string | null = null) {
       if (type === "session_started" && sid) {
         if (seenSessions.current.has(sid)) return;
         seenSessions.current.add(sid);
+
+        // ¿Es una sesion que acabamos de crear nosotros? Si hay una
+        // pestana todavia en borrador (`sessionId === null`), se le ataba
+        // el id a ESA.
+        //
+        // Sin esto, la creacion local y el evento del daemon se pisan. El
+        // daemon emite `SessionStarted` apenas inserta la fila, o sea
+        // ANTES de que resuelva el `POST /v1/sessions` que hizo
+        // `ensureSessionForTab`. Cuando llega el evento, todavia no
+        // ausencia nada en `seenSessions` y la pestana local sigue con
+        // `sessionId: null`, asi que el dedupe de `upsertSession` no
+        // encuentra nada y crea una SEGUNDA pestana para la misma sesion.
+        // Despues, al resolver el POST, la primera tambien queda con ese
+        // id: dos pestanas apuntando a la misma sesion.
+        //
+        // El sintoma era doble: se veian dos chats, y al cerrar el segundo
+        // se llamaba `endSession` sobre la sesion, que la archivaba
+        // (`ended_at`), y la conversacion desaparecia de la primera.
+        //
+        // Es independiente del orden de llegada: si el evento llega
+        // cuando la pestana ya tiene el id, el find no encuentra borrador
+        // y se sigue por el camino de siempre (crear pestana, que es lo
+        // que corresponde a una sesion que viene de otro dispositivo).
+        const draft = tabsRef.current.find((t) => t.sessionId === null);
+        if (draft) {
+          updateTab(draft.id, { sessionId: sid });
+          return;
+        }
+
         upsertSession({
           session_id: sid,
           agent_id: "",

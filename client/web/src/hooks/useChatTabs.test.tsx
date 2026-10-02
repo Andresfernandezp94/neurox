@@ -755,3 +755,148 @@ describe("useChatTabs — single-source chunk apply (ordered by seq)", () => {
 // reads `seq`) and routes it to `applyStreamChunk` — the exact method
 // these tests exercise directly. Behaviour parity is a code-level
 // guarantee, not a runtime one.
+
+// ─── session_started: la carrera que duplicaba la pestaña ──────────────────
+//
+// El daemon emite `SessionStarted` apenas inserta la fila, o sea ANTES de
+// que resuelva el `POST /v1/sessions` que dispara `ensureSessionForTab`.
+// Cuando el evento llegaba, la pestaña local todavía tenía
+// `sessionId: null` y el id no estaba en `seenSessions`, así que el dedupe
+// de `upsertSession` no encontraba nada y creaba una segunda pestaña para la
+// misma sesión. Al resolver el POST, la primera también quedaba con ese id.
+//
+// El síntoma era doble: dos chats, y al cerrar el segundo se llamaba
+// `endSession` sobre la sesión, que la archivaba, y la conversación
+// desaparecía de la primera.
+describe("useChatTabs — session_started sobre una pestana en borrador", () => {
+  class FakeWebSocket {
+    static instances: FakeWebSocket[] = [];
+    onmessage: ((e: { data: string }) => void) | null = null;
+    onopen: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    /** `StoreContext` se suscribe con `addEventListener`, no con `onx`. */
+    private listeners: Record<string, ((e: unknown) => void)[]> = {};
+    addEventListener(type: string, fn: (e: unknown) => void) {
+      (this.listeners[type] ??= []).push(fn);
+    }
+    removeEventListener() {}
+    close() {}
+    constructor(public url: string) {
+      FakeWebSocket.instances.push(this);
+    }
+    emit(payload: unknown) {
+      this.onmessage?.({ data: JSON.stringify(payload) });
+    }
+  }
+
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    global.fetch = mockFetchEmpty();
+    window.sessionStorage.setItem("neurox_token", "test-token");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.sessionStorage.clear();
+  });
+
+  it("ata la sesion a la pestana en borrador en vez de crear una segunda", async () => {
+    const { result } = renderHook(() => useChatTabs(), {
+      wrapper: ({ children }) => (
+        <StoreProvider eventsPath="/__test_no_ws__">{children}</StoreProvider>
+      ),
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // El daemon no tiene sesiones: hay una sola pestaña, en borrador.
+    expect(result.current.tabs).toHaveLength(1);
+    expect(result.current.tabs[0]!.sessionId).toBeNull();
+
+    // Llega el evento de la sesión que el front está creando.
+    const ws = FakeWebSocket.instances[0]!;
+    await act(async () => {
+      ws.emit({
+        type: "session_started",
+        session_id: "sess-nueva",
+        agent_id: TEST_AGENT_ID,
+      });
+      await Promise.resolve();
+    });
+
+    // UNA sola pestaña, y ahora con la sesión atada.
+    expect(result.current.tabs).toHaveLength(1);
+    expect(result.current.tabs[0]!.sessionId).toBe("sess-nueva");
+  });
+
+  it("sin pestana en borrador sigue creando la pestana (sesion de otro equipo)", async () => {
+    // Si no hay borrador, el evento es de otra sesion (otro dispositivo) y
+    // corresponde crear la pestaña. El fix no puede tragarse esas.
+    //
+    // Se hidrata con una sesion ya existente para que la unica pestaña
+    // tenga `sessionId` y no haya borrador: el efecto de draft solo crea
+    // una pestaña en borrador cuando el daemon no devuelve ninguna.
+    global.fetch = vi.fn((url: string | URL | Request) => {
+      const u = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+      let body: Record<string, unknown> = {};
+      if (u.includes("/v1/agents")) {
+        body = { in_process: [], persistent: [], ephemeral_templates: [], running: [] };
+      } else if (u.includes("/v1/sessions") && !u.includes("/messages")) {
+        body = {
+          sessions: [
+            {
+              session_id: "sess-ya-existe",
+              agent_id: TEST_AGENT_ID,
+              started_at: "2026-09-05T00:00:00Z",
+              ended_at: null,
+              summary: null,
+            },
+          ],
+        };
+      } else if (u.includes("/v1/approvals")) {
+        body = { pending: [] };
+      } else if (u.includes("/health")) {
+        body = { status: "ok", service: "neurox", version: "0.0.0-test", auth_required: false };
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }) as typeof fetch;
+
+    const { result } = renderHook(() => useChatTabs(), {
+      wrapper: ({ children }) => (
+        <StoreProvider eventsPath="/__test_no_ws__">{children}</StoreProvider>
+      ),
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Precondicion: una sola pestaña, con sesion, y sin borrador.
+    expect(result.current.tabs).toHaveLength(1);
+    expect(result.current.tabs[0]!.sessionId).toBe("sess-ya-existe");
+    expect(result.current.tabs.some((t) => t.sessionId === null)).toBe(false);
+
+    const ws = FakeWebSocket.instances[0]!;
+    await act(async () => {
+      ws.emit({
+        type: "session_started",
+        session_id: "sess-de-otro",
+        agent_id: TEST_AGENT_ID,
+      });
+      await Promise.resolve();
+    });
+
+    const ids = result.current.tabs.map((t) => t.sessionId);
+    expect(ids).toContain("sess-de-otro");
+    expect(result.current.tabs).toHaveLength(2);
+  });
+});

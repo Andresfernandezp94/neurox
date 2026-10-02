@@ -8,10 +8,30 @@ export function newRequestId(): string {
   return "req_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-export function listSessions(): Promise<SessionsResponse> {
-  // Pass client_id so the daemon filters to sessions owned by this
-  // browser. Without this we'd see sidebar sessions too.
-  return apiGet<SessionsResponse>(`/v1/sessions?client_id=${encodeURIComponent(getWebClientId())}`);
+export interface ListSessionsOpts {
+  /**
+   * Incluir las sesiones cerradas (`ended_at` con valor). Necesario para
+   * el panel de historial: sin esto solo llegan las activas y los filtros
+   * "All" y "Closed" no tienen nada que mostrar.
+   */
+  includeInactive?: boolean;
+}
+
+export function listSessions(opts: ListSessionsOpts = {}): Promise<SessionsResponse> {
+  // Camino por usuario, SIN `client_id`.
+  //
+  // `client_id` esta deprecado para la UI principal, y ademas tiene un
+  // efecto colateral que rompia el historial entero: cuando viene
+  // `client_id`, el daemon toma el camino `list_sessions_by_client` e
+  // IGNORA `include_inactive`. O sea que aunque el front pidiera las
+  // cerradas, no llegarian nunca.
+  //
+  // El filtro por `client_id` tampoco hacia falta: la hidratacion de
+  // `useChatTabs` ya pegaba a `/v1/sessions` sin el, o sea por usuario.
+  const q = new URLSearchParams();
+  if (opts.includeInactive) q.set("include_inactive", "true");
+  const qs = q.toString();
+  return apiGet<SessionsResponse>(`/v1/sessions${qs ? `?${qs}` : ""}`);
 }
 
 export function createSession(agent_id: string): Promise<{ session_id: string; agent_id: string }> {

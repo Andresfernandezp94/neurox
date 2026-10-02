@@ -67,13 +67,26 @@ describe('api/sessions', () => {
     vi.restoreAllMocks();
   });
 
-  it('listSessions hits /v1/sessions with client_id filter', async () => {
+  it('listSessions pega a /v1/sessions SIN client_id', async () => {
+    // El camino por `client_id` esta deprecado y, peor, hacia que el daemon
+    // IGNORARA `include_inactive`: cuando viene `client_id` toma
+    // `list_sessions_by_client` y no mira el otro query param. Con eso el
+    // historial no podia traer nunca las sesiones cerradas.
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       new Response('{}', { status: 200 }),
     );
     await listSessions();
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(call[0]).toMatch(/^\/v1\/sessions\?client_id=web-[a-z0-9]+$/);
+    expect(call[0]).toBe('/v1/sessions');
+  });
+
+  it('listSessions con includeInactive pide las cerradas', async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      new Response('{}', { status: 200 }),
+    );
+    await listSessions({ includeInactive: true });
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(call[0]).toBe('/v1/sessions?include_inactive=true');
   });
 
   it('createSession sends agent_id + client_id in body', async () => {
