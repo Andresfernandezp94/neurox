@@ -3543,20 +3543,24 @@ pub async fn put_env_var(
             ))
         }
     };
-    // Las variables de solo lectura se listan en el catalogo pero no se
-    // escriben desde aca: son de infraestructura (las pone el host) o
-    // keys de providers (que se editan en su tab). Aceptarlas haria que
-    // el valor sobreviva hasta el proximo reinicio y despues pierda
-    // contra el entorno real, sin avisar.
+    // Solo la INFRAESTRUCTURA se rechaza (403). Las pone el host
+    // (HOME, PATH, XDG_*): escribir una haria que ganara hasta el proximo
+    // reinicio y despues perderia contra el valor real, sin avisar.
+    //
+    // Las keys de providers NO se rechazan, aunque el catalogo las marque
+    // `read_only`. Ese flag es para la UI: le dice a la tab Environment que
+    // no ofrezca un editor, porque el lugar de escritura es la tab
+    // Providers. Y esa tab escribe por ESTE MISMO endpoint
+    // (`putEnvVar(api_key_env)`). Rejectearlas acá rompia guardar keys.
     if let Some(spec) = crate::env_catalog::all()
         .into_iter()
         .find(|s| s.key == key)
     {
-        if spec.read_only {
+        if spec.category == crate::env_catalog::EnvCategory::Infrastructure {
             return Err((
                 StatusCode::FORBIDDEN,
                 format!(
-                    "'{key}' es de solo lectura ({}) — se administra en otro lugar",
+                    "'{key}' la define el host ({}): neurox no la escribe",
                     spec.category.label()
                 )
                 .into(),

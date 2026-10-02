@@ -336,25 +336,55 @@ async fn catalog_covers_all_categories() {
 }
 
 #[tokio::test]
-async fn put_rejects_read_only_provider_key() {
+async fn put_accepts_provider_key_because_the_providers_tab_writes_it() {
     let _g = env_lock().await;
-    let _guard = env_guard("ro-put");
+    let _guard = env_guard("provkey-put");
     let app = build_app().await;
 
-    // Editar una key de provider desde acá la pisaría con la tab Providers
-    // sin avisar. El lugar de escritura es la tab Providers.
+    // El catálogo marca las keys de providers `read_only` para que la tab
+    // Environment NO ofrezca un editor. Eso es una señal de UI, no una
+    // prohibición de escritura: la tab Providers guarda la key por este
+    // mismo endpoint (`putEnvVar(api_key_env)`).
+    //
+    // Este test falló al revés cuando el PUT rechazaba cualquier var
+    // `read_only`: guardar una key desde Providers daba 403.
     let resp = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
                 .uri("/v1/env/MINIMAX_API_KEY")
                 .header("content-type", "application/json")
-                .body(Body::from(json!({"value": "sk-intento"}).to_string()))
+                .body(Body::from(json!({"value": "sk-real"}).to_string()))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn catalog_marks_provider_keys_not_editable_in_the_env_tab() {
+    let _g = env_lock().await;
+    let _guard = env_guard("provkey-flag");
+    let app = build_app().await;
+
+    // Lo que sí tiene que ser cierto: la UI de Environment no ofrece
+    // editor para ellas, aunque la API sí acepte la escritura.
+    let resp = app
+        .oneshot(Request::builder().uri("/v1/env").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = to_bytes(resp.into_body(), 4 * 1024 * 1024).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let key = v["vars"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["key"] == "MINIMAX_API_KEY")
+        .unwrap();
+    assert_eq!(key["read_only"], true);
+    assert_eq!(key["sensitive"], true);
 }
 
 #[tokio::test]
