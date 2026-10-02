@@ -44,16 +44,24 @@ pub fn engine_provider_from_config(
 ///
 /// Replaces the old `register_from_llmd` HTTP hop. The engine is now
 /// in-process so there's no race condition with llmd startup.
+/// `sandbox` es el `Arc` COMPARTIDO del sandbox: se pasa el mismo que
+/// recibe `WorkspaceLayer`, para que el objeto que lee y escribe
+/// `GET/PUT /v1/sandbox` sea literalmente el que las tools aplican.
+///
+/// Antes cada capa construía el suyo desde `core_config.sandbox.clone()`:
+/// uno acá para el engine (y por lo tanto para todas las tools, via
+/// `register_defaults`) y otro en `main.rs` para el `WorkspaceLayer`. Eran
+/// dos objetos distintos con los mismos valores iniciales, asi que editar
+/// el sandbox desde la UI no cambiaba nada en las tools: estas seguian
+/// leyendo el suyo, que nadie mutaba.
 pub async fn build_engine(
     core_config: &CoreConfig,
     workspace_root: PathBuf,
+    sandbox_cfg: Arc<RwLock<Box<dyn tools_engine::SandboxConfig>>>,
 ) -> anyhow::Result<Arc<tools_engine::Engine>> {
-    // EP-0015 T-5: pass the configured sandbox to the engine, not the
-    // default. The previous version used `tokio::sync::RwLock::new(Box::new(tools_engine::DefaultSandbox)) as Arc<tokio::sync::RwLock<Box<dyn tools_engine::SandboxConfig>>>`
-    // which ignored the operator's config.yaml.
-    let sandbox_cfg: Arc<RwLock<Box<dyn tools_engine::SandboxConfig>>> = Arc::new(
-        RwLock::new(Box::new(core_config.sandbox.clone())),
-    );
+    // EP-0015 T-5: se usa el sandbox configurado, no el default. La
+    // version anterior usaba `DefaultSandbox`, que ignoraba el config.yaml
+    // del operador.
     let engine = tools_engine::Engine::new(
         &core_config.db_path,
         sandbox_cfg,

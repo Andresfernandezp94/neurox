@@ -204,8 +204,21 @@ async fn serve(
     // 17 native tools, the LLM provider store, and the model
     // discovery/downloader/configs. Constructing it once here replaces
     // the old `register_from_llmd` HTTP hop.
-    let engine = startup::build_engine(&core_config, workspace_root.clone())
-        .await?;
+    // UN solo Arc de sandbox para toda la app: lo usan el engine (y por
+    // lo tanto todas las tools, que comparten este Arc via
+    // `register_defaults`) y el `WorkspaceLayer`, que es el que lee y
+    // escribe `GET/PUT /v1/sandbox`. Antes eran dos Arc distintos con
+    // los mismos valores iniciales, asi que configurar el sandbox desde
+    // la UI no llegaba a las tools.
+    let shared_sandbox: Arc<tokio::sync::RwLock<Box<dyn tools_engine::SandboxConfig>>> = Arc::new(
+        tokio::sync::RwLock::new(Box::new(core_config.sandbox.clone())),
+    );
+    let engine = startup::build_engine(
+        &core_config,
+        workspace_root.clone(),
+        shared_sandbox.clone(),
+    )
+    .await?;
     let tools = engine.tools.clone();
 
     let llm_providers_for_orchestrator = engine.list_providers().await.unwrap_or_default();
@@ -333,10 +346,11 @@ async fn serve(
         Arc::new(SkillsRegistry::new()),
         plugin_registry,
     ));
-    let workspace_sandbox: Arc<tokio::sync::RwLock<Box<dyn tools_engine::SandboxConfig>>> = Arc::new(
-        tokio::sync::RwLock::new(Box::new(core_config.sandbox.clone())),
-    );
-    let workspace = Arc::new(WorkspaceLayer::new(workspace_root.clone(), workspace_sandbox));
+    // Mismo Arc que el engine: ver la nota de `shared_sandbox` arriba.
+    let workspace = Arc::new(WorkspaceLayer::new(
+        workspace_root.clone(),
+        shared_sandbox,
+    ));
     let (event_tx, _) = broadcast::channel(1024);
     let events = Arc::new(EventsLayer::new(event_tx));
     let auth = AuthLayer::new()
