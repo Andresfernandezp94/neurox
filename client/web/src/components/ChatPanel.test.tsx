@@ -163,7 +163,7 @@ describe("ChatPanel — sesion perezosa (se crea al primer mensaje)", () => {
 
     const textarea = await screen.findByTestId("chat-input");
     fireEvent.change(textarea, { target: { value: "hola" } });
-    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(textarea, { key: "Enter" });
 
     await waitFor(() => {
       expect(mockCreateSession).toHaveBeenCalledWith(TEST_AGENT_ID);
@@ -180,7 +180,7 @@ describe("ChatPanel — sesion perezosa (se crea al primer mensaje)", () => {
 
     const textarea = await screen.findByTestId("chat-input");
     fireEvent.change(textarea, { target: { value: "hola" } });
-    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(textarea, { key: "Enter" });
 
     // El id de sesion viene del POST, no del closure del render (que aun
     // era ""). Si el override no llegara, el POST del mensaje iria a
@@ -188,10 +188,10 @@ describe("ChatPanel — sesion perezosa (se crea al primer mensaje)", () => {
     await waitFor(() => {
       expect(mockStreamMessage).toHaveBeenCalledTimes(1);
     });
-    const [sid, agentId, text] = mockStreamMessage.mock.calls[0];
-    expect(sid).toBe("test-123");
-    expect(agentId).toBe(TEST_AGENT_ID);
-    expect(text).toBe("hola");
+    const call = mockStreamMessage.mock.calls[0];
+    expect(call?.[0]).toBe("test-123");
+    expect(call?.[1]).toBe(TEST_AGENT_ID);
+    expect(call?.[2]).toBe("hola");
   });
 
   it("the <textarea> is usable before any session exists", async () => {
@@ -217,7 +217,7 @@ describe("ChatPanel — sesion perezosa (se crea al primer mensaje)", () => {
 
     const textarea = await screen.findByTestId("chat-input");
     fireEvent.change(textarea, { target: { value: "hola" } });
-    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(textarea, { key: "Enter" });
 
     // El mensaje NO se manda: sin sesion no hay a donde mandarlo.
     await waitFor(() => {
@@ -249,11 +249,11 @@ describe("ChatPanel — sesion perezosa (se crea al primer mensaje)", () => {
     expect((textarea as HTMLTextAreaElement).value).toBe("hola");
   });
 
-  // EP-hide-header-followup (2026-08-15): changed the keyboard
-  // convention so bare Enter inserts a newline (matching Slack /
-  // Discord / most modern chat UIs) instead of sending. Sending now
-  // requires Shift+Enter or Ctrl+Enter. Locked down with these
-  // regression tests so the change doesn't accidentally flip back.
+  // EP-hide-header-followup (2026-08-15) fijo la convencion contraria
+  // (Enter = salto de linea, Shift+Enter = enviar, al estilo de Slack y
+  // Discord). Invertida a pedido del usuario: Enter envia y Shift+Enter
+  // mete un salto. Los tests vuelven a fijar la convencion vigente, que es
+  // lo que evita que vuelva a flippingar sola.
   describe("keyboard shortcuts", () => {
     function setupReady() {
       mockCreateSession.mockResolvedValue({
@@ -269,31 +269,26 @@ describe("ChatPanel — sesion perezosa (se crea al primer mensaje)", () => {
       return screen.findByTestId("chat-input");
     }
 
-    it("bare Enter does NOT send", async () => {
+    it("Enter sends", async () => {
       setupReady();
       const textarea = await readyTextarea();
       fireEvent.change(textarea, { target: { value: "hola" } });
       fireEvent.keyDown(textarea, { key: "Enter" });
-      // No send happens: handleSend is not called. The textarea
-      // keeps its content because Enter was not intercepted by
-      // preventDefault — it would insert a newline in a real
-      // browser. (jsdom doesn't mutate the value for Enter, so we
-      // assert it stays equal to what we typed.)
-      await new Promise((r) => setTimeout(r, 50));
-      expect((textarea as HTMLTextAreaElement).value).toBe("hola");
+      // handleSend limpia el input (setInput("")).
+      await waitFor(() => {
+        expect(textarea).toHaveValue("");
+      });
     });
 
-    it("Shift+Enter sends", async () => {
+    it("Shift+Enter does NOT send: it inserts a newline", async () => {
       setupReady();
       const textarea = await readyTextarea();
       fireEvent.change(textarea, { target: { value: "hola" } });
       fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
-      // handleSend clears the input (setInput("")). It also sets
-      // busy=true during the stream; we don't need to assert on
-      // busy — just on the cleared value.
-      await waitFor(() => {
-        expect(textarea).toHaveValue("");
-      });
+      // No hay envio: el texto sigue ahi y el input no se limpio.
+      await new Promise((r) => setTimeout(r, 50));
+      expect((textarea as HTMLTextAreaElement).value).toBe("hola");
+      expect(mockCreateSession).not.toHaveBeenCalled();
     });
 
     it("Ctrl+Enter sends", async () => {
@@ -304,6 +299,19 @@ describe("ChatPanel — sesion perezosa (se crea al primer mensaje)", () => {
       await waitFor(() => {
         expect(textarea).toHaveValue("");
       });
+    });
+
+    it("Enter does not send while an IME is composing", async () => {
+      // Con pinyin/kana, Enter confirma el candidato: es el caracter que
+      // se esta escribiendo, no el envio. Sin esta excepcion el mensaje
+      // se mandaba a medio componer.
+      setupReady();
+      const textarea = await readyTextarea();
+      fireEvent.change(textarea, { target: { value: "ni" } });
+      fireEvent.keyDown(textarea, { key: "Enter", isComposing: true });
+      await new Promise((r) => setTimeout(r, 50));
+      expect((textarea as HTMLTextAreaElement).value).toBe("ni");
+      expect(mockCreateSession).not.toHaveBeenCalled();
     });
   });
 });

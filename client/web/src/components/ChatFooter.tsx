@@ -234,7 +234,7 @@ export function ChatFooter({
                   title={
                     !sessionModel
                       ? "Pick a model first"
-                      : "Send (Shift+Enter)"
+                      : "Send (Enter)"
                   }
                   aria-label="Send"
                   data-testid="chat-send"

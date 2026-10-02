@@ -633,13 +633,26 @@ useLayoutEffect(() => {
   }, [activeTab?.sessionId, cancelStream]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Send only on Shift+Enter or Ctrl+Enter. Bare Enter inserts a
-    // newline (the textarea's default behavior). This matches the
-    // convention used by Slack, Discord and most modern chat UIs.
-    if (e.key === "Enter" && (e.shiftKey || e.ctrlKey)) {
-      e.preventDefault();
-      void handleSend();
-    }
+    // Enter envia, Shift+Enter inserta un salto de linea (el
+    // comportamiento por defecto del textarea, que no interceptamos).
+    //
+    // Esto invierte la convencion anterior, que era la de Slack/Discord
+    // (Enter = salto, Shift+Enter = enviar) y estaba fijada con tests de
+    // regresion. El cambio es pedido explicito del usuario.
+    if (e.key !== "Enter") return;
+
+    // Con un IME activo (pinyin, kana, cualquier compositor del sistema),
+    // Enter confirma el candidato: es el caracter que el usuario esta
+    // escribiendo, no el envio del mensaje. Sin esta excepcion, confirmar
+    // la composicion mandaba el texto a medio componer.
+    if (e.nativeEvent.isComposing) return;
+
+    // Ctrl/Cmd+Enter tambien envia: no estorba y es lo que se espera
+    // de un atajo alternativo.
+    if (e.shiftKey && !e.ctrlKey && !e.metaKey) return;
+
+    e.preventDefault();
+    void handleSend();
   }, [handleSend]);
 
   // EP-0028 HMR-fix: `messages`, `sessionId`, and `sessionModel` were
