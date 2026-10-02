@@ -10,6 +10,7 @@
 // contrae o se expande, sin calcular ningun offset contra el ancho de la
 // sidebar.
 
+import type { CSSProperties } from "react";
 import { Spinner } from "../atoms/Spinner";
 import { IconAlert, IconClose, IconInfo, IconWarning } from "../Icons";
 import {
@@ -36,12 +37,28 @@ function roleFor(kind: NotificationKind): "alert" | "status" {
   return kind === "error" || kind === "alert" ? "alert" : "status";
 }
 
-function NotificationRow({ n }: { n: Notification }) {
+function NotificationRow({ n, depth }: { n: Notification; depth: number }) {
   const { dismiss } = useNotifications();
   const close = `Cerrar aviso: ${n.message}`;
+  const front = depth === 0;
 
   return (
-    <div className={`notification notification--${n.kind}`} role={roleFor(n.kind)}>
+    <div
+      className={[
+        "notification",
+        `notification--${n.kind}`,
+        // Marca de "no es el de al frente". El CSS esconde el contenido de
+        // los de atras para que asome solo la franja de color: con el texto
+        // visible la franjita caia a media linea y se leia como texto
+        // cortado.
+        front ? "notification--front" : "notification--behind",
+      ].join(" ")}
+      // La profundidad la calcula el padre y se pasa por custom property en
+      // vez de deducirla con `nth-last-child` en CSS: queda explicita,
+      // testeable, y el CSS solo la consume.
+      style={{ "--depth": depth } as CSSProperties}
+      role={roleFor(n.kind)}
+    >
       <span className="notification__icon" aria-hidden="true">
         <KindIcon kind={n.kind} />
       </span>
@@ -65,8 +82,11 @@ export function NotificationStack() {
 
   return (
     <div className="notification-stack" data-testid="notification-stack">
-      {items.map((n) => (
-        <NotificationRow key={n.id} n={n} />
+      {/* El DOM va en orden de llegada (viejo -> nuevo) y el CSS pone el
+          ultimo al frente con `z-index`. La profundidad se cuenta desde
+          atras: el ultimo es 0, el anterior 1, y asi. */}
+      {items.map((n, i) => (
+        <NotificationRow key={n.id} n={n} depth={items.length - 1 - i} />
       ))}
     </div>
   );

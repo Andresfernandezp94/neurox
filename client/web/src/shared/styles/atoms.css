@@ -5890,6 +5890,9 @@ body[data-sidebar-hidden="true"] .notification-stack {
   display: flex;
   align-items: flex-start;
   gap: 0.625rem;
+  /* El `padding-top` de 0.625rem es justamente el margen que la escala
+   * achica: sin el, al encogerse la card la franja de color de arriba
+   * queda mas alta que la original y el mazo se ve descuadrado. */
   padding: 0.625rem 0.5rem 0.625rem 0.75rem;
   /* Superficie solida: el mensaje puede ser largo (un error de tool trae
    * la tool, la ruta y el sandbox) y un tinte translucido con texto de
@@ -5918,12 +5921,20 @@ body[data-sidebar-hidden="true"] .notification-stack {
   top: var(--notification-inset-top);
   left: var(--notification-inset);
   right: var(--notification-inset);
-  /* Cuanto se corre cada uno hacia abajo. 0.5rem era muy pegado: los de
-   * atras se leian como un borde y no se entendia que eran avisos
-   * separados. 1.5rem deja ver la franja de cada uno, asi que el mazo se
-   * lee como "hay N" sin volver a apilar el alto completo de cada aviso. */
-  opacity: calc(1 - var(--depth) * 0.18);
-  transform: translateY(calc(var(--depth) * 1.5rem));
+  /* Cada uno ATRAS se achica, no solo se corre. Con el mismo ancho que el
+   * de al frente, los de abajo parecian duplicados del de arriba en vez de
+   * cards de un mazo; ademas el `margin-top` del padding hacia que el
+   * achicado se notara de verdad.
+   *
+   * El origen de la escala es el `bottom`: anclarlo abajo y escalar hacia
+   * arriba hace que todos compartan el mismo borde de arriba y se lean
+   * como un mazo que se abre, no como un bloque que se encoge. Con el
+   * centro, cada uno se achicaba hacia adentro y se veia una escalera
+   * descentrada. */
+  transform-origin: bottom center;
+  opacity: calc(1 - var(--depth) * 0.22);
+  transform: translateY(calc(var(--depth) * 0.75rem))
+             scale(calc(1 - var(--depth) * 0.06));
   z-index: calc(10 - var(--depth));
   transition: opacity 180ms ease-out, transform 180ms ease-out;
   animation: notification-in 160ms ease-out;
@@ -5942,16 +5953,15 @@ body[data-sidebar-hidden="true"] .notification-stack {
  * frente caia a media linea y se leia como texto cortado, o sea basura.
  * `visibility: hidden` y no `display: none` a proposito: oculta sin
  * cambiar el alto de la caja, asi el de al frente mantiene su posicion y
- * el mazo no se rearrangea al abrir y cerrar. */
-.notification-stack > .notification:not(:nth-last-child(1)) .notification__icon,
-.notification-stack > .notification:not(:nth-last-child(1)) .notification__content {
+ * el mazo no se rearrangea al abrir y cerrar.
+ *
+ * La clase la pone el componente (`--front` / `--behind`), no un
+ * `nth-last-child`: la profundidad se calcula en TS y se pasa por custom
+ * property, para que sea explicita y testeable. */
+.notification--behind .notification__icon,
+.notification--behind .notification__content {
   visibility: hidden;
 }
-
-.notification-stack > .notification:nth-last-child(1) { --depth: 0; }
-.notification-stack > .notification:nth-last-child(2) { --depth: 1; }
-.notification-stack > .notification:nth-last-child(3) { --depth: 2; }
-.notification-stack > .notification:nth-last-child(n + 4) { --depth: 3; }
 
 /* Solo la opacidad: animar `transform` aca pisaria el `transform` del mazo
  * durante la entrada y los avisos saltarian al aparecer. */

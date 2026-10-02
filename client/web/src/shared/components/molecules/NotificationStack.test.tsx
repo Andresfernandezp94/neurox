@@ -121,6 +121,44 @@ describe("NotificationStack", () => {
     expect(screen.getAllByText("repetido")).toHaveLength(3);
   });
 
+  it("cada aviso atras es mas chico que el de al frente", () => {
+    // El mazo se achica por profundidad. Con el mismo ancho, los de abajo
+    // parecian duplicados del de arriba en vez de cards de un mazo.
+    //
+    // Se asserta el custom property `--depth` que CSS usa para escalar, y
+    // no el `transform` computado: en jsdom no hay layout, asi que el
+    // `scale()` no se resuelve y testearlo daria falso verde.
+    function Push3() {
+      const notify = useNotifications();
+      return (
+        <button
+          type="button"
+          data-testid="push3"
+          onClick={() => {
+            notify.error("a");
+            notify.alert("b");
+            notify.error("c");
+          }}
+        >
+          x3
+        </button>
+      );
+    }
+    const { container } = render(
+      <NotificationsProvider>
+        <Push3 />
+        <NotificationStack />
+      </NotificationsProvider>,
+    );
+    fireEvent.click(screen.getByTestId("push3"));
+
+    const rows = Array.from(container.querySelectorAll<HTMLElement>(".notification"));
+    expect(rows).toHaveLength(3);
+    // DOM en orden de llegada, asi que el ultimo es el de al frente.
+    const depth = rows.map((r) => r.style.getPropertyValue("--depth").trim());
+    expect(depth).toEqual(["2", "1", "0"]);
+  });
+
   it("un proceso usa role=status y no interrumpe al lector", () => {
     // Un spinner no debe cortar lo que el usuario esta leyendo, asi que
     // va como `status` y no como `alert`.
