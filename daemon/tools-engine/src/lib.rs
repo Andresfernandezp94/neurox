@@ -52,4 +52,6 @@ pub use http_client::{build as build_http_client, HttpClientConfig};
 pub use providers::provider_store::ProviderStore;
 pub use sandbox::{DefaultSandbox, SandboxConfig};
 pub use state::EngineState;
-pub use tools::{ExecuteContext, Tool, ToolRegistry, ToolSpec, ToolSpecWithState};
+pub use tools::{
+    ExecuteContext, Scope, Tool, ToolRegistry, ToolSpec, ToolSpecWithState, WorkspaceScope,
+};

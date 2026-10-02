@@ -33,6 +33,14 @@ pub struct AppState {
     pub auth: AuthLayer,
     pub workspace: Arc<WorkspaceLayer>,
     pub config: Arc<CoreConfig>,
+    /// Workspaces = entornos aislados. `None` = la API de workspaces
+    /// responde 503 y toda sesion cae al sandbox global, que es el
+    /// comportamiento de antes del feature.
+    ///
+    /// Va aparte de `workspace: WorkspaceLayer` a proposito: ese layer es
+    /// el root y el sandbox GLOBAL (una sola cosa), y el nombre se
+    /// prestaba a confusion. Este es el multi-tenant.
+    pub workspaces: Option<Arc<crate::workspaces::WorkspacesLayer>>,
 }
 
 impl AppState {
@@ -53,6 +61,20 @@ impl AppState {
             auth,
             workspace,
             config,
+            workspaces: None,
         }
+    }
+
+    /// Crea el `AppState` con workspaces. Se separa de `new` a proposito:
+    /// `new` tiene seis argumentos y los tests que arman el estado a mano
+    /// (los de rutas y los de `http_e2e`) no tienen por que saber de
+    /// workspaces para que sus endpoints sigan andando.
+    #[must_use]
+    pub fn with_workspaces(
+        mut self,
+        workspaces: Arc<crate::workspaces::WorkspacesLayer>,
+    ) -> Self {
+        self.workspaces = Some(workspaces);
+        self
     }
 }

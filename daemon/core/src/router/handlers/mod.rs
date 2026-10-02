@@ -16,3 +16,4 @@ pub mod sessions;
 pub mod skills;
 pub mod tools;
 pub mod tools_admin;
+pub mod workspaces;

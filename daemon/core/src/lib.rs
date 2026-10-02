@@ -19,6 +19,7 @@ pub mod session;
 pub mod session_agents;
 pub mod skills;
 pub mod startup;
+pub mod workspaces;
 pub mod spawner;
 pub mod supervisor;
 pub mod tasks;

@@ -349,12 +349,34 @@ async fn serve(
     // Mismo Arc que el engine: ver la nota de `shared_sandbox` arriba.
     let workspace = Arc::new(WorkspaceLayer::new(
         workspace_root.clone(),
-        shared_sandbox,
+        shared_sandbox.clone(),
     ));
     let (event_tx, _) = broadcast::channel(1024);
     let events = Arc::new(EventsLayer::new(event_tx));
     let auth = AuthLayer::new()
         .with_orchestrator(local_orchestrator.clone());
+
+    // Workspaces = entornos aislados. El registro usa el MISMO Arc de
+    // sandbox global que el engine y el WorkspaceLayer (ver `shared_sandbox`),
+    // asi que "sin workspace" sigue significando exactamente lo mismo que
+    // antes del feature.
+    let workspaces_layer = neurox::workspaces::WorkspacesLayer::open(
+        &core_config.db_path,
+        shared_sandbox,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("failed to open workspaces store: {e}"))?;
+    let workspaces_count = workspaces_layer
+        .store
+        .list()
+        .await
+        .map(|w| w.len())
+        .unwrap_or(0);
+    info!(
+        db_path = %core_config.db_path.display(),
+        workspaces = workspaces_count,
+        "workspaces store opened"
+    );
 
     let state = AppState::new(
         lifecycle,
@@ -363,7 +385,8 @@ async fn serve(
         auth,
         workspace,
         Arc::new(core_config.clone()),
-    );
+    )
+    .with_workspaces(Arc::new(workspaces_layer));
 
     // EP-2026-08-15: spawn one agent subprocess per InProcess spec.
     // Extracted into startup::spawn_in_process_agents (EP-2026-08-19

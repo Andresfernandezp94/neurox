@@ -150,7 +150,29 @@ pub fn router(state: AppState) -> axum::Router {
         .route("/v1/mcps/clean", post(http::clean_mcps))
         .route("/v1/env", get(http::list_env_vars))
         .route("/v1/env/:key", put(http::put_env_var).delete(http::delete_env_var))
-        .route("/v1/sandbox", get(crate::router::handlers::sandbox::get_sandbox).put(crate::router::handlers::sandbox::put_sandbox));
+        .route("/v1/sandbox", get(crate::router::handlers::sandbox::get_sandbox).put(crate::router::handlers::sandbox::put_sandbox))
+        // Workspaces = entornos aislados, cada uno con su root y su sandbox.
+        // `sandbox-defaults` va antes que `:id` para que el path literal no
+        // lo se coma el parametro.
+        .route(
+            "/v1/workspaces",
+            get(crate::router::handlers::workspaces::list_workspaces)
+                .post(crate::router::handlers::workspaces::create_workspace),
+        )
+        .route(
+            "/v1/workspaces/sandbox-defaults",
+            get(crate::router::handlers::workspaces::get_sandbox_defaults),
+        )
+        .route(
+            "/v1/workspaces/:id",
+            get(crate::router::handlers::workspaces::get_workspace)
+                .patch(crate::router::handlers::workspaces::update_workspace)
+                .delete(crate::router::handlers::workspaces::delete_workspace),
+        )
+        .route(
+            "/v1/workspaces/:id/sandbox",
+            put(crate::router::handlers::workspaces::put_workspace_sandbox),
+        );
 
     let auth_state = state.auth.auth.clone();
     let state = Arc::new(state);
