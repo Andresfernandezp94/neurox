@@ -202,6 +202,12 @@ pub struct AgentsConfig {
 /// `AgentKind::Subprocess` plus lifecycle tunables for the pool.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionAgentSpec {
+    /// EP-0026-UX: workspace (entorno aislado) donde corre este agente por
+    /// default. Una sesion puede apartarse con su propio `workspace_id`.
+    ///
+    /// `None` = el sandbox global, o sea el comportamiento de siempre.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     /// Command to execute. Resolved by `tokio::process::Command` (PATH
     /// search applies for bare names).
     pub command: String,

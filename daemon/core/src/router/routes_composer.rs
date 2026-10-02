@@ -76,6 +76,8 @@ pub fn router(state: AppState) -> axum::Router {
         .route("/v1/sessions/:id/rename", put(http::rename_session))
         .route("/v1/sessions/:id/model", put(http::set_session_model))
         .route("/v1/sessions/:id/mode", put(http::set_session_mode))
+        // EP-0026-UX: override por sesion del workspace del agente.
+        .route("/v1/sessions/:id/workspace", put(http::set_session_workspace))
         .route("/v1/sessions/:id/tool-mode", put(http::set_session_tool_mode))
         .route("/v1/sessions/:id/temperature", put(http::set_session_temperature))
         .route("/v1/sessions/:id/cancel", post(http::cancel_session))

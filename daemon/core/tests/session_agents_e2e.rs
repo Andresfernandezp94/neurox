@@ -91,6 +91,7 @@ fn mock_spec(extra_args: &[&str], idle_timeout_secs: u64, max_sessions: Option<u
     let mut args = vec![mock_agent_path()];
     args.extend(extra_args.iter().map(|s| s.to_string()));
     SessionAgentSpec {
+        workspace_id: None,
         command: mock_agent_command(),
         args,
         env: HashMap::new(),

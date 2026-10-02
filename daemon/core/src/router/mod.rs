@@ -69,6 +69,84 @@ pub fn session_stream_timeout_secs() -> u64 {
 pub const DEFAULT_AGENT_ID: &str = "default";
 
 impl AppState {
+    /// Workspace efectivo de una sesión, como `WorkspaceScope` listo para
+    /// el `ExecuteContext`.
+    ///
+    /// Es el punto donde el aislamiento se decide: la sesión trae el id, el
+    /// id trae el root y el sandbox, y el tool usa eso en vez de su par
+    /// propio. Sin sesión, sin workspaces, o con un id que no resuelve, cae
+    /// al sandbox global con el root global: el comportamiento de antes, y
+    /// un id mal escrito no deja al agente sin permisos.
+    pub async fn scope_for_session(
+        &self,
+        session_id: uuid::Uuid,
+    ) -> tools_engine::WorkspaceScope {
+        let global_root = self.workspace.workspace_root.clone();
+        let Some(layers) = self.workspaces.as_ref() else {
+            return tools_engine::WorkspaceScope {
+                id: None,
+                root: global_root,
+                sandbox: self.workspace.sandbox.clone(),
+            };
+        };
+        let workspace_id = self
+            .lifecycle
+            .session
+            .get_workspace_id(session_id)
+            .await
+            .ok()
+            .flatten();
+        crate::workspaces::resolve_scope(
+            &layers.store,
+            &layers.registry,
+            workspace_id.as_deref(),
+            &global_root,
+        )
+        .await
+    }
+
+    /// Workspace efectivo de un agente persistente, por su `workspace_id`.
+    ///
+    /// Los agentes con session usan `scope_for_session`, que gana: es el
+    /// override por sesión. Este es el default que aplica a los agentes
+    /// persistentes y a las sesiones que no elegieron nada.
+    pub async fn scope_for_agent(&self, agent_id: &str) -> tools_engine::WorkspaceScope {
+        let global_root = self.workspace.workspace_root.clone();
+        let Some(layers) = self.workspaces.as_ref() else {
+            return tools_engine::WorkspaceScope {
+                id: None,
+                root: global_root,
+                sandbox: self.workspace.sandbox.clone(),
+            };
+        };
+        // El default del agente: su `workspace_id` en el spec. Si el agente
+        // no declara uno, se usa el workspace marcado `is_default`, que es
+        // el "entorno por defecto" del operator. Sin ninguno de los dos, el
+        // global.
+        let del_spec = self
+            .lifecycle
+            .session_agents
+            .spec(agent_id)
+            .await
+            .and_then(|s| s.workspace_id);
+        let del_agente = match del_spec {
+            Some(id) => Some(id),
+            None => layers
+                .store
+                .list()
+                .await
+                .ok()
+                .and_then(|list| list.into_iter().find(|w| w.is_default).map(|w| w.id)),
+        };
+        crate::workspaces::resolve_scope(
+            &layers.store,
+            &layers.registry,
+            del_agente.as_deref(),
+            &global_root,
+        )
+        .await
+    }
+
     /// Returns true if `agent_id` is something we can dispatch to:
     /// the in-process default, any other configured in-process
     /// agent (EP-2026-08-15 multi-agent), a registered persistent
@@ -568,7 +646,7 @@ impl AppState {
         let exec_start = std::time::Instant::now();
         let ctx = tools_engine::ExecuteContext {
             agent_id: agent.agent_id.clone(),
-            workspace: None,
+            workspace: Some(self.scope_for_session(session_id).await),
             cancel: None,
             http_client: None,
         };
@@ -1129,7 +1207,7 @@ impl AppState {
         let exec_start = std::time::Instant::now();
         let ctx = tools_engine::ExecuteContext {
             agent_id: agent_id.to_string(),
-            workspace: None,
+            workspace: Some(self.scope_for_agent(agent_id).await),
             cancel: None,
             http_client: None,
         };

@@ -41,6 +41,9 @@ pub struct SessionRecord {
     /// per-user migration — those won't appear in `list_sessions`
     /// until someone re-opens them (they're still reachable by id).
     pub user_id: Option<String>,
+    /// EP-0026-UX: workspace (entorno aislado) en el que corre esta
+    /// sesion. `None` = sandbox global, que es el comportamiento previo.
+    pub workspace_id: Option<String>,
 }
 
 type SessionRow = (
@@ -57,6 +60,7 @@ type SessionRow = (
     Option<f64>,      // 10: temperature
     Option<String>,   // 11: client_id
     Option<String>,   // 12: user_id
+    Option<String>,   // 13: workspace_id
 );
 type MessageRow = (i64, String, String, String, Option<String>, String);
 
@@ -127,6 +131,11 @@ impl SessionStore {
         // filters by user_id so each device only sees its own.
         // NULL = legacy row persisted before the migration.
         Self::ensure_column(&pool, "sessions", "user_id").await?;
+        // EP-0026-UX: workspace de la sesion (entorno aislado). NULL = el
+        // sandbox global, o sea el comportamiento de siempre. Permite que
+        // un agente con workspace por default tenga sesiones que se
+        // aparten a otro, sin perder el default.
+        Self::ensure_column(&pool, "sessions", "workspace_id").await?;
         // Index on user_id for `list_sessions_by_user` (the hot path
         // for tab syncing across devices). Without this, every tab
         // refresh does a full table scan.
@@ -224,6 +233,10 @@ impl SessionStore {
                 // are shared across every device logged in as this user.
                 ("sessions", "user_id") => {
                     "ALTER TABLE sessions ADD COLUMN user_id TEXT"
+                }
+                // EP-0026-UX: workspace de la sesion.
+                ("sessions", "workspace_id") => {
+                    "ALTER TABLE sessions ADD COLUMN workspace_id TEXT"
                 }
                 // EP-0026-rev-fix: thinking persisted per assistant message.
                 ("messages", "thinking") => {
@@ -365,7 +378,7 @@ impl SessionStore {
 
     pub async fn list_sessions(&self, limit: u32) -> anyhow::Result<Vec<SessionRecord>> {
                 let rows: Vec<SessionRow> = sqlx::query_as(
-            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id
+            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id, workspace_id
              FROM sessions ORDER BY started_at DESC LIMIT ?",
         )
         .bind(i64::from(limit))
@@ -375,7 +388,7 @@ impl SessionStore {
         Ok(rows
             .into_iter()
             .map(
-                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id)| {
+                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id, workspace_id)| {
                     SessionRecord {
                         session_id: sid,
                         agent_id: agent,
@@ -390,6 +403,7 @@ impl SessionStore {
                         temperature,
                         client_id,
                         user_id,
+                        workspace_id,
                     }
                 },
             )
@@ -408,7 +422,7 @@ impl SessionStore {
         limit: u32,
     ) -> anyhow::Result<Vec<SessionRecord>> {
         let rows: Vec<SessionRow> = sqlx::query_as(
-            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id
+            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id, workspace_id
              FROM sessions WHERE client_id = ? ORDER BY started_at DESC LIMIT ?",
         )
         .bind(client_id)
@@ -418,7 +432,7 @@ impl SessionStore {
         Ok(rows
             .into_iter()
             .map(
-                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id)| {
+                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id, workspace_id)| {
                     SessionRecord {
                         session_id: sid,
                         agent_id: agent,
@@ -433,6 +447,7 @@ impl SessionStore {
                         temperature,
                         client_id,
                         user_id,
+                        workspace_id,
                     }
                 },
             )
@@ -454,7 +469,7 @@ impl SessionStore {
         limit: u32,
     ) -> anyhow::Result<Vec<SessionRecord>> {
         let sql = if include_inactive {
-            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id
+            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id, workspace_id
              FROM sessions WHERE user_id = ? ORDER BY started_at DESC LIMIT ?"
         } else {
             // Pestanas activas: `ended_at IS NULL` Y con al menos un mensaje.
@@ -469,7 +484,7 @@ impl SessionStore {
             // Se filtra en la consulta y no en el front para que "activa"
             // tenga un solo significado en todo el sistema: el daemon, la
             // hidratacion y el WS consultan la misma definicion.
-            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id
+            "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id, workspace_id
              FROM sessions
              WHERE user_id = ? AND ended_at IS NULL
                AND EXISTS (SELECT 1 FROM messages WHERE messages.session_id = sessions.session_id)
@@ -483,7 +498,7 @@ impl SessionStore {
         Ok(rows
             .into_iter()
             .map(
-                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id)| {
+                |(sid, agent, started, ended, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id, workspace_id)| {
                     SessionRecord {
                         session_id: sid,
                         agent_id: agent,
@@ -498,6 +513,7 @@ impl SessionStore {
                         temperature,
                         client_id,
                         user_id,
+                        workspace_id,
                     }
                 },
             )
@@ -798,5 +814,137 @@ mod tests {
         s.end_session(sid, Some("listo")).await.unwrap();
         assert!(s.list_sessions_by_user("u1", false, 50).await.unwrap().is_empty());
         assert_eq!(s.list_sessions_by_user("u1", true, 50).await.unwrap().len(), 1);
+    }
+}
+
+// ─── Workspace por sesión (EP-0026-UX) ─────────────────────────────────────
+
+impl SessionStore {
+    /// Workspace de la sesión. `None` = sandbox global.
+    ///
+    /// Se lee por separado y no desde `SessionRecord` porque el dispatch de
+    /// tool calls solo tiene el `session_id`: leer una columna suelta evita
+    /// traer la fila entera en cada tool call.
+    pub async fn get_workspace_id(&self, session_id: Uuid) -> anyhow::Result<Option<String>> {
+        let v: Option<String> =
+            sqlx::query_scalar("SELECT workspace_id FROM sessions WHERE session_id = ?")
+                .bind(session_id.to_string())
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten();
+        Ok(v)
+    }
+
+    /// Fija el workspace de la sesión. `None` la deja en el global.
+    ///
+    /// No valida que el workspace exista: borrarlo tiene que poder dejar
+    /// sesiones huerfanas sin fallar, y `resolve_scope` ya cae al global
+    /// cuando el id no resuelve.
+    pub async fn set_workspace_id(
+        &self,
+        session_id: Uuid,
+        workspace_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let result = sqlx::query("UPDATE sessions SET workspace_id = ? WHERE session_id = ?")
+            .bind(workspace_id)
+            .bind(session_id.to_string())
+            .execute(&self.pool)
+            .await?;
+        if result.rows_affected() == 0 {
+            anyhow::bail!("session not found: {session_id}");
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod workspace_id_tests {
+    use super::*;
+
+    async fn store() -> (tempfile::TempDir, SessionStore) {
+        let dir = tempfile::tempdir().unwrap();
+        let s = SessionStore::open(&dir.path().join("s.db")).await.unwrap();
+        (dir, s)
+    }
+
+    /// La migracion tiene que ser idempotente: `open` corre los
+    /// `ensure_column` en cada arranque.
+    #[tokio::test]
+    async fn la_migracion_es_idempotente() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("s.db");
+        SessionStore::open(&db).await.unwrap();
+        // El segundo open encuentra la columna y no debe fallar ni duplicar.
+        SessionStore::open(&db).await.unwrap();
+        // El pool tiene que vivir la sentencia: un temporal creado en el
+        // argumento se dropea antes de que corra el query.
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}?mode=rwc", db.display()))
+            .await
+            .unwrap();
+        let cols: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM pragma_table_info('sessions') WHERE name = 'workspace_id'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cols.len(), 1, "exactamente una columna workspace_id");
+    }
+
+    #[tokio::test]
+    async fn workspace_por_defecto_es_el_global() {
+        let (_d, s) = store().await;
+        let id = Uuid::new_v4();
+        s.start_session(id, "default").await.unwrap();
+        assert_eq!(
+            s.get_workspace_id(id).await.unwrap(),
+            None,
+            "una sesion nueva arranca en el sandbox global"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_y_get_workspace() {
+        let (_d, s) = store().await;
+        let id = Uuid::new_v4();
+        s.start_session(id, "default").await.unwrap();
+
+        s.set_workspace_id(id, Some("sixbell")).await.unwrap();
+        assert_eq!(s.get_workspace_id(id).await.unwrap().as_deref(), Some("sixbell"));
+
+        // Volver a None la deja en el global.
+        s.set_workspace_id(id, None).await.unwrap();
+        assert_eq!(s.get_workspace_id(id).await.unwrap(), None);
+    }
+
+    /// El id no se valida al escribir: borrar un workspace tiene que poder
+    /// dejar sesiones huerfanas sin que el write falle.
+    #[tokio::test]
+    async fn acepta_un_workspace_inexistente() {
+        let (_d, s) = store().await;
+        let id = Uuid::new_v4();
+        s.start_session(id, "default").await.unwrap();
+        s.set_workspace_id(id, Some("no-existe")).await.unwrap();
+        assert_eq!(s.get_workspace_id(id).await.unwrap().as_deref(), Some("no-existe"));
+    }
+
+    /// Sesion inexistente: error, no un "ok" silencioso.
+    #[tokio::test]
+    async fn sesion_inexistente_da_error() {
+        let (_d, s) = store().await;
+        assert!(s.set_workspace_id(Uuid::new_v4(), Some("x")).await.is_err());
+    }
+
+    /// El id tiene que sobrevivir el round trip por `SessionRecord`, que es
+    /// lo que ve el front.
+    #[tokio::test]
+    async fn el_workspace_viaja_en_el_record() {
+        let (_d, s) = store().await;
+        let id = Uuid::new_v4();
+        s.start_session(id, "default").await.unwrap();
+        s.set_workspace_id(id, Some("sixbell")).await.unwrap();
+
+        let rows = s.list_sessions(10).await.unwrap();
+        let r = rows.iter().find(|r| r.session_id == id.to_string()).unwrap();
+        assert_eq!(r.workspace_id.as_deref(), Some("sixbell"));
     }
 }

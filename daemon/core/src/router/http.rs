@@ -488,6 +488,9 @@ pub async fn list_agents(State(state): State<Arc<AppState>>) -> Json<serde_json:
 pub struct RegisterInProcessAgentReq {
     pub id: String,
     pub identity_dir: String,
+    /// EP-0026-UX: workspace por default de este agente. Las sesiones
+    /// pueden apartarse con su propio `workspace_id`.
+    pub workspace_id: Option<String>,
     pub command: Option<String>,
     pub args: Option<Vec<String>>,
     pub idle_timeout_secs: Option<u64>,
@@ -612,6 +615,7 @@ pub async fn register_in_process_agent(
     }
 
     let spec = SessionAgentSpec {
+        workspace_id: req.workspace_id.clone(),
         command: command.clone(),
         args: args.clone(),
         env: std::collections::HashMap::new(),
@@ -984,6 +988,24 @@ pub async fn create_session(
             "session persist failed (non-fatal)"
         );
     }
+    // EP-0026-UX: workspace de la sesion (entorno aislado). Se persiste
+    // aparte de `start_session_for_user` porque ese INSERT no lo escribe.
+    //
+    // No se valida que exista: un id que no resuelve cae al sandbox global
+    // en `AppState::scope_for_session`, que es el comportamiento de antes.
+    // Rechazar aca dejaria al usuario sin poder abrir una conversacion por
+    // un typo en un id.
+    if let Some(ws) = body.get("workspace_id").and_then(|v| v.as_str()) {
+        if let Err(e) = state
+            .lifecycle
+            .session
+            .set_workspace_id(session_id, Some(ws))
+            .await
+        {
+            tracing::warn!(session_id = %session_id, workspace_id = %ws, error = %e, "workspace_id set failed");
+        }
+    }
+
     // Telemetry tag — kept for diagnostic views (which device opened
     // the session). No longer used for list partitioning.
     if let Some(ref cid) = client_id {
@@ -2115,6 +2137,73 @@ pub async fn get_session_agent(
 }
 
 /// POST /v1/sessions/:id/agent/restart — kill + respawn the session's subprocess.
+/// PUT /v1/sessions/:id/workspace — mueve la sesion a otro workspace.
+///
+/// El override por sesion: el agente tiene su `workspace_id` por default y
+/// esto lo aparta sin tocar el agente. Es lo que permite tener una
+/// conversacion de trabajo en Sixbell y otra en projects con el mismo
+/// agente.
+///
+/// Body: `{"workspace_id": "sixbell"}` o `{"workspace_id": null}` para
+/// volver al sandbox global.
+pub async fn set_session_workspace(
+    State(state): State<Arc<AppState>>,
+    user: UserContext,
+    Path(session_id): Path<Uuid>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Mismo chequeo de ownership que el resto de la API de sesion: 404 y
+    // no 403, para no filtrar la existencia de una sesion ajena.
+    match state.lifecycle.session.get_session_user(session_id).await {
+        Ok(Some(owner)) if owner == user.user_id.to_string() => {}
+        _ => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                format!("session not found: {session_id}"),
+            ))
+        }
+    }
+
+    let workspace_id = match body.get("workspace_id") {
+        Some(serde_json::Value::Null) | None => None,
+        Some(serde_json::Value::String(s)) => {
+            if s.trim().is_empty() {
+                None
+            } else {
+                Some(s.clone())
+            }
+        }
+        Some(_) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "workspace_id must be a string or null".to_string(),
+            ))
+        }
+    };
+
+    state
+        .lifecycle
+        .session
+        .set_workspace_id(session_id, workspace_id.as_deref())
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("set workspace: {e}")))?;
+
+    // Se devuelve el scope efectivo, para que el front pueda mostrar que
+    // quedo aplicado (root y permisos de verdad) en vez de asumirlo.
+    let scope = state.scope_for_session(session_id).await;
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "session_id": session_id,
+        "workspace_id": workspace_id,
+        "effective": {
+            "workspace_id": scope.id,
+            "root": scope.root.to_string_lossy(),
+            "writable_paths": scope.sandbox.read().await.writable_paths_resolved(&scope.root),
+            "readable_paths": scope.sandbox.read().await.readable_paths_resolved(&scope.root),
+        }
+    })))
+}
+
 pub async fn restart_session_agent(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<Uuid>,
