@@ -348,13 +348,13 @@ function ConfigureModal({ model, onClose, onSaved }: ConfigureModalProps) {
               />
             </Stack>
             <Stack gap="sm">
-              <Label>system</Label>
+              <Label>system prompt</Label>
               <textarea
                 className="input"
                 rows={3}
-                value={config.system ?? ""}
+                value={config.system_prompt ?? ""}
                 onChange={(e) =>
-                  setConfig({ ...config, system: e.target.value })
+                  setConfig({ ...config, system_prompt: e.target.value })
                 }
               />
             </Stack>

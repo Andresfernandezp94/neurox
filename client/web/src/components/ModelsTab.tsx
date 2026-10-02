@@ -413,6 +413,7 @@ export function ModelsTab() {
                   <span className="muted text-sm">{items.length}</span>
                 </div>
               )}
+              <div className="models-tab__model-list">
               {items.map((m) => {
                 const isActive = m.path === activeLocalPath;
                 const isSelected = editing?.path === m.path;
@@ -426,6 +427,16 @@ export function ModelsTab() {
                     title={m.path}
                     data-testid={`model-row-${m.filename}`}
                     onClick={() => setEditing(m)}
+                    // Un <button> nativo dispara click con Enter y Espacio
+                    // en el navegador, pero no con `fireEvent.keyDown` en
+                    // jsdom. El onKeyDown explícito cubre ambos caminos y
+                    // deja el comportamiento igual en los dos entornos.
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setEditing(m);
+                      }
+                    }}
                   >
                     {fam ? (
                       <FamilyLogo id={fam} className="provider-logo" />
@@ -440,6 +451,7 @@ export function ModelsTab() {
                   </button>
                 );
               })}
+              </div>
             </Fragment>
           ))}
         </section>
@@ -724,8 +736,10 @@ function ConfigurePanel({
                   className="input"
                   rows={4}
                   placeholder="System prompt for this model"
-                  value={config.system ?? ""}
-                  onChange={(e) => setConfig({ ...config, system: e.target.value })}
+                  value={config.system_prompt ?? ""}
+                  onChange={(e) =>
+                    setConfig({ ...config, system_prompt: e.target.value })
+                  }
                   data-testid="cfg-system"
                 />
               </div>

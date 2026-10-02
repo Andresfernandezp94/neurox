@@ -191,7 +191,12 @@ export interface ModelConfig {
   max_tokens?: number;
   tokens_per_second?: number;
   stop_sequences?: string[];
-  system?: string;
+  /**
+   * El daemon lo llama `system_prompt`, no `system`. Con `system` el PUT
+   * devolvía 200 y guardaba solo el resto: el system prompt se perdía en
+   * silencio, sin error visible.
+   */
+  system_prompt?: string;
 }
 
 /** `GET /v1/llm/models/hf?search=...` — Hugging Face search results. */

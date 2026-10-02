@@ -3706,10 +3706,28 @@ pub async fn get_model_config(
         .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e))?;
     match cfg {
         Some(c) => Ok(Json(serde_json::to_value(&c).unwrap_or(serde_json::Value::Null))),
-        None => Err((
-            axum::http::StatusCode::NOT_FOUND,
-            format!("model config not found for {}", path.display()),
-        )),
+        // Sin fila guardada se devuelve un config VACIO, no 404.
+        //
+        // Una config vacía y "no existe el modelo" son cosas distintas: la
+        // tabla `model_configs` guarda solo lo que el operador setea, así que
+        // TODO modelo sin tocar es indistinguible de uno inexistente para el
+        // store. Con 404 el front pintaba un banner de error rojo en la
+        // pantalla de configuración de cada modelo recien descargado, que es
+        // el estado inicial de cualquiera.
+        //
+        // Un config vacío con todos los campos en None significa "todo por
+        // defecto", que es exactamente lo que hay que mostrar para que el
+        // operador pueda cargar los valores.
+        None => Ok(Json(serde_json::to_value(tools_engine::model_configs::ModelConfig {
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            max_tokens: None,
+            tokens_per_second: None,
+            stop_sequences: None,
+            system_prompt: None,
+        })
+        .unwrap_or(serde_json::Value::Null))),
     }
 }
 

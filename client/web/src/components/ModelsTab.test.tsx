@@ -252,6 +252,46 @@ describe("ModelsTab inline configuration panel", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders rows with the project's own typography, not the browser default", async () => {
+    // El proyecto no tiene reset global de `button`. Una fila <button> sin
+    // `font: inherit` se renderiza con la tipografía por defecto del
+    // navegador y con el fondo gris del user agent: se ve como una card sin
+    // estilos. Esta clase es la que lo previene.
+    mockLocal();
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+      ).toBeInTheDocument();
+    });
+    const row = screen.getByTestId(
+      "model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    );
+    expect(row.className).toContain("models-tab__model-row");
+    // El contenedor es el que lleva el gap entre filas; sin el, los
+    // <button> secuenciales se leen pegados.
+    expect(row.parentElement).toHaveClass("models-tab__model-list");
+  });
+
+  it("keeps every row focusable for keyboard navigation", async () => {
+    mockLocal();
+    vi.mocked(modelsApi.getModelConfig).mockResolvedValue({} as never);
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+      ).toBeInTheDocument();
+    });
+    // Seleccionar con Enter tiene que funcionar igual que con click: es un
+    // <button> nativo, no un div con onClick.
+    const row = screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf");
+    row.focus();
+    fireEvent.keyDown(row, { key: "Enter" });
+    await waitFor(() => {
+      expect(screen.getByTestId("cfg-temperature")).toBeInTheDocument();
+    });
+  });
+
   it("loads and shows the config of the model the operator clicked", async () => {
     mockLocal();
     vi.mocked(modelsApi.getModelConfig).mockResolvedValue({
@@ -412,6 +452,107 @@ describe("ModelsTab inline configuration panel", () => {
       },
       { timeout: 500 },
     );
+  });
+});
+
+describe("ModelsTab config persistence against the real API shape", () => {
+  const m = {
+    filename: "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    path: "/models/chat/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    size_bytes: 468_000_000,
+    category: "chat",
+  };
+
+  beforeEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    vi.mocked(modelsApi.getLocalModels).mockResolvedValue({
+      dir: "/models",
+      env_var: "NEUROX_MODELS_DIR",
+      models: [m],
+    } as never);
+    vi.mocked(llmApi.getProviders).mockResolvedValue({
+      providers: [],
+      default_provider: "",
+      default_model: "",
+    } as never);
+  });
+
+  it("reads the config from the row shape the daemon returns", async () => {
+    // El daemon devuelve `{ config, filename, updated_at }`, no el
+    // ModelConfig pelado. Sin desenvolver, todos los campos salían
+    // undefined y el panel se veía vacío con config ya guardada.
+    vi.mocked(modelsApi.getModelConfig).mockResolvedValue({
+      temperature: 0.42,
+      system_prompt: "soy un system prompt",
+    } as never);
+
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(screen.getByTestId("model-row-qwen2.5-0.5b-instruct-q4_k_m.gguf"))
+        .toBeInTheDocument();
+    });
+    fireEvent.click(
+      screen.getByTestId("model-row-qwen2.5-0.5b-instruct-q4_k_m.gguf"),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("cfg-temperature")).toHaveValue(0.42);
+    });
+    expect(screen.getByTestId("cfg-system")).toHaveValue(
+      "soy un system prompt",
+    );
+  });
+
+  it("sends the system prompt under the field name the daemon expects", async () => {
+    // `system_prompt`, no `system`: el daemon descarta campos desconocidos
+    // en silencio y el PUT respondía 200 guardando solo el resto.
+    vi.mocked(modelsApi.getModelConfig).mockResolvedValue({} as never);
+    vi.mocked(modelsApi.putModelConfig).mockResolvedValue({} as never);
+
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(screen.getByTestId("model-row-qwen2.5-0.5b-instruct-q4_k_m.gguf"))
+        .toBeInTheDocument();
+    });
+    fireEvent.click(
+      screen.getByTestId("model-row-qwen2.5-0.5b-instruct-q4_k_m.gguf"),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("cfg-system")).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByTestId("cfg-system"), {
+      target: { value: "nuevo prompt" },
+    });
+    fireEvent.click(screen.getByTestId("cfg-save"));
+
+    await waitFor(() => {
+      expect(modelsApi.putModelConfig).toHaveBeenCalledWith(
+        m.filename,
+        expect.objectContaining({ system_prompt: "nuevo prompt" }),
+      );
+    });
+    expect(modelsApi.putModelConfig).not.toHaveBeenCalledWith(
+      m.filename,
+      expect.objectContaining({ system: expect.anything() }),
+    );
+  });
+
+  it("handles an empty config for a model that was never configured", async () => {
+    // El daemon devuelve `{}` cuando no hay fila: es el estado inicial de
+    // cualquier modelo recien descargado, no un error.
+    vi.mocked(modelsApi.getModelConfig).mockResolvedValue({} as never);
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(screen.getByTestId("model-row-qwen2.5-0.5b-instruct-q4_k_m.gguf"))
+        .toBeInTheDocument();
+    });
+    fireEvent.click(
+      screen.getByTestId("model-row-qwen2.5-0.5b-instruct-q4_k_m.gguf"),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("cfg-temperature")).toHaveValue(null);
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
 
