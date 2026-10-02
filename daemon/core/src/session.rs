@@ -457,9 +457,23 @@ impl SessionStore {
             "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id
              FROM sessions WHERE user_id = ? ORDER BY started_at DESC LIMIT ?"
         } else {
-            // Active tabs only: ended_at IS NULL.
+            // Pestanas activas: `ended_at IS NULL` Y con al menos un mensaje.
+            //
+            // El filtro de mensajes es lo que implementa "una sesion solo
+            // persiste si se manda un mensaje". `POST /v1/sessions` crea el
+            // registro al abrir la pestana, y si el usuario nunca escribe
+            // queda con `ended_at = NULL` para siempre: la hidratacion del
+            // front lo mapeaba a una ventana de chat y se acumulaban
+            // ventanas vacias (9 sesiones, 8 sin un solo mensaje).
+            //
+            // Se filtra en la consulta y no en el front para que "activa"
+            // tenga un solo significado en todo el sistema: el daemon, la
+            // hidratacion y el WS consultan la misma definicion.
             "SELECT session_id, agent_id, started_at, ended_at, summary, provider_id, model, tokens_used, ui_mode, tool_mode, temperature, client_id, user_id
-             FROM sessions WHERE user_id = ? AND ended_at IS NULL ORDER BY started_at DESC LIMIT ?"
+             FROM sessions
+             WHERE user_id = ? AND ended_at IS NULL
+               AND EXISTS (SELECT 1 FROM messages WHERE messages.session_id = sessions.session_id)
+             ORDER BY started_at DESC LIMIT ?"
         };
         let rows: Vec<SessionRow> = sqlx::query_as(sql)
             .bind(user_id)
@@ -724,3 +738,65 @@ impl SessionStore {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    async fn store() -> (TempDir, SessionStore) {
+        let tmp = TempDir::new().unwrap();
+        let s = SessionStore::open(&tmp.path().join("sessions.db")).await.unwrap();
+        (tmp, s)
+    }
+
+    /// `include_inactive = false` define las pestanas activas. Una sesion
+    /// que se creo pero nunca recibio un mensaje NO es una pestana: queda
+    /// `ended_at = NULL` para siempre y, sin este filtro, cada ventana de
+    /// chat abierta sin escribir dejaba una sesion activa permanente que
+    /// la hidratacion del front convertia en otra ventana al recargar.
+    #[tokio::test]
+    async fn active_list_excludes_sessions_without_messages() {
+        let (_tmp, s) = store().await;
+        let used = Uuid::new_v4();
+        let empty = Uuid::new_v4();
+        s.start_session_for_user(used, "default", "u1").await.unwrap();
+        s.start_session_for_user(empty, "default", "u1").await.unwrap();
+        s.log_message(used, "user", "hola", None).await.unwrap();
+
+        let active = s.list_sessions_by_user("u1", false, 50).await.unwrap();
+        let ids: Vec<String> = active.iter().map(|r| r.session_id.clone()).collect();
+        assert!(ids.contains(&used.to_string()), "la sesion con mensaje va");
+        assert!(
+            !ids.contains(&empty.to_string()),
+            "la sesion sin mensaje NO va: no llego a usarse"
+        );
+    }
+
+    /// El filtro es solo de la lista de activas: con `include_inactive`
+    /// la sesion vacia sigue existiendo y se puede recuperar.
+    #[tokio::test]
+    async fn include_inactive_still_returns_empty_sessions() {
+        let (_tmp, s) = store().await;
+        let empty = Uuid::new_v4();
+        s.start_session_for_user(empty, "default", "u1").await.unwrap();
+
+        let all = s.list_sessions_by_user("u1", true, 50).await.unwrap();
+        assert!(all.iter().any(|r| r.session_id == empty.to_string()));
+    }
+
+    /// Cerrar la sesion la saca de las activas aunque tenga mensajes, y
+    /// con un mensaje sola no basta para reabrirla como pestana.
+    #[tokio::test]
+    async fn ended_session_with_messages_is_not_active() {
+        let (_tmp, s) = store().await;
+        let sid = Uuid::new_v4();
+        s.start_session_for_user(sid, "default", "u1").await.unwrap();
+        s.log_message(sid, "user", "hola", None).await.unwrap();
+        assert_eq!(s.list_sessions_by_user("u1", false, 50).await.unwrap().len(), 1);
+
+        s.end_session(sid, Some("listo")).await.unwrap();
+        assert!(s.list_sessions_by_user("u1", false, 50).await.unwrap().is_empty());
+        assert_eq!(s.list_sessions_by_user("u1", true, 50).await.unwrap().len(), 1);
+    }
+}

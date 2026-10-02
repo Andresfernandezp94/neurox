@@ -55,7 +55,12 @@ export interface ModelSelection {
 }
 
 export interface ModelSelectorProps {
-  sessionId: string;
+  /**
+   * `null` cuando la pestana todavia no tiene sesion: la sesion se crea
+   * al mandar el primer mensaje. El modelo elegido se guarda igual en la
+   * tab y se aplica a la sesion en el momento de crearla.
+   */
+  sessionId: string | null;
   currentModel?: ModelSelection | null;
   onChange?: (selection: ModelSelection) => void;
   disabled?: boolean;
@@ -272,11 +277,19 @@ export function ModelSelector({
       setSaving(true);
       setError(null);
       try {
-        await setSessionModel(sessionId, parsed.provider_id, parsed.model);
+        // Sin sesion todavia no hay fila a la que escribirle el modelo. No
+        // es un error: la eleccion vive en la tab y `ensureSessionForTab`
+        // la aplica al crear la sesion. La preferencia del usuario si se
+        // persiste siempre, porque es global a el.
+        if (sessionId) {
+          await setSessionModel(sessionId, parsed.provider_id, parsed.model);
+        }
         // Persiste como preferencia del usuario (`/v1/llm/prefs`), no solo
         // en la sesión. Sin esto, abrir otra pestaña pierde la elección.
         await setLlmPrefs(parsed.provider_id, parsed.model);
         setPrefSource("user");
+        // Se llama siempre, tambien sin sesion: es lo que guarda el modelo
+        // en la tab y lo hace usable para el primer mensaje.
         onChange?.(parsed);
         setOpen(false);
       } catch (err) {

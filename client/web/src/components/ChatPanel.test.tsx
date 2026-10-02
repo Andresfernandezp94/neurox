@@ -1,10 +1,13 @@
-// EP-0026-01 R3.2: tests del auto-create de session backend.
+// Tests de la sesion perezosa del ChatPanel.
 //
-// El ChatPanel debe llamar a createSession con el agent_id de la
-// tab activa (default "default") cuando el sessionId es null, y
-// persistir el session_id retornado vía updateTab. El <textarea>
-// debe pasar de "Connecting…" (disabled) a "Type a message…"
-// (enabled) una vez que el sessionId se setea.
+// El ChatPanel NO crea la sesion al montar ni al abrir la pestana: la crea
+// cuando el usuario manda el primer mensaje, con el agent_id resuelto desde
+// `/v1/agents`, y manda ese primer mensaje a la sesion recien creada.
+//
+// Reemplazan a los de EP-0026-01 R3.2, que fijaban el contrato contrario
+// (auto-create al activar la pestana, textarea deshabilitado con
+// placeholder "Connecting…" hasta que la sesion existiera). Ese contrato es
+// lo que producia las ventanas de chat vacias acumuladas.
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +21,7 @@ vi.mock("../api/sessions", async (importOriginal) => {
     createSession: vi.fn(),
     listSessions: vi.fn().mockResolvedValue({ sessions: [] }),
     getSessionMessages: vi.fn().mockResolvedValue({ messages: [] }),
-    streamMessage: vi.fn(),
+    streamMessage: vi.fn().mockResolvedValue(undefined),
     cancelSession: vi.fn(),
     renameSession: vi.fn(),
   };
@@ -46,10 +49,11 @@ vi.mock("../api/default", () => ({
 }));
 
 import { ChatPanel } from "./ChatPanel";
-import { createSession } from "../api/sessions";
+import { createSession, streamMessage } from "../api/sessions";
 import { StoreProvider } from "../store/StoreContext";
 
 const mockCreateSession = createSession as ReturnType<typeof vi.fn>;
+const mockStreamMessage = streamMessage as ReturnType<typeof vi.fn>;
 const TEST_AGENT_ID = "default";
 
 /**
@@ -118,7 +122,7 @@ function withStore({ children }: { children: ReactNode }) {
   );
 }
 
-describe("ChatPanel — auto-create session (EP-0026-01 R2)", () => {
+describe("ChatPanel — sesion perezosa (se crea al primer mensaje)", () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.clearAllMocks();
@@ -129,7 +133,13 @@ describe("ChatPanel — auto-create session (EP-0026-01 R2)", () => {
     vi.restoreAllMocks();
   });
 
-  it("calls createSession with the agent_id resolved from /v1/agents", async () => {
+  // La sesion se crea cuando el usuario manda el primer mensaje, no al
+  // montar el panel ni al abrir la pestana. Antes se creaba en los dos
+  // momentos, y como una sesion sin mensajes queda `ended_at = NULL`
+  // para siempre, cada ventana abierta sin escribir dejaba una sesion
+  // activa permanente (se acumularon 9, 8 de ellas vacias).
+
+  it("does NOT create a session on mount", async () => {
     mockCreateSession.mockResolvedValue({
       session_id: "test-123",
       agent_id: TEST_AGENT_ID,
@@ -137,12 +147,13 @@ describe("ChatPanel — auto-create session (EP-0026-01 R2)", () => {
 
     render(<ChatPanel />, { wrapper: withStore });
 
-    await waitFor(() => {
-      expect(mockCreateSession).toHaveBeenCalledWith(TEST_AGENT_ID);
-    });
+    // Dejamos correr los efectos iniciales.
+    await screen.findByTestId("chat-input");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mockCreateSession).not.toHaveBeenCalled();
   });
 
-  it("enables the <textarea> after the session is created", async () => {
+  it("creates the session on the first message, with the resolved agent_id", async () => {
     mockCreateSession.mockResolvedValue({
       session_id: "test-123",
       agent_id: TEST_AGENT_ID,
@@ -151,38 +162,91 @@ describe("ChatPanel — auto-create session (EP-0026-01 R2)", () => {
     render(<ChatPanel />, { wrapper: withStore });
 
     const textarea = await screen.findByTestId("chat-input");
-    // Before the response: disabled + placeholder "Connecting…".
-    // After the response: enabled + placeholder "Type a message…".
+    fireEvent.change(textarea, { target: { value: "hola" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+
     await waitFor(() => {
-      expect(textarea).not.toBeDisabled();
+      expect(mockCreateSession).toHaveBeenCalledWith(TEST_AGENT_ID);
     });
+  });
+
+  it("sends the first message to the session it just created", async () => {
+    mockCreateSession.mockResolvedValue({
+      session_id: "test-123",
+      agent_id: TEST_AGENT_ID,
+    });
+
+    render(<ChatPanel />, { wrapper: withStore });
+
+    const textarea = await screen.findByTestId("chat-input");
+    fireEvent.change(textarea, { target: { value: "hola" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+
+    // El id de sesion viene del POST, no del closure del render (que aun
+    // era ""). Si el override no llegara, el POST del mensaje iria a
+    // `/v1/sessions//messages`.
+    await waitFor(() => {
+      expect(mockStreamMessage).toHaveBeenCalledTimes(1);
+    });
+    const [sid, agentId, text] = mockStreamMessage.mock.calls[0];
+    expect(sid).toBe("test-123");
+    expect(agentId).toBe(TEST_AGENT_ID);
+    expect(text).toBe("hola");
+  });
+
+  it("the <textarea> is usable before any session exists", async () => {
+    mockCreateSession.mockResolvedValue({
+      session_id: "test-123",
+      agent_id: TEST_AGENT_ID,
+    });
+
+    render(<ChatPanel />, { wrapper: withStore });
+
+    // Gatear el textarea por `sessionId` era un deadlock: sin sesion no se
+    // puede escribir, y sin escribir no hay sesion que crear.
+    const textarea = await screen.findByTestId("chat-input");
+    expect(textarea).not.toBeDisabled();
     expect(textarea.getAttribute("placeholder")).toMatch(/Type a message/);
   });
 
-  it("logs the error and keeps the textarea disabled when createSession fails", async () => {
+  it("surfaces the error and keeps the message unsent when the session cannot be created", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     mockCreateSession.mockRejectedValue(new Error("backend boom"));
 
     render(<ChatPanel />, { wrapper: withStore });
 
-    // createSession was attempted.
-    await waitFor(() => {
-      expect(mockCreateSession).toHaveBeenCalled();
-    });
+    const textarea = await screen.findByTestId("chat-input");
+    fireEvent.change(textarea, { target: { value: "hola" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
 
-    // The textarea stays disabled (we don't wait for it to enable
-    // because the request failed). After a tick, the error is
-    // logged.
+    // El mensaje NO se manda: sin sesion no hay a donde mandarlo.
     await waitFor(() => {
-      expect(consoleError).toHaveBeenCalledWith(
-        "createSession failed",
-        expect.any(Error),
-      );
+      expect(screen.getByText(/Could not start the session/i)).toBeTruthy();
     });
-    const textarea = screen.getByTestId("chat-input");
-    expect(textarea).toBeDisabled();
+    expect(mockStreamMessage).not.toHaveBeenCalled();
 
     consoleError.mockRestore();
+  });
+
+  it("does NOT wipe what the user typed while the first tab was being set up", async () => {
+    // Regresion: el efecto de "reset input on tab switch" corria tambien
+    // cuando `activeId` pasaba de null al id de la primera pestana, que es
+    // la inicializacion y no un cambio de pestana. Con el textarea
+    // deshabilitado durante esa ventana era invisible; con la sesion
+    // perezosa el usuario puede escribir y perdia el texto.
+    mockCreateSession.mockResolvedValue({
+      session_id: "test-123",
+      agent_id: TEST_AGENT_ID,
+    });
+
+    render(<ChatPanel />, { wrapper: withStore });
+
+    const textarea = await screen.findByTestId("chat-input");
+    // Escribimos de inmediato, antes de que la hidratacion asiente el
+    // `activeId` de la pestana draft.
+    fireEvent.change(textarea, { target: { value: "hola" } });
+    await new Promise((r) => setTimeout(r, 100));
+    expect((textarea as HTMLTextAreaElement).value).toBe("hola");
   });
 
   // EP-hide-header-followup (2026-08-15): changed the keyboard
@@ -199,14 +263,10 @@ describe("ChatPanel — auto-create session (EP-0026-01 R2)", () => {
       return render(<ChatPanel />, { wrapper: withStore });
     }
 
-    // Wait until the textarea is enabled (placeholder switched
-    // from "Connecting…" → "Type a message…" once the session is up).
+    // El textarea ya no espera a que exista la sesion: se habilita al
+    // montar. Asi que no hay nada que esperar.
     async function readyTextarea() {
-      const textarea = await screen.findByTestId("chat-input");
-      await waitFor(() => {
-        expect(textarea).not.toBeDisabled();
-      });
-      return textarea;
+      return screen.findByTestId("chat-input");
     }
 
     it("bare Enter does NOT send", async () => {

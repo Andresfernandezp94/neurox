@@ -77,13 +77,14 @@ export function ChatFooter({
       <div className="chat__footer-body">
         {/* Tools bar */}
         <div className="chat__bar chat__bar--tools">
-          {sessionId && (
-            <ModelSelector
-              sessionId={sessionId}
-              currentModel={sessionModel}
-              onChange={onChangeModel}
-            />
-          )}
+          {/* El selector se monta tambien sin sesion: el modelo elegido
+              vive en la tab (`sessionModel`) y se aplica a la sesion en el
+              momento de crearla, no antes. */}
+          <ModelSelector
+            sessionId={sessionId}
+            currentModel={sessionModel}
+            onChange={onChangeModel}
+          />
           <div className="chat__bar-actions">
             <AgentSelector currentAgent={currentAgent} onChange={onChangeAgent} />
             <button
@@ -193,8 +194,12 @@ export function ChatFooter({
               value={input}
               onChange={(e) => onInputChange(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder={sessionId ? "Type a message…" : "Connecting…"}
-              disabled={!sessionId || isStreaming}
+              // La sesion se crea al mandar el primer mensaje, asi que el
+              // textarea NO puede depender de `sessionId`: gatearlo dejaba
+              // al usuario sin poder escribir, y sin escribir no habia
+              // sesion que crear. Solo el streaming lo deshabilita.
+              placeholder="Type a message…"
+              disabled={isStreaming}
               data-testid="chat-input"
               rows={1}
             />
@@ -225,7 +230,7 @@ export function ChatFooter({
                   // selector before the chat can send anything —
                   // previously the daemon's default model was
                   // preselected silently, which surprised new users.
-                  disabled={!sessionId || !sessionModel || input.trim() === ""}
+                  disabled={!sessionModel || input.trim() === ""}
                   title={
                     !sessionModel
                       ? "Pick a model first"

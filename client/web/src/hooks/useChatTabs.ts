@@ -21,7 +21,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message, MessageMetrics } from "../types";
 import type { ModelSelection } from "../components/ModelSelector";
 import { apiGet, apiPost, getToken } from "../api/client";
-import { getWebClientId } from "../shared/clientId";
+import { createSession } from "../api/sessions";
+import { setSessionModel } from "../api/llm";
 import {
   applyStreamChunk as applyChunkToMessage,
   initAccumulator,
@@ -475,10 +476,23 @@ export function useChatTabs(defaultAgentId: string | null = null) {
   }, []);
 
   // First-time UX: if the user has no active sessions yet, auto-create
-  // an empty "draft" tab so the chat panel isn't empty. The first
-  // message they send will create the actual session.
+  // an empty "draft" tab so the chat panel isn't empty. The draft has no
+  // `sessionId`: the session is created on the first message the user
+  // sends, not here.
+  //
+  // `draftCreatedRef` lo hace idempotente. Sin el, en dev StrictMode monta,
+  // desmonta y remonta: el efecto corre dos veces y en la segunda
+  // `tabs.length` Todavía es 0 en el closure (el `setTabs` de la primera
+  // corrida todavía no se aplicó), así que creaba una segunda tab. El
+  // síntoma era recargar y ver dos chats vacíos.
+  //
+  // El ref persiste entre el desmontaje simulado de StrictMode, que es
+  // justo lo que lo hace sirve.
+  const draftCreatedRef = useRef(false);
   useEffect(() => {
+    if (draftCreatedRef.current) return;
     if (loaded && tabs.length === 0 && activeId === null) {
+      draftCreatedRef.current = true;
       const fresh: ChatTab = {
         id: uuid(),
         title: "Chat 1",
@@ -521,11 +535,20 @@ export function useChatTabs(defaultAgentId: string | null = null) {
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? null;
 
+  /**
+   * Abre una pestana NUEVA en la UI. No crea la sesion en el daemon.
+   *
+   * La sesion se crea recien cuando el usuario manda el primer mensaje
+   * (ver `ensureSessionForTab`). Antes se creaba acá y en un efecto de
+   * ChatPanel al activar la pestana, y como una sesion sin mensajes queda
+   * `ended_at = NULL` para siempre, cada pestana abierta sin escribir
+   * dejaba una sesion activa permanente: se acumularon 9 sesiones, 8 de
+   * ellas sin un solo mensaje, y cada recarga abria 9 ventanas de chat.
+   *
+   * El click del usuario es el unico momento en que se abre una ventana
+   * nueva. Al cargar solo hay una.
+   */
   const createTab = useCallback(async () => {
-    // Server-side: POST creates the session, returns session_id. The
-    // WS broadcast will fire SessionStarted, but we also optimistically
-    // add the tab here so the UI moves instantly without waiting for
-    // the round-trip.
     const id = uuid();
     const tab: ChatTab = {
       id,
@@ -541,24 +564,6 @@ export function useChatTabs(defaultAgentId: string | null = null) {
     };
     setTabs((prev) => [...prev, tab]);
     setActiveId(id);
-
-    try {
-      const res = await apiPost<{
-        session_id: string;
-        agent_id: string;
-      }>("/v1/sessions", {
-        agent_id: defaultAgentId ?? "default",
-        client_id: getWebClientId(),
-      });
-      seenSessions.current.add(res.session_id);
-      setTabs((prev) =>
-        prev.map((t) =>
-          t.id === id ? { ...t, sessionId: res.session_id, sessionAgent: res.agent_id } : t,
-        ),
-      );
-    } catch (e) {
-      console.error("useChatTabs: failed to create session", e);
-    }
     return tab;
   }, [tabs.length, defaultAgentId]);
 
@@ -1010,12 +1015,78 @@ export function useChatTabs(defaultAgentId: string | null = null) {
     streamMessageIdsRef.current.delete(sessionId);
   }, []);
 
+  /**
+   * Crea la sesion en el daemon para una pestana que todavia no tiene
+   * `sessionId`, y devuelve el id. Idempotente.
+   *
+   * Se invoca desde `handleSend`, no al abrir la pestana: la sesion tiene
+   * que existir solo si el usuario mando un mensaje. Crearla al abrir
+   * dejaba una sesion activa permanente por cada pestana que se abria sin
+   * escribir, y esas se acumulaban como ventanas vacias al recargar.
+   *
+   * Dos llamadas concurrentes (doble click, dos pestanas enviando a la vez)
+   * comparten la misma promesa para no crear dos sesiones.
+   */
+  const sessionCreationRef = useRef<Map<string, Promise<string>>>(new Map());
+  const ensureSessionForTab = useCallback(
+    async (tab: ChatTab): Promise<string | null> => {
+      if (tab.sessionId) return tab.sessionId;
+      const inFlight = sessionCreationRef.current.get(tab.id);
+      if (inFlight) return inFlight;
+
+      const agentId = tab.sessionAgent || defaultAgentId || "default";
+      const p = (async () => {
+        // Usa el helper de `api/sessions` y no un `apiPost` suelto: es el
+        // unico camino para crear sesiones y el unico que los tests
+        // interceptan.
+        const res = await createSession(agentId);
+        seenSessions.current.add(res.session_id);
+        updateTab(tab.id, {
+          sessionId: res.session_id,
+          sessionAgent: res.agent_id,
+        });
+
+        // Aplica a la sesion recien creada el modelo que el usuario ya
+        // habia elegido en la pestana. El selector vive en `ChatFooter` y
+        // su `sessionId` era `null` mientras no habia sesion, asi que el
+        // PUT por sesion no se pudo hacer en su momento. El mensaje que
+        // dispara esta creacion ya viaja con el provider/model correctos
+        // (los lee de `tab.sessionModel`), asi que esto es solo para
+        // dejar la fila de la sesion consistente.
+        //
+        // No debe tumbar la creacion si falla: la sesion ya existe y el
+        // mensaje se puede mandar igual.
+        if (tab.sessionModel) {
+          try {
+            await setSessionModel(
+              res.session_id,
+              tab.sessionModel.provider_id,
+              tab.sessionModel.model,
+            );
+          } catch (e) {
+            console.error("useChatTabs: failed to apply pending model", e);
+          }
+        }
+        return res.session_id;
+      })();
+
+      sessionCreationRef.current.set(tab.id, p);
+      try {
+        return await p;
+      } finally {
+        sessionCreationRef.current.delete(tab.id);
+      }
+    },
+    [defaultAgentId, updateTab],
+  );
+
   return {
     tabs,
     activeTab,
     activeId,
     createTab,
     createTabFromSession,
+    ensureSessionForTab,
     closeTab,
     closeSession,
     selectTab,

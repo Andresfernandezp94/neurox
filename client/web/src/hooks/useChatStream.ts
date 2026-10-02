@@ -44,7 +44,14 @@ export interface UseChatStreamReturn {
    * ends normally. Rejects with the underlying error on fetch / network
    * failures, or resolves if `cancel()` is called.
    */
-  send: (text: string) => Promise<void>;
+  /**
+   * `sessionIdOverride` manda el id de sesion explicitamente.
+   *
+   * Necesario porque la sesion se crea recien al enviar el primer mensaje:
+   * el `sessionId` del closure del render es "" en ese instante, y sin el
+   * override el POST del mensaje iria a `/v1/sessions//messages`.
+   */
+  send: (text: string, sessionIdOverride?: string) => Promise<void>;
   /** Abort the in-flight stream (if any). Idempotent. */
   cancel: () => void;
   status: ChatStreamStatus;
@@ -80,8 +87,15 @@ export function useChatStream({
   }, []);
 
   const send = useCallback(
-    async (text: string): Promise<void> => {
+    async (text: string, sessionIdOverride?: string): Promise<void> => {
       if (!text.trim()) return;
+      // El override gana sobre el del closure: es el caso de la primera
+      // mensagem de una pestana recien creada.
+      const targetSessionId = sessionIdOverride ?? sessionId;
+      if (!targetSessionId) {
+        setError("No session to send to.");
+        return;
+      }
       setError(null);
       setStatus("streaming");
 
@@ -103,7 +117,7 @@ export function useChatStream({
         // (only relevant if a previous stream is still being torn down).
         const requestId = newRequestId();
         await streamMessage(
-          sessionId,
+          targetSessionId,
           agentId,
           text,
           providerId ?? "",

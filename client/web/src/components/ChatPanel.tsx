@@ -8,7 +8,6 @@ import { VoiceCallOverlay } from "./VoiceCallOverlay";
 import { useChatTabs } from "../hooks/useChatTabs";
 import { useDefaultAgentId } from "../hooks/useDefaultAgentId";
 import {
-  createSession,
   cancelSession,
   getSessionMessages,
   listSessions,
@@ -50,6 +49,7 @@ export function ChatPanel(_: ChatPanelProps = {}) {
     activeId,
     createTab,
     createTabFromSession,
+    ensureSessionForTab,
     closeTab,
     selectTab,
     renameTab,
@@ -196,43 +196,22 @@ export function ChatPanel(_: ChatPanelProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, messages]);
 
-  // EP-0026-01 R2: auto-create a backend session for the active tab
-  // if it doesn't have one yet. The <textarea> stays disabled with
-  // `placeholder="Connecting…"` until sessionId is set, so we
-  // trigger the create call as soon as the tab becomes active.
-  // The cancel flag avoids a race where the tab changes (or the
-  // component unmounts) before the response arrives.
-  useEffect(() => {
-    if (!activeTab || activeTab.sessionId) return;
-    // Wait until the daemon's `/v1/agents` has loaded so we don't
-    // race with the StoreProvider's fetch (which would send `""` and
-    // get a confusing `agent_id required` from the daemon).
-    if (!daemonDefaultAgentId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        // Resolve the agent id at send-time: prefer the tab's
-        // explicit choice, fall back to the daemon's in-process
-        // agent from `state.agents`. (Sentinel empty string was
-        // already handled by the early-return above.)
-        const agentId = activeTab.sessionAgent || daemonDefaultAgentId;
-        const resp = await createSession(agentId);
-        if (!cancelled && resp.session_id) {
-          updateTab(activeTab.id, { sessionId: resp.session_id });
-        }
-      } catch (e) {
-        if (!cancelled) {
-          // Leave the textarea disabled; user can close+recreate
-          // the tab. The error is logged for debugging.
-          // eslint-disable-next-line no-console
-          console.error("createSession failed", e);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab?.id, activeTab?.sessionId, activeTab?.sessionAgent, daemonDefaultAgentId, updateTab]);
+  // La sesion NO se crea al activar la pestana: se crea en `handleSend`,
+  // cuando el usuario manda el primer mensaje.
+  //
+  // Antes este efecto creaba la sesion en cuanto la pestana se activaba, y
+  // `createTab` tambien la creaba al abrirla: dos caminos, los dos antes de
+  // que hubiera un solo mensaje. Como una sesion sin mensajes queda
+  // `ended_at = NULL` para siempre, cada pestana abierta sin escribir
+  // dejaba una sesion activa permanente, y la hidratacion las convertia en
+  // ventanas de chat al recargar (9 sesiones, 8 de ellas vacias).
+  //
+  // El comentario anterior decia que el textarea quedaba deshabilitado con
+  // placeholder "Connecting…" hasta que `sessionId` estuviera listo. Era
+  // cierto, pero el `disabled` vivia en `ChatFooter`, no acá — por eso el
+  // gateo se zafaba de una vista. Con la sesion perezosa ese gateo era un
+  // deadlock: sin sesion no se puede escribir, y sin escribir no hay sesion.
+  // Ahora el footer solo se gatea por `isStreaming`.
 
   // Auto-resize the textarea to its content height on every input
   // change. Reset to "auto" first so scrollHeight reflects the
@@ -291,7 +270,25 @@ export function ChatPanel(_: ChatPanelProps = {}) {
   }, [activeTab?.messages.length]);
 
   // Reset input when switching tabs.
+  //
+  // Solo cuando se cambia de una pestana a OTRA. En la carga inicial
+  // `activeId` pasa de `null` al id de la primera pestana (la que crea el
+  // efecto de draft al terminar la hidratacion), y eso no es un cambio de
+  // pestana: es la inicializacion. Si se limpiara ahi, se borraria lo que
+  // el usuario hubiera escrito mientras se hidrataba.
+  //
+  // Antes esto no se notaba porque el textarea estaba deshabilitado hasta
+  // que existia la sesion, con lo cual era imposible escribir durante esa
+  // ventana. Con la sesion perezosa el textarea es usable desde el
+  // principio, asi que el borrado se vuelve visible: escribir y perder el
+  // texto.
+  const prevActiveIdRef = useRef<string | null>(null);
   useEffect(() => {
+    const prev = prevActiveIdRef.current;
+    prevActiveIdRef.current = activeId;
+    // `prev === null`: primera asignacion (oMontaje, o la pestana activa
+    // se cerro). `prev === activeId`: React StrictMode remunta el efecto.
+    if (prev === null || prev === activeId) return;
     setInput("");
     setError(null);
   }, [activeId]);
@@ -522,12 +519,35 @@ useLayoutEffect(() => {
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || isStreaming || !activeTab || !activeTab.sessionId) return;
-    setInput("");
+    if (!text || isStreaming || !activeTab) return;
     setError(null);
 
-    const sessionId = activeTab.sessionId;
     const tabId = activeTab.id;
+
+    // La sesion se crea recien aca: recien cuando hay un mensaje que
+    // justificar su existencia.
+    //
+    // Antes `handleSend` abortaba si la pestana no tenia `sessionId`, y la
+    // sesion la creaba un efecto al activar la pestana. Eso dejaba una
+    // sesion activa permanente por cada ventana abierta sin escribir.
+    // Ahora se crea bajo demanda y es idempotente.
+    let sessionId: string | null = activeTab.sessionId;
+    if (!sessionId) {
+      try {
+        sessionId = await ensureSessionForTab(activeTab);
+      } catch (e) {
+        setError(
+          `Could not start the session: ${(e as Error).message}. Your message was not sent.`,
+        );
+        return;
+      }
+      if (!sessionId) {
+        setError("Could not start the session. Your message was not sent.");
+        return;
+      }
+    }
+
+    setInput("");
 
     // ─── Order fix: user message BEFORE assistant ─────────────────────
     // We add the user message NOW with a NEGATIVE temp id (a
@@ -565,7 +585,7 @@ useLayoutEffect(() => {
       // `useChatTabs`, ordenados por el `seq` monotónico del daemon.
       // Esto elimina la doble aplicación SSE+WS que causaba la
       // duplicación/truncación en el receptor.
-      await sendStream(text);
+      await sendStream(text, sessionId);
       const durationMs = Date.now() - t0;
       // Apply metrics to the assistant message we just streamed. We
       // look up by ROLE (last assistant) from `tabsRef` rather than
