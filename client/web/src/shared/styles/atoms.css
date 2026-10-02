@@ -1358,6 +1358,59 @@
   font-size: 0.75rem;
 }
 
+/* Form de workspace (consumido por WorkspaceFormModal).
+ * Labels y hints usan las mismas escalas que el resto de los paneles: label
+ * 0.75rem / 500, hint 0.6875rem muted. */
+.workspace-form__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.workspace-form__row--switch {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.workspace-form__label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.workspace-form__hint {
+  margin: 0;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+.workspace-form__hint code {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+.workspace-form__select {
+  height: var(--control-height);
+  padding: 0 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-deep);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.75rem;
+}
+.workspace-form__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-deep);
+}
+.workspace-form__section-title {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
 
 .workspace-card__count {
   font-size: 0.6875rem;
@@ -3455,6 +3508,70 @@
 .provider-action:active:not(:disabled) { transform: scale(0.92); }
 
 /* Modal (consumed by ProvidersPanel + future modals) */
+/* Modal generico (consumido por Modal.tsx, y por ConfirmDialog y
+ * AlertModal por encima).
+ *
+ * El fondo usaba `var(--bg-surface, #1e1e1e)` y `--bg-surface` NO esta
+ * definido en ningun tema: el fallback ganaba siempre y el dialogo salia
+ * casi negro en light mode. Ahora toma tokens que si existen en los dos
+ * temas.
+ *
+ * El padding vive en header/body/footer y no en el contenedor: antes era
+ * `padding: 2rem` en el modal entero, que dejaba el titulo pegado al borde
+ * del header y el cuerpo a 2rem del contenido. */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--backdrop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 1000;
+}
+.modal {
+  display: flex;
+  flex-direction: column;
+  max-height: min(85dvh, 48rem);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  width: 100%;
+  max-width: 32rem;
+  overflow: hidden;
+}
+.modal--wide { max-width: 44rem; }
+.modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.modal__title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.modal__body {
+  padding: 1rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+.modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface-deep);
+  flex-shrink: 0;
+}
 
 /* Inline provider config (consumed by ProvidersPanel) */
 .card__body { min-width: 0; overflow: hidden; }

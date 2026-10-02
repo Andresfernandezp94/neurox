@@ -104,6 +104,13 @@ svg {
    * desalineados aunque el `align-items` del contenedor los centre. */
   --control-height: 1.875rem;
 
+  /* Scrim de los overlays (modal, confirm dialog, alertas).
+   *
+   * Va como token porque el mismo backdrop se ve en los dos temas y un
+   * negro fijo no sirve para los dos: sobre superficie clara un 0.55 tapa
+   * la pagina entera y no se distingue el dialogo del fondo. En claro va
+   * mas suave. */
+  --backdrop: rgba(0, 0, 0, 0.55);
 
   /* Fondo de la landing + chrome fijo (header/footer).
    *
@@ -227,6 +234,8 @@ svg {
    * claro: --surface #ffffff -> --surface-deep #fafafa -> --bg-elevated
    * #f5f5f7. */
   --surface-deep: #fafafa;
+  /* Scrim mas suave sobre superficie clara: ver el token oscuro. */
+  --backdrop: rgba(0, 0, 0, 0.35);
   /* Ver el token oscuro: un solo color para los tres kinds. En claro la
    * consola de AWS usa el pizarra solo sobre el navy; sobre blanco el
    * equivalente legible es el gris de superficie secundaria (#f2f3f3)

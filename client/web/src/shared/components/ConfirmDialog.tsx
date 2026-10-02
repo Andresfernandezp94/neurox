@@ -6,9 +6,8 @@
 // - Sin options complejas (variant: danger/primary)
 // - Cierre con Escape
 
-import { useEffect, type ReactNode } from "react";
-import { Card } from "./molecules/Card";
-import { Row } from "./molecules/Row";
+import type { ReactNode } from "react";
+import { Modal } from "./molecules/Modal";
 import { Button } from "./atoms/Button";
 
 interface Props {
@@ -22,6 +21,19 @@ interface Props {
   onCancel: () => void;
 }
 
+/**
+ * Confirmacion sobre `Modal`.
+ *
+ * Antes montaba su propio overlay con `confirm-dialog-overlay`,
+ * `confirm-dialog__card`, `confirm-dialog__title` y
+ * `confirm-dialog__message`, y NINGUNA de las cuatro tenia CSS en ningun
+ * archivo: el dialogo salia sin fondo, sin borde y sin padding. Sobre
+ * `Modal` hereda la superficie, el Escape y el click fuera de una sola vez,
+ * y deja de haber dos implementaciones de lo mismo.
+ *
+ * El `message` puede ser un `ReactNode`, asi que el modal acepta contenido
+ * arbitrario; esta clase solo lo compone.
+ */
 export function ConfirmDialog({
   open,
   title,
@@ -32,28 +44,15 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: Props) {
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [open, onCancel]);
-
-  if (!open) return null;
-
   return (
-    <div
-      className="confirm-dialog-overlay"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      <Card className="confirm-dialog__card">
-        {title && <h3 className="strong confirm-dialog__title">{title}</h3>}
-        <div className="muted confirm-dialog__message">{message}</div>
-        <Row justify="between">
+    <Modal
+      open={open}
+      onClose={onCancel}
+      title={title}
+      className="confirm-dialog"
+      data-testid="confirm-dialog"
+      footer={
+        <>
           <Button variant="secondary" onClick={onCancel}>
             {cancelLabel}
           </Button>
@@ -64,8 +63,10 @@ export function ConfirmDialog({
           >
             {confirmLabel}
           </Button>
-        </Row>
-      </Card>
-    </div>
+        </>
+      }
+    >
+      <div className="confirm-dialog__message">{message}</div>
+    </Modal>
   );
 }

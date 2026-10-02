@@ -1,161 +1,193 @@
-// WorkspaceViewer — tabbed view con Sandbox, Agents y MCP.
-// EP-0026-UX: top-level workspace view con tabs internas.
-
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Stack } from "../shared/components/molecules/Stack";
+import { ErrorBanner } from "../shared/components/molecules/ErrorBanner";
+import { Tabs } from "../shared/components/molecules/Tabs";
 import { SandboxTab } from "./SandboxTab";
 import { AgentsPanel } from "./AgentsPanel";
 import { MCP } from "./MCP";
-import { WorkspaceList, type WorkspaceConfig } from "./WorkspaceList";
-import { WorkspaceConfigView } from "./WorkspaceConfigView";
-import { useI18n } from "../shared/hooks/useI18n";
+import { WorkspaceList } from "./WorkspaceList";
+import { WorkspaceFormModal, type WorkspaceFormValue } from "./WorkspaceFormModal";
+import { ConfirmDialog } from "../shared/components/ConfirmDialog";
+import {
+  createWorkspace,
+  deleteWorkspace,
+  getSandboxDefaults,
+  listWorkspaces,
+  updateWorkspace,
+  type SandboxDefaults,
+  type Workspace,
+} from "../api/workspaces";
 
 type WorkspaceTab = "general" | "sandbox" | "agents" | "mcp";
 
-// Mock data — when `/v1/workspaces` is exposed by the daemon, replace
-// this with a fetch + state.
-const WORKSPACES: WorkspaceConfig[] = [
-  {
-    id: "sixbell",
-    name: "Sixbell",
-    description:
-      "Sixbell product team workspace. 9 idempotent agents sharing the same sandbox, MCPs and memory pool.",
-    status: "active",
-    icon: "IconIntegrations",
-    sandboxes: [
-      {
-        path: "/home/andres_fernandez/Sixbell/*",
-        permissions: ["read", "write", "execute", "delete"],
-        recursive: true,
-      },
-    ],
-    network: {
-      noNetwork: false,
-      allow: [".*"],
-      deny: [],
-    },
-    env: {
-      SIXBELL_WORKSPACE: "true",
-      SIXBELL_ROOT: "/home/andres_fernandez/Sixbell",
-    },
-    resources: {
-      memoryMb: 4096,
-      cpuCores: 4,
-      diskMb: 10240,
-      timeoutSecs: 120,
-    },
-    tools: {
-      allow: ["*"],
-      deny: ["rm -rf /"],
-    },
-    mcps: {
-      memoryd: { enabled: true, config: { workspace: "sixbell" } },
-      llmd: { enabled: true, config: {} },
-      voice: { enabled: true, config: {} },
-      clickup: { enabled: true, config: {} },
-      playwright: { enabled: true, config: {} },
-    },
-    skills: [
-      "ep-creator",
-      "design-doc",
-      "task-splitter",
-    ],
-    agents: [
-      "developer",
-      "doc-agent",
-      "infra",
-      "infrastructure",
-      "orchestrator",
-      "product-assistant",
-      "researcher",
-      "reviewer",
-      "sql-qa",
-    ],
-  },
-];
-
+// WorkspaceViewer — tabbed view con General, Sandbox, Agents y MCP.
+//
+// La tab General lista los workspaces contra `/v1/workspaces`. Antes era un
+// objeto "Sixbell" hardcodeado a nivel de modulo (const WORKSPACES), sin
+// estado ni fetch: agregar o borrar no hacia nada porque los handlers eran
+// no-ops con un TODO, y el boton "Save changes" de la vista de config estaba
+// permanentemente deshabilitado.
+//
+// El fetch usa el patron de los otros paneles (`useState` + `useCallback` +
+// `useEffect` + `ErrorBanner` al tope, ver EnvTab).
 export function WorkspaceViewer() {
   const [tab, setTab] = useState<WorkspaceTab>("general");
-  const [configWorkspaceId, setConfigWorkspaceId] = useState<string | null>(null);
-  const { t } = useI18n();
 
-  const configWorkspace = configWorkspaceId
-    ? WORKSPACES.find((w) => w.id === configWorkspaceId) ?? null
-    : null;
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [defaults, setDefaults] = useState<SandboxDefaults | null>(null);
 
-  if (configWorkspace) {
-    return (
-      <WorkspaceConfigView
-        workspace={configWorkspace}
-        onBack={() => setConfigWorkspaceId(null)}
-      />
-    );
-  }
+  const [search, setSearch] = useState("");
+  const [editing, setEditing] = useState<Workspace | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Workspace | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [list, defs] = await Promise.all([
+        listWorkspaces(),
+        getSandboxDefaults().catch(() => null),
+      ]);
+      setWorkspaces(list);
+      setDefaults(defs);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const onCreate = async (value: WorkspaceFormValue) => {
+    setSaving(true);
+    try {
+      await createWorkspace({
+        name: value.name,
+        root: value.root,
+        description: value.description || null,
+        status: value.status,
+        sandbox_enabled: value.sandbox_enabled,
+        sandbox_readable_paths: value.readable_paths,
+        sandbox_writable_paths: value.writable_paths,
+        sandbox_max_recursion_depth: value.max_recursion_depth,
+      });
+      setCreating(false);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onSaveEdit = async (value: WorkspaceFormValue) => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      await updateWorkspace(editing.id, {
+        name: value.name,
+        root: value.root,
+        description: value.description || null,
+        status: value.status,
+        sandbox_enabled: value.sandbox_enabled,
+        sandbox_readable_paths: value.readable_paths,
+        sandbox_writable_paths: value.writable_paths,
+        sandbox_max_recursion_depth: value.max_recursion_depth,
+      });
+      setEditing(null);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onDelete = async () => {
+    if (!pendingDelete) return;
+    const id = pendingDelete.id;
+    setPendingDelete(null);
+    try {
+      await deleteWorkspace(id);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
 
   return (
-    <>
-      <div className="config-viewer__tabs" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "general"}
-          data-testid="workspace-tab-general"
-          className={`config-viewer__tab ${tab === "general" ? "active" : ""}`}
-          onClick={() => setTab("general")}
-        >
-          General
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "sandbox"}
-          data-testid="workspace-tab-sandbox"
-          className={`config-viewer__tab ${tab === "sandbox" ? "active" : ""}`}
-          onClick={() => setTab("sandbox")}
-        >
-          Sandbox
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "agents"}
-          data-testid="workspace-tab-agents"
-          className={`config-viewer__tab ${tab === "agents" ? "active" : ""}`}
-          onClick={() => setTab("agents")}
-        >
-          {t("sidebar.agents")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "mcp"}
-          data-testid="workspace-tab-mcp"
-          className={`config-viewer__tab ${tab === "mcp" ? "active" : ""}`}
-          onClick={() => setTab("mcp")}
-        >
-          MCP
-        </button>
-      </div>
+    <div className="page-pad">
+      <Stack gap="md">
+        {error != null && <ErrorBanner onDismiss={() => setError(null)}>{error}</ErrorBanner>}
 
-      <div className="page-pad">
-        <Stack gap="md">
-          {tab === "general" && (
-            <WorkspaceList
-              workspaces={WORKSPACES}
-              onAdd={() => {
-                /* TODO: open a modal to create a new workspace */
-              }}
-              onDelete={(_id) => {
-                /* TODO: confirm + delete workspace `_id` */
-              }}
-              onOpenConfig={(id) => setConfigWorkspaceId(id)}
-            />
-          )}
-          {tab === "sandbox" && <SandboxTab />}
-          {tab === "agents" && <AgentsPanel />}
-          {tab === "mcp" && <MCP />}
-        </Stack>
-      </div>
-    </>
+        <Tabs
+          items={[
+            { id: "general" as const, label: "General" },
+            { id: "sandbox" as const, label: "Sandbox" },
+            { id: "agents" as const, label: "Agentes" },
+            { id: "mcp" as const, label: "MCP" },
+          ]}
+          active={tab}
+          onChange={setTab}
+          testIdPrefix="workspace-tab"
+        />
+
+        {tab === "general" && (
+          <WorkspaceList
+            workspaces={workspaces}
+            loading={loading}
+            error={null}
+            search={search}
+            onSearchChange={setSearch}
+            onAdd={() => setCreating(true)}
+            onOpenConfig={(id) => setEditing(workspaces.find((w) => w.id === id) ?? null)}
+            onDelete={(id) => setPendingDelete(workspaces.find((w) => w.id === id) ?? null)}
+          />
+        )}
+        {tab === "sandbox" && <SandboxTab />}
+        {tab === "agents" && <AgentsPanel />}
+        {tab === "mcp" && <MCP />}
+      </Stack>
+
+      <WorkspaceFormModal
+        open={creating}
+        mode="create"
+        defaults={defaults}
+        saving={saving}
+        onClose={() => setCreating(false)}
+        onSubmit={onCreate}
+      />
+
+      <WorkspaceFormModal
+        open={editing != null}
+        mode="edit"
+        workspace={editing}
+        defaults={defaults}
+        saving={saving}
+        onClose={() => setEditing(null)}
+        onSubmit={onSaveEdit}
+      />
+
+      <ConfirmDialog
+        open={pendingDelete != null}
+        title={pendingDelete ? `Remove “${pendingDelete.name}”?` : undefined}
+        destructive
+        message={
+          pendingDelete
+            ? `The workspace is removed and the agents lose access to ${pendingDelete.root}. The directory and everything in it are NOT deleted.`
+            : ""
+        }
+        confirmLabel="Remove"
+        onConfirm={onDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
+    </div>
   );
 }
