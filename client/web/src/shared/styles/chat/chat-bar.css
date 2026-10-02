@@ -105,7 +105,13 @@
    * sumar padding del wrapper + padding del boton inflaba la fila
    * y la dejaba ~14px mas alta que las demas. */
   padding: 0;
-  background: var(--bg);
+  /* Antes `background: var(--bg)`: un rectángulo negro opaco sin radio
+   * detrás de los iconos. Con el footer con superficie propia eso se
+   * lee como un agujero. Pasa a un inset tenue con el mismo lenguaje
+   * plano del resto de la fila (el trigger del ModelSelector es
+   * transparente y sin borde). */
+  background: var(--bg-tertiary);
+  border-radius: 0.25rem;
   backdrop-filter: var(--chrome-blur, blur(20px) saturate(140%));
   -webkit-backdrop-filter: var(--chrome-blur, blur(20px) saturate(140%));
 }
@@ -191,7 +197,11 @@
 
 .chat__bar--context {
   background: transparent;
-  color: var(--text-muted);
+  /* Estas dos filas llevan informacion real (tokens, msgs, scope), no
+   * solo metrica secundaria. Con `--text-muted` no se leian; con la
+   * superficie del footer ya se distinguen del fondo, pero el salto de
+   * tono sigue siendo poco para el tamaño de la letra. */
+  color: var(--text-secondary);
   font-family: inherit; /* sans-serif, matches repo body */
   font-size: 0.75rem;
   border: none;
@@ -203,7 +213,8 @@
    background + border, which looks like a wrapped box. */
 .chat__bar--workspace {
   background: transparent;
-  color: var(--text-muted);
+  /* Ver .chat__bar--context. */
+  color: var(--text-secondary);
   font-family: inherit;
   font-size: 0.75rem;
   border: none;
