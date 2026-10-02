@@ -136,14 +136,41 @@ describe("OverviewPage", () => {
     );
   });
 
-  it("warns when providers have no API key", async () => {
+  it("marca el provider activo con el pill accent, no con una variante de color", async () => {
+    // El activo usa `badge--active`, el mismo pill solido que
+    // ProvidersPanel / ModelsTab / UsersPanel / EnvTab. Con
+    // `variant="success"` salia un verde generico.
+    mockApi.providers = [
+      { id: "mistral", kind: "openai_compat", model: "large", base_url: "", configured: true, active: true },
+      { id: "minimax", kind: "minimax", model: "M3", base_url: "", configured: false, active: false },
+    ];
+    render(<OverviewPage />);
+
+    const activo = await screen.findByText("ACTIVE");
+    expect(activo.className).toContain("badge--active");
+    expect(activo.className).not.toContain("badge--success");
+  });
+
+  it("no avisa por providers sin API key", async () => {
+    // El aviso se saco por pedido del operador: en una instalacion con 8
+    // providers catálogo y 3 configurados, el aviso de "5 sin API key"
+    // aparecia siempre y no era accionable, solo ruido.
     mockApi.providers = [
       { id: "minimax", kind: "minimax", model: "M3", base_url: "", configured: false, active: false },
       { id: "mistral", kind: "openai_compat", model: "large", base_url: "", configured: true, active: true },
     ];
     render(<OverviewPage />);
+    await waitFor(() => expect(screen.getByText("Providers LLM")).toBeInTheDocument());
+    expect(screen.queryByText(/provider.*sin API key/i)).toBeNull();
+    expect(screen.queryByText(/el chat fallará/i)).toBeNull();
+  });
+
+  it("la seccion Requiere atencion sigue con los avisos que importan", async () => {
+    // Quitar el aviso de providers no puede dejar la seccion vacia: las
+    // aprobaciones pendientes siguen siendo accionables.
+    render(<OverviewPage />);
     await waitFor(() =>
-      expect(screen.getByText(/provider.*sin API key/i)).toBeInTheDocument(),
+      expect(screen.getByText(/aprobación.*pendiente/i)).toBeInTheDocument(),
     );
   });
 

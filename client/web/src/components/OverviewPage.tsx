@@ -85,9 +85,6 @@ export function OverviewPage() {
 
   const configuredProviders =
     providers?.filter((p) => p.configured).length ?? null;
-  const unconfiguredProviders =
-    providers?.filter((p) => !p.configured) ?? [];
-
   // Categorías únicas del catálogo. Un tool sin categoría caería en un
   // grupo inexistente y desaparecería de la pantalla, así que se agrupa
   // bajo "sin categoría" explícito.
@@ -102,12 +99,6 @@ export function OverviewPage() {
     attention.push({
       kind: "warn",
       text: `${pendingApprovals} aprobación${pendingApprovals === 1 ? "" : "es"} pendiente${pendingApprovals === 1 ? "" : "s"}`,
-    });
-  }
-  if (unconfiguredProviders.length > 0) {
-    attention.push({
-      kind: "warn",
-      text: `${unconfiguredProviders.length} provider${unconfiguredProviders.length === 1 ? "" : "s"} sin API key — el chat fallará`,
     });
   }
   if (conn.ws === "closed") {
@@ -204,9 +195,15 @@ export function OverviewPage() {
                     {providerDisplayName(p.id, p.kind)}
                   </strong>
                   </Row>
-                  <Badge variant={providerVariant(p)}>
-                    {providerLabel(p)}
-                  </Badge>
+                  {p.configured && p.active ? (
+                    // El pill accent solido es el que ya usan ProvidersPanel,
+                    // ModelsTab, UsersPanel y EnvTab para marcar lo activo.
+                    // `variant="success"` era un verde generico que no
+                    // comunicaba "este es el que se esta usando".
+                    <Badge className="badge--active">ACTIVE</Badge>
+                  ) : (
+                    <Badge variant={providerVariant(p)}>{providerLabel(p)}</Badge>
+                  )}
                 </Row>
                 <p className="overview__provider-model muted text-sm">
                   {p.model}
@@ -331,14 +328,15 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 /* ── Helpers ───────────────────────────────────────────────── */
 
+/// Variante para el provider que NO es el activo: el activo se resuelve
+/// aparte porque usa el pill accent solido y no una variante de color.
 function providerVariant(p: LlmProviderStatus): BadgeVariant {
-  if (p.configured && p.active) return "success";
   if (p.configured) return "info";
   return "neutral";
 }
 
+/// Texto del badge para los providers que no son el activo.
 function providerLabel(p: LlmProviderStatus): string {
-  if (p.configured && p.active) return "activo";
   if (p.configured) return "configurado";
   return "sin key";
 }
