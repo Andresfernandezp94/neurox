@@ -65,11 +65,35 @@ pub async fn invoke_tool(
         .cloned()
         .unwrap_or(serde_json::json!({}));
 
+    // EP-0026-UX: `workspace_id` opcional en el body. Sin el, la invocacion
+    // usa el sandbox global, que es el comportamiento previo.
+    //
+    // Sin esto no habia forma de probar el sandbox de un workspace por API:
+    // el dispatch de sesion arma el scope, pero este endpoint es
+    // sessionless por diseno, asi que no podia resolver nada por su cuenta.
+    let workspace_id = body.get("workspace_id").and_then(|v| v.as_str());
+    let scope = match (state.workspaces.as_ref(), workspace_id) {
+        (Some(layers), Some(id)) => {
+            crate::workspaces::resolve_scope(
+                &layers.store,
+                &layers.registry,
+                Some(id),
+                &state.workspace.workspace_root,
+            )
+            .await
+        }
+        _ => tools_engine::WorkspaceScope {
+            id: None,
+            root: state.workspace.workspace_root.clone(),
+            sandbox: state.workspace.sandbox.clone(),
+        },
+    };
+
     let started = std::time::Instant::now();
     let ctx = tools_engine::ExecuteContext {
         agent_id: String::new(),
-        workspace: None,
-            cancel: None,
+        workspace: Some(scope),
+        cancel: None,
         http_client: Some(state.engine.http_client.clone()),
     };
     match tool.execute(&ctx, args).await {
