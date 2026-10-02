@@ -355,7 +355,7 @@
 .models-tab__cols {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: var(--grid-cols-side);
   gap: var(--gap-card-grid);
   /* `stretch`, no `start`: las dos columnas quedan a la MISMA altura, la
    * que marque la más alta. Con `start` cada una mide lo suyo y las cajas
@@ -365,14 +365,11 @@
 
 /* ─── Modelos locales: lista densa + editor ─── */
 
-/* La lista tiene ancho FIJO y el editor se lleva todo lo que sobra.
- *
- * Al reves que antes: la lista con `1.15fr` y el editor con `1fr`. El editor
- * necesita el ancho — son labels largos como `tokens_per_second` y textareas
- * de stop_sequences y system — mientras que la lista tiene un nombre que se
- * recorta con ellipsis sin dejar de ser legible. */
+/* La fila de abajo usa el MISMO template que la de arriba (token
+ * `--grid-cols-side`), para que las columnas se alineen. Antes esta regla
+ * repetia el valor y las dos grillas se desincronizaban al cambiar una. */
 .models-tab__cols--models {
-  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
+  grid-template-columns: var(--grid-cols-side);
 }
 
 /* Contenedor de las filas de una categoria.
@@ -523,7 +520,19 @@
 .models-tab__config {
   position: sticky;
   top: 0.5rem;
-  align-self: start;
+  /* SIN `align-self: start`.
+   *
+   * `.models-tab__col` es un flex COLUMN, así que su eje transversal es el
+   * horizontal: `align-self` controla el ANCHO del hijo, no el alto.
+   * `align-self: start` hacía que la card se encogiera al ancho de su
+   * contenido y quedara un hueco vacío a la derecha, más o menos del ancho
+   * de su columna de labels.
+   *
+   * El alto natural lo da `justify-content: flex-start` (el default del
+   * column), que es lo que el sticky necesita: si la card se estirara a
+   * todo el alto de la columna, `position: sticky` no tendría nada que
+   * pegarse. */
+  width: 100%;
 }
 
 .models-tab__config-head {
@@ -639,8 +648,13 @@
 }
 
 /* Por debajo de ~64rem las dos columnas quedan ilegibles: la card de
- * servicio tiene un form con label + control, y a la mitad de ancho el
- * input queda corto para una ruta de GGUF. Se apila. */
+ * servicio tiene un form con label + control, y con la columna izquierda
+ * acotada a 22rem la derecha queda demasiado angosta para las textareas.
+ * Se apila.
+ *
+ * Un selector en vez de dos (`.models-tab__cols` y `--models`): el override
+ * tiene que alcanzar las dos filas, y basta uno porque las dos comparten el
+ * token. */
 @media (max-width: 64rem) {
   .models-tab__cols {
     grid-template-columns: 1fr;

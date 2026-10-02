@@ -117,6 +117,20 @@ svg {
    * 0.25rem de aire + ~8px de sombra ≈ 1.25rem de separación real. */
   --gap-card-grid: 1.25rem;
 
+  /* Grilla de dos columnas de la tab Local (Local service | Hugging Face,
+   * y abajo modelos | configuración).
+   *
+   * UN token, no dos valores: las dos filas comparten el mismo template para
+   * que las columnas se alineen verticalmente. Con `1fr 1fr` arriba y algo
+   * distinto abajo, las cards quedaban desalineadas en una grilla que se
+   * lee como una sola cosa.
+   *
+   * La columna izquierda es de ancho FIJO y acotado; la derecha se lleva
+   * todo lo que sobra. El editor de configuración es lo que necesita ancho
+   * —labels largos y dos textareas— mientras que el nombre de un modelo se
+   * recorta con ellipsis sin dejar de ser legible. */
+  --grid-cols-side: minmax(16rem, 22rem) minmax(0, 1fr);
+
   --rail-content-x: 2.5rem;
   --mode-tag-w: 3.25rem;
   --sidebar-w: 18rem;
