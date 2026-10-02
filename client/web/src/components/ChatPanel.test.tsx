@@ -265,6 +265,43 @@ describe("ChatPanel — sesion perezosa (se crea al primer mensaje)", () => {
     });
   });
 
+  it("dos turnos con error dejan DOS avisos: el stack no se limpia al enviar", async () => {
+    // Regresion: quede un `clear()` al inicio de `handleSend`, que venia
+    // del estado local de un solo error. Con un stack que tiene que
+    // permanecer hasta que se lo cierre, cada turno nuevo borraba los
+    // avisos del turno anterior y se veia como que los errores se pisaban
+    // en vez de apilarse.
+    const errores = ["fallo del primer turno", "fallo del segundo turno"];
+    let i = 0;
+    mockCreateSession.mockResolvedValue({
+      session_id: "test-123",
+      agent_id: TEST_AGENT_ID,
+    });
+    mockStreamMessage.mockImplementation(async (...args: unknown[]) => {
+      const onChunk = args[5] as (c: unknown) => void;
+      onChunk({ type: "error", message: errores[i++] });
+    });
+
+    render(<ChatPanel />, { wrapper: withStore });
+    const textarea = await screen.findByTestId("chat-input");
+
+    for (const _ of errores) {
+      fireEvent.change(textarea, { target: { value: "hola" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      // Espera a que el stream de este turno termine antes del siguiente.
+      await waitFor(() => {
+        expect(mockStreamMessage).toHaveBeenCalledTimes(i);
+      });
+    }
+
+    // Los dos avisos, apilados.
+    await waitFor(() => {
+      expect(screen.getByText("fallo del primer turno")).toBeTruthy();
+    });
+    expect(screen.getByText("fallo del segundo turno")).toBeTruthy();
+    expect(screen.getAllByRole("alert")).toHaveLength(2);
+  });
+
   it("does NOT wipe what the user typed while the first tab was being set up", async () => {
     // Regresion: el efecto de "reset input on tab switch" corria tambien
     // cuando `activeId` pasaba de null al id de la primera pestana, que es

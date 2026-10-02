@@ -5932,11 +5932,21 @@ body[data-sidebar-hidden="true"] .notification-stack {
    * centro, cada uno se achicaba hacia adentro y se veia una escalera
    * descentrada. */
   transform-origin: bottom center;
-  opacity: calc(1 - var(--depth) * 0.22);
+  /* Escalones chicos a proposito. Con 0.06 por nivel, cuatro niveles
+   * suman 24% de achicado y cada card se ve claramente mas chica que la
+   * de adelante: eso se lee como un salto, no como una baraja. Con 0.03 el
+   * escalon es de ~1.5% por lado, que es justo el inset que tiene un mazo
+   * de cartas real, y las cards de atras se distinguen sin gritar.
+   *
+   * La opacidad tambien baja menos: 0.22 por nivel hacia que las del fondo
+   * casi no se vieran y el escalon se nota todavia mas. */
+  opacity: calc(1 - var(--depth) * 0.12);
   transform: translateY(calc(var(--depth) * 0.75rem))
-             scale(calc(1 - var(--depth) * 0.06));
+             scale(calc(1 - var(--depth) * 0.03));
   z-index: calc(10 - var(--depth));
-  transition: opacity 180ms ease-out, transform 180ms ease-out;
+  /* Mas lenta que antes: al entrar un aviso nuevo todas las de atras cambian
+   * de profundidad, y con 180ms el reacomodo se leia como un tirón. */
+  transition: opacity 260ms ease, transform 260ms ease;
   animation: notification-in 160ms ease-out;
 }
 

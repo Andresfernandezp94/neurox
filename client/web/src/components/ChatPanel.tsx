@@ -316,8 +316,10 @@ export function ChatPanel(_: ChatPanelProps = {}) {
     // se cerro). `prev === activeId`: React StrictMode remunta el efecto.
     if (prev === null || prev === activeId) return;
     setInput("");
-    notify.clear();
-  }, [activeId, notify]);
+    // El stack de avisos NO se limpia al cambiar de pestana. Un aviso
+    // sigue siendo cierto en la otra pestana, y borrarlo hacia que al
+    // volver no estuviera nada que mostrar de lo que paso.
+  }, [activeId]);
 
   // ── Search-in-chat (per tab) ─────────────────────────────────────────
   // Query, active match index and the total live on the tab itself so
@@ -546,7 +548,12 @@ useLayoutEffect(() => {
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text || isStreaming || !activeTab) return;
-    notify.clear();
+    // El stack de avisos NO se limpia al mandar un mensaje. Este `clear`
+    // venia del estado local de un solo error, donde limpiar al empezar
+    // un turno tenia sentido. Con un stack que tiene que permanecer hasta
+    // que se lo cierre, hacia que cada turno nuevo borrara los avisos del
+    // turno anterior: se veia como que los errores se pisaban entre si en
+    // vez de apilarse.
 
     const tabId = activeTab.id;
 
