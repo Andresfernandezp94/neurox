@@ -1111,19 +1111,25 @@ mod tests {
     #[test]
     fn expand_preserves_multibyte_utf8() {
         let _g = lock();
-        // em dash, accents, emoji, CJK - no debe corromper UTF-8
+        // Acentos, cirilico y emoji: texto multibyte de 2 y 4 bytes por
+        // caracter. No debe corromper UTF-8.
+        //
+        // Se evita el CJK a proposito: el proyecto no usa caracteres chinos y
+        // un fixture con ellos se cuela en el repo sin que nadie lo note.
+        // El cirilico prueba exactamente lo mismo (multibyte, con y sin
+        // signo diacritico) y no inventa un script que no usamos.
         std::env::set_var("NEURO_TEST_HOST", "example.com");
         // La línea con la ref NO es comentario: si lo fuera, ya no se
-        // expandiría y el assert de "example.com" no tendría sentido.
+        // expandiria y el assert de "example.com" no tendria sentido.
         let r = expand_env_vars(concat!(
             "neurox - cross-platform (5 EUR/mes) - host: $NEURO_TEST_HOST\n",
-            "# ñoño 中文 🎉\n",
+            "# ñoño Привет 🎉\n",
         ));
         assert!(r.text.contains("neurox - cross-platform"));
         assert!(r.text.contains("(5 EUR/mes)"));
         assert!(r.text.contains("host: example.com"));
-        // El comentario con CJK y emoji sobrevive literal.
-        assert!(r.text.contains("ñoño 中文 🎉"));
+        // El comentario con cirilico y emoji sobrevive literal.
+        assert!(r.text.contains("ñoño Привет 🎉"));
     }
 
     fn spec_with_secret() -> PersistentAgentSpec {
