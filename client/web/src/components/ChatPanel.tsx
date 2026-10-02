@@ -17,6 +17,7 @@ import { getDefaultAgentStatus, type DefaultAgentResponse } from "../api/default
 import { countTranscriptMatches } from "./chat/searchTranscript";
 import type { Message, MessageMetrics } from "../types";
 import { PanelToggle } from "../shared/components/PanelToggle";
+import { useAppFullscreen } from "../shared/hooks/useAppFullscreen";
 import { useChatStream } from "../hooks/useChatStream";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMain } from "./ChatMain";
@@ -87,34 +88,13 @@ export function ChatPanel(_: ChatPanelProps = {}) {
   // (vive dentro del elemento fullscreen). En browsers sin la API (p.ej.
   // iOS Safari) cae a la clase CSS `chat-layout--focus` (mismo resultado
   // visual, sin Fullscreen API).
+  //
+  // El estado NO es local: vive en `useAppFullscreen`, un store a nivel de
+  // modulo, porque hay un segundo control del mismo estado en la barra de
+  // mobile (que vive en el Sidebar, fuera de este arbol). Con estado local
+  // los dos iconos podrian contradecirse.
   const chatLayoutRef = useRef<HTMLDivElement | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  // Fallback CSS-only (browsers sin Fullscreen API).
-  const [isFocusMode, setIsFocusMode] = useState(false);
-
-  // Mantener isFullscreen sincronizado con la API (Esc u otro trigger).
-  useEffect(() => {
-    const handler = () => setIsFullscreen(Boolean(document.fullscreenElement));
-    document.addEventListener("fullscreenchange", handler);
-    return () => document.removeEventListener("fullscreenchange", handler);
-  }, []);
-
-  const handleToggleExpanded = useCallback(() => {
-    // Camino principal: fullscreen del shell `.app` — la sidebar vive
-    // dentro del elemento fullscreen (lado a lado con el chat), así que
-    // el fullscreen real llena el viewport sin ocultar la navegación.
-    const shell = document.querySelector<HTMLElement>(".app");
-    if (shell?.requestFullscreen) {
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
-      } else {
-        shell.requestFullscreen().catch(() => {});
-      }
-      return;
-    }
-    // Fallback: expandir el chat vía clase CSS (sin Fullscreen API).
-    setIsFocusMode((prev) => !prev);
-  }, []);
+  const { isExpanded, isFocusMode, toggle: toggleExpanded } = useAppFullscreen();
 
   // Sync fallback class on chat-layout root
   useEffect(() => {
@@ -742,8 +722,8 @@ useLayoutEffect(() => {
         onToggleHistory={() => setShowHistory(!showHistory)}
         voiceOverlayOpen={voiceOverlayOpen}
         onOpenVoiceCall={() => setVoiceOverlayOpen(true)}
-        isExpanded={isFullscreen || isFocusMode}
-        onToggleExpanded={handleToggleExpanded}
+        isExpanded={isExpanded}
+        onToggleExpanded={toggleExpanded}
         defaultAgent={defaultAgent}
         input={input}
         onInputChange={setInput}
