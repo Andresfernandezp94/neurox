@@ -108,7 +108,8 @@ mod tests {
         let tool = SearchMemoryTool;
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"query": "dark"}),
             )
             .await
@@ -127,7 +128,8 @@ mod tests {
         let tool = SearchMemoryTool;
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({}),
             )
             .await;
@@ -145,7 +147,8 @@ mod tests {
         let tool = SearchMemoryTool;
         let r = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"query": "anything"}),
             )
             .await
@@ -167,7 +170,8 @@ mod tests {
         let tool = SearchMemoryTool;
         let r = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"query": 42}),
             )
             .await;

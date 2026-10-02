@@ -50,7 +50,8 @@ mod tests {
         };
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"command": "echo hello"}),
             )
             .await
@@ -70,7 +71,8 @@ mod tests {
         };
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"command": "touch /etc/neurox-test-should-fail"}),
             )
             .await;
@@ -84,7 +86,8 @@ mod tests {
     async fn assert_write_blocked(tool: &ShellTool, cmd: &str) {
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"command": cmd}),
             )
             .await;
@@ -180,7 +183,8 @@ mod tests {
         for empty in ["", " ", "\t", "  \n  "] {
             let r = tool
                 .execute(
-                    &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                    &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                     serde_json::json!({"command": empty}),
                 )
                 .await;
@@ -230,7 +234,8 @@ mod tests {
         let cmd = format!("echo hi > {target}");
         let r = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"command": cmd}),
             )
             .await;
@@ -300,9 +305,9 @@ impl Tool for ShellTool {
         // Best-effort: a clever command can still bypass via shell expansion
         // (e.g. `cat foo > bar` where bar is a glob). The parser only
         // checks the literal tokens.
-        let sandbox = self.sandbox.read().await;
-        let writable = sandbox.writable_paths_resolved(&self.workspace_root);
-        let readable = sandbox.readable_paths_resolved(&self.workspace_root);
+        let scope = ctx.scope(&self.workspace_root, &self.sandbox);
+        let writable = scope.writable().await;
+        let readable = scope.readable().await;
         let write_tokens = write_token_positions(command);
         let path_strs = extract_absolute_paths(command);
         // Match path strings back to token positions. We re-tokenize the
@@ -343,7 +348,7 @@ impl Tool for ShellTool {
             let resolved = if p.is_absolute() {
                 p.clone()
             } else {
-                self.workspace_root.join(&p)
+                scope.root.join(&p)
             };
             let normalized = normalize_path(&resolved);
             if !writable.iter().any(|root| normalized.starts_with(root)) {
@@ -411,7 +416,7 @@ impl Tool for ShellTool {
         let cmd_future = Command::new("/bin/sh")
             .arg("-c")
             .arg(command)
-            .current_dir(&self.workspace_root)
+            .current_dir(scope.root)
             .output();
         let result = if let Some(token) = cancel {
             tokio::select! {

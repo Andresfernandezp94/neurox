@@ -568,6 +568,7 @@ impl AppState {
         let exec_start = std::time::Instant::now();
         let ctx = tools_engine::ExecuteContext {
             agent_id: agent.agent_id.clone(),
+            workspace: None,
             cancel: None,
             http_client: None,
         };
@@ -1128,6 +1129,7 @@ impl AppState {
         let exec_start = std::time::Instant::now();
         let ctx = tools_engine::ExecuteContext {
             agent_id: agent_id.to_string(),
+            workspace: None,
             cancel: None,
             http_client: None,
         };

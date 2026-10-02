@@ -46,7 +46,7 @@ impl Tool for WriteFileTool {
     }
 
 
-    async fn execute(&self, _ctx: &crate::ExecuteContext, args: Value) -> Result<String, String> {
+    async fn execute(&self, ctx: &crate::ExecuteContext, args: Value) -> Result<String, String> {
         let path = args
             .get("path")
             .and_then(|v| v.as_str())
@@ -58,10 +58,11 @@ impl Tool for WriteFileTool {
 
         // EP-0019-03: write tools use the operator-configured SandboxConfig
         // to decide whether the target path is acceptable.
+        let scope = ctx.scope(&self.workspace_root, &self.sandbox);
         let resolved = resolve_under_workspace(
-            &self.workspace_root,
+            scope.root,
             path,
-            &self.sandbox.write().await.writable_paths_resolved(&self.workspace_root),
+            &scope.writable().await,
             true,
         )
         .map_err(|e| format!("path: {e}"))?;
@@ -159,7 +160,8 @@ mod tests {
         };
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({
                     "path": path.to_string_lossy().to_string(),
                     "command": "create",
@@ -182,7 +184,8 @@ mod tests {
         };
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({
                     "path": "/etc/test",
                     "command": "create",

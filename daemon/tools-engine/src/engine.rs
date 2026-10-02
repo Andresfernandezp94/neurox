@@ -305,6 +305,7 @@ impl Engine {
             .ok_or_else(|| format!("unknown tool: {name}"))?;
         let ctx = ExecuteContext {
             agent_id: agent_id.to_string(),
+            workspace: None,
             cancel: None,
             http_client: None,
         };
@@ -695,6 +696,7 @@ mod sandbox_propagation_tests {
     fn ctx() -> crate::ExecuteContext {
         crate::ExecuteContext {
             agent_id: "test".into(),
+            workspace: None,
             cancel: None,
             http_client: None,
         }
@@ -785,5 +787,178 @@ mod sandbox_propagation_tests {
             sandbox.read().await.is_readable(&granted),
             "el valor tiene que estar en la celda compartida"
         );
+    }
+}
+
+#[cfg(test)]
+mod workspace_scope_tests {
+    //! Aislamiento por workspace: el root y el sandbox de la LLAMADA
+    //! mandan sobre los valores fijos con los que se construyo el tool.
+    //!
+    //! Los tools de filesystem guardan `workspace_root: PathBuf` y
+    //! `sandbox: Arc<RwLock<Box<dyn SandboxConfig>>>` como valores fijos
+    //! desde su construccion (`register_defaults`), y hay UN solo registro
+    //! de tools. Sin el contexto no habia manera de que dos workspaces
+    //! distintos usaran el mismo tool con permisos distintos.
+    //!
+    //! `ExecuteContext.workspace` es lo que lo resuelve: lo arma el daemon,
+    //! que es el que sabe que workspace tiene la sesion que llamo.
+
+    use super::*;
+    use crate::sandbox::SandboxConfig as SandboxTrait;
+    use crate::tools::read::read_file::ReadFileTool;
+    use crate::tools::Tool;
+    use std::path::{Path, PathBuf};
+    use crate::tools::{ExecuteContext, WorkspaceScope};
+
+    /// Sandbox parametrizable por path legible.
+    struct ReadableOnly(Vec<PathBuf>);
+
+    impl SandboxTrait for ReadableOnly {
+        fn enabled(&self) -> bool {
+            true
+        }
+        fn is_writable(&self, _p: &Path) -> bool {
+            false
+        }
+        fn is_readable(&self, p: &Path) -> bool {
+            self.0.iter().any(|r| p.starts_with(r))
+        }
+        fn readable_paths_resolved(&self, _ws: &Path) -> Vec<PathBuf> {
+            self.0.clone()
+        }
+    }
+
+    fn ctx() -> ExecuteContext {
+        ExecuteContext {
+            agent_id: "test".into(),
+            workspace: None,
+            cancel: None,
+            http_client: None,
+        }
+    }
+
+    fn scope(root: &Path, sandbox: ReadableOnly) -> WorkspaceScope {
+        WorkspaceScope {
+            id: Some("w".into()),
+            root: root.to_path_buf(),
+            sandbox: Arc::new(tokio::sync::RwLock::new(Box::new(sandbox))),
+        }
+    }
+
+    /// El root del contexto pisa el del tool. El tool se construye apuntando
+    /// a `propio` con el sandbox cerrado, pero la llamada va con el root
+    /// `ajeno`: leer de `ajeno` tiene que andar y leer de `propio` no.
+    #[tokio::test]
+    async fn el_root_del_contexto_pisa_el_del_tool() {
+        let propio = tempfile::TempDir::new().unwrap();
+        let ajeno = tempfile::TempDir::new().unwrap();
+        let en_ajeno = ajeno.path().join("dato.txt");
+        let en_propio = propio.path().join("dato.txt");
+        std::fs::write(&en_ajeno, "ajeno").unwrap();
+        std::fs::write(&en_propio, "propio").unwrap();
+
+        let vacio: Arc<RwLock<Box<dyn SandboxTrait>>> =
+            Arc::new(RwLock::new(Box::new(ReadableOnly(vec![]))));
+        let tool = ReadFileTool {
+            workspace_root: propio.path().to_path_buf(),
+            sandbox: vacio,
+        };
+
+        let mut c = ctx();
+        c.workspace = Some(scope(ajeno.path(), ReadableOnly(vec![ajeno.path().to_path_buf()])));
+
+        let leido = tool
+            .execute(&c, serde_json::json!({ "path": en_ajeno.to_string_lossy() }))
+            .await
+            .expect("tiene que leer del root del contexto");
+        assert!(leido.contains("ajeno"), "salida: {leido:?}");
+
+        let fuera = tool
+            .execute(&c, serde_json::json!({ "path": en_propio.to_string_lossy() }))
+            .await;
+        assert!(
+            fuera.is_err(),
+            "el root del tool ya no manda: su directorio deberia estar fuera"
+        );
+    }
+
+    /// Dos workspaces con permisos distintos no se pisan: el sandbox que
+    /// aplica es el del contexto, no el que el tool tiene guardado.
+    #[tokio::test]
+    async fn cada_workspace_manda_con_su_sandbox() {
+        let dir_a = tempfile::TempDir::new().unwrap();
+        let dir_b = tempfile::TempDir::new().unwrap();
+        let en_a = dir_a.path().join("a.txt");
+        let en_b = dir_b.path().join("b.txt");
+        std::fs::write(&en_a, "A").unwrap();
+        std::fs::write(&en_b, "B").unwrap();
+
+        // El tool arranca con un sandbox que no deja leer nada.
+        let cerrado: Arc<RwLock<Box<dyn SandboxTrait>>> =
+            Arc::new(RwLock::new(Box::new(ReadableOnly(vec![]))));
+        let tool = ReadFileTool {
+            workspace_root: dir_a.path().to_path_buf(),
+            sandbox: cerrado,
+        };
+
+        // Llamada 1: workspace con root de A, legible solo A.
+        let mut c_a = ctx();
+        c_a.workspace = Some(scope(
+            dir_a.path(),
+            ReadableOnly(vec![dir_a.path().to_path_buf()]),
+        ));
+        assert!(tool
+            .execute(&c_a, serde_json::json!({ "path": en_a.to_string_lossy() }))
+            .await
+            .is_ok());
+        assert!(
+            tool.execute(&c_a, serde_json::json!({ "path": en_b.to_string_lossy() }))
+                .await
+                .is_err(),
+            "A no puede leer B"
+        );
+
+        // Llamada 2: MISMO tool, workspace con root de B, legible solo B.
+        let mut c_b = ctx();
+        c_b.workspace = Some(scope(
+            dir_b.path(),
+            ReadableOnly(vec![dir_b.path().to_path_buf()]),
+        ));
+        assert!(tool
+            .execute(&c_b, serde_json::json!({ "path": en_b.to_string_lossy() }))
+            .await
+            .is_ok());
+        assert!(
+            tool.execute(&c_b, serde_json::json!({ "path": en_a.to_string_lossy() }))
+                .await
+                .is_err(),
+            "B no puede leer A"
+        );
+    }
+
+    /// Sin workspace en el contexto, el tool usa su root y su sandbox
+    /// propios. Es lo de la invocacion directa por API y lo de todos los
+    /// tests anteriores: el cambio no puede haber roto ese camino.
+    #[tokio::test]
+    async fn sin_workspace_en_el_contexto_manda_el_del_tool() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let dentro = dir.path().join("dato.txt");
+        std::fs::write(&dentro, "ok").unwrap();
+
+        let abierto: Arc<RwLock<Box<dyn SandboxTrait>>> =
+            Arc::new(RwLock::new(Box::new(ReadableOnly(vec![]))));
+        let tool = ReadFileTool {
+            workspace_root: dir.path().to_path_buf(),
+            sandbox: abierto,
+        };
+
+        // El directorio del tool siempre es legible por el short-circuit de
+        // `resolve_under_workspace`, asi que el fallback tiene que andar.
+        let leido = tool
+            .execute(&ctx(), serde_json::json!({ "path": dentro.to_string_lossy() }))
+            .await
+            .expect("sin workspace en el contexto manda el root propio");
+        assert!(leido.contains("ok"));
     }
 }

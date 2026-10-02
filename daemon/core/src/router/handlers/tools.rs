@@ -68,7 +68,8 @@ pub async fn invoke_tool(
     let started = std::time::Instant::now();
     let ctx = tools_engine::ExecuteContext {
         agent_id: String::new(),
-        cancel: None,
+        workspace: None,
+            cancel: None,
         http_client: Some(state.engine.http_client.clone()),
     };
     match tool.execute(&ctx, args).await {

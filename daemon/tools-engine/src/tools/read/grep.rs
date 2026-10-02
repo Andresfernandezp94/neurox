@@ -44,7 +44,7 @@ impl Tool for GrepTool {
     }
 
 
-    async fn execute(&self, _ctx: &crate::ExecuteContext, args: Value) -> Result<String, String> {
+    async fn execute(&self, ctx: &crate::ExecuteContext, args: Value) -> Result<String, String> {
         let pattern = args
             .get("pattern")
             .and_then(|v| v.as_str())
@@ -63,10 +63,11 @@ impl Tool for GrepTool {
         // `writable: false` argument tells `resolve_under_workspace`
         // to accept any path under readable_paths OR under the
         // workspace root itself.
+        let scope = ctx.scope(&self.workspace_root, &self.sandbox);
         let resolved = resolve_under_workspace(
-            &self.workspace_root,
+            scope.root,
             path,
-            &self.sandbox.read().await.readable_paths_resolved(&self.workspace_root),
+            &scope.readable().await,
             false,
         )
         .map_err(|e| format!("path: {e}"))?;
@@ -138,7 +139,8 @@ mod tests {
         };
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"pattern": "hello", "path": dir.path().to_string_lossy().to_string()}),
             )
             .await
@@ -158,7 +160,8 @@ mod tests {
         };
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"pattern": "x", "path": "/etc"}),
             )
             .await;
@@ -186,7 +189,8 @@ mod tests {
         // ~/.ssh is readable by the process but NOT in readable_paths
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({
                     "pattern": "BEGIN",
                     "path": "/home/andres_fernandez/.ssh",

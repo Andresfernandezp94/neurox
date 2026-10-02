@@ -102,12 +102,89 @@ pub struct ToolResult {
     pub error: Option<String>,
 }
 
+/// Workspace efectivo de UNA llamada a tool.
+///
+/// Lo arma el daemon, que es el unico que sabe que workspace tiene la
+/// sesion que esta pidiendo la llamada. El tool no resuelve nada: recibe la
+/// raiz ya resuelta y el sandbox de ESE workspace.
+///
+/// El sandbox viaja en un `Arc` propio por workspace, no en el `Arc`
+/// compartido global. Con un solo `Arc` dos workspaces con permisos
+/// distintos serian indistinguibles para el tool, y cambiar uno pisaria al
+/// otro: es el mismo bug que hacia que configurar el sandbox desde la UI
+/// no llegara a las tools.
+///
+/// `id: None` significa "sin workspace asociado": el tool usa su sandbox
+/// propio, que es el default global. Es lo que pasa con la invocacion
+/// directa por API y con los tests.
+#[derive(Clone)]
+pub struct WorkspaceScope {
+    /// Id del workspace. `None` = sandbox global.
+    pub id: Option<String>,
+    /// Raiz ya resuelta: nunca un placeholder sin expandir.
+    pub root: std::path::PathBuf,
+    /// Sandbox de ESTE workspace.
+    pub sandbox: std::sync::Arc<tokio::sync::RwLock<Box<dyn crate::sandbox::SandboxConfig>>>,
+}
+
+// El trait `SandboxConfig` no pide `Debug` ni `Clone`, asi que los derives
+// no alcanzan. `ExecuteContext` los deriva, y se seguianderivando aunque
+// hoy nada los use: mejor mantenerlos con implementaciones a mano que
+// romper la superficie de la API.
+impl std::fmt::Debug for WorkspaceScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkspaceScope")
+            .field("id", &self.id)
+            .field("root", &self.root)
+            .field("sandbox", &"<dyn SandboxConfig>")
+            .finish()
+    }
+}
+
+/// Root + sandbox de una llamada, ya resueltos.
+///
+/// Antes cada tool repetia el par `self.workspace_root` + `self.sandbox`,
+/// que son valores fijos de construccion. Con workspaces, el root
+/// efectivo depende de quien llamo, asi que se lee del contexto y el
+/// valor propio queda como default.
+pub struct Scope<'a> {
+    pub root: &'a std::path::Path,
+    pub sandbox: &'a std::sync::Arc<tokio::sync::RwLock<Box<dyn crate::sandbox::SandboxConfig>>>,
+}
+
+impl<'a> Scope<'a> {
+    /// Alcance de lectura. Incluye los `writable_paths`: leer implicito
+    /// donde se puede escribir.
+    pub async fn readable(&self) -> Vec<std::path::PathBuf> {
+        self.sandbox
+            .read()
+            .await
+            .readable_paths_resolved(self.root)
+    }
+
+    /// Alcance de escritura.
+    pub async fn writable(&self) -> Vec<std::path::PathBuf> {
+        self.sandbox
+            .write()
+            .await
+            .writable_paths_resolved(self.root)
+    }
+
+    /// Tope de recursion para glob/grep. `None` = default del tool.
+    pub async fn depth(&self) -> Option<usize> {
+        self.sandbox.read().await.max_recursion_depth()
+    }
+}
+
 /// EP-2026-08-19: per-request context passed to `Tool::execute`. Currently
 /// only `agent_id` (so tools media proxied via the daemon can pick the
 /// right output directory). The trait can be extended (session_id, etc.).
 #[derive(Debug, Clone)]
 pub struct ExecuteContext {
     pub agent_id: String,
+    /// Workspace de esta llamada. `None` = el tool usa su root y su sandbox
+    /// propios (invocacion directa, tests).
+    pub workspace: Option<WorkspaceScope>,
     /// EP-0013 T-003: optional cancellation token. Tools that perform
     /// long-running operations (shell, generate_*) should
     /// poll `cancel.is_cancelled()` and return `Err("cancelled")` when
@@ -118,6 +195,35 @@ pub struct ExecuteContext {
     /// calls should clone this instead of building their own
     /// `reqwest::Client` (which would skip connection pooling).
     pub http_client: Option<std::sync::Arc<reqwest::Client>>,
+}
+
+impl Default for ExecuteContext {
+    fn default() -> Self {
+        Self {
+            agent_id: String::new(),
+            workspace: None,
+            cancel: None,
+            http_client: None,
+        }
+    }
+}
+
+impl ExecuteContext {
+    /// Root + sandbox efectivos de esta llamada.
+    ///
+    /// Con workspace en el contexto manda el del contexto; si no, el par
+    /// propio del tool. Los dos `&'a` se unifican en el `Scope` de
+    /// retorno, asi que el borrow vive lo que haga falta sin clonar el Arc.
+    pub fn scope<'a>(
+        &'a self,
+        root: &'a std::path::Path,
+        sandbox: &'a std::sync::Arc<tokio::sync::RwLock<Box<dyn crate::sandbox::SandboxConfig>>>,
+    ) -> Scope<'a> {
+        match self.workspace.as_ref() {
+            Some(w) => Scope { root: &w.root, sandbox: &w.sandbox },
+            None => Scope { root, sandbox },
+        }
+    }
 }
 
 #[async_trait]

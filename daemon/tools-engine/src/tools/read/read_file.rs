@@ -51,7 +51,7 @@ impl Tool for ReadFileTool {
     }
 
 
-    async fn execute(&self, _ctx: &crate::ExecuteContext, args: Value) -> Result<String, String> {
+    async fn execute(&self, ctx: &crate::ExecuteContext, args: Value) -> Result<String, String> {
         let path = args
             .get("path")
             .and_then(|v| v.as_str())
@@ -68,10 +68,11 @@ impl Tool for ReadFileTool {
             .and_then(|v| v.as_u64())
             .map(|v| v as usize);
 
+        let scope = ctx.scope(&self.workspace_root, &self.sandbox);
         let resolved = resolve_under_workspace(
-            &self.workspace_root,
+            scope.root,
             path,
-            &self.sandbox.read().await.readable_paths_resolved(&self.workspace_root),
+            &scope.readable().await,
             false,
         )
         .map_err(|e| format!("path: {e}"))?;
@@ -178,7 +179,8 @@ mod tests {
         };
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"path": path.to_string_lossy().to_string()}),
             )
             .await
@@ -196,7 +198,8 @@ mod tests {
         };
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"path": "/etc/passwd"}),
             )
             .await;
@@ -217,7 +220,8 @@ mod tests {
         };
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"path": path.to_string_lossy().to_string(), "offset": 100}),
             )
             .await;
@@ -237,7 +241,8 @@ mod tests {
         };
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"path": ""}),
             )
             .await;
@@ -259,7 +264,8 @@ mod tests {
         };
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"path": path.to_string_lossy().to_string(), "limit": 0}),
             )
             .await;

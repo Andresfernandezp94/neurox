@@ -720,7 +720,8 @@ mod tests {
             &tool,
             &tools_engine::tools::ExecuteContext {
                 agent_id: "test-agent".to_string(),
-                cancel: None,
+                workspace: None,
+            cancel: None,
                 http_client: None,
             },
             serde_json::json!({}),

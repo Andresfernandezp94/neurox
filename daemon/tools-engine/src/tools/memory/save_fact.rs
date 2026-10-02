@@ -120,7 +120,8 @@ mod tests {
         std::env::set_var("NEUROX_IDENTITY_DIR", dir.path());
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({"content": "user prefers dark mode"}),
             )
             .await
@@ -134,7 +135,8 @@ mod tests {
         let tool = SaveFactTool;
         let result = tool
             .execute(
-                &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                 serde_json::json!({}),
             )
             .await;
@@ -153,7 +155,8 @@ mod tests {
             handles.push(tokio::spawn(async move {
                 let tool = SaveFactTool;
                 tool.execute(
-                    &crate::ExecuteContext { agent_id: "test".into(), cancel: None, http_client: None },
+                    &crate::ExecuteContext { agent_id: "test".into(), workspace: None,
+            cancel: None, http_client: None },
                     serde_json::json!({"content": format!("concurrent fact {i}")}),
                 )
                 .await
