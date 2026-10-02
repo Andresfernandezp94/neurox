@@ -137,6 +137,7 @@ async fn full_flow_register_session_message_with_real_default_agent() {
         auth: neurox::config::AuthConfigSection::default(),
         llm: neurox::config::LlmConfig::default(),
         sandbox: SandboxConfig::default(),
+        workspaces: Default::default(),
         session_agents: SessionAgentsConfig::default(),
     };
     registry.load_from_config(&cfg).await.unwrap();
@@ -295,6 +296,7 @@ async fn websocket_streams_session_events() {
         auth: neurox::config::AuthConfigSection::default(),
         llm: neurox::config::LlmConfig::default(),
         sandbox: SandboxConfig::default(),
+        workspaces: Default::default(),
         session_agents: SessionAgentsConfig::default(),
     };
 
@@ -449,6 +451,7 @@ async fn ephemeral_researcher_end_to_end() {
         plugins_registry: None,
         llm: neurox::config::LlmConfig::default(),
         sandbox: SandboxConfig::default(),
+        workspaces: Default::default(),
         session_agents: SessionAgentsConfig::default(),
         auth: neurox::config::AuthConfigSection::default(),
     };
@@ -632,6 +635,7 @@ async fn sse_stream_terminates_even_when_the_agent_cannot_run() {
         auth: neurox::config::AuthConfigSection::default(),
         llm: neurox::config::LlmConfig::default(),
         sandbox: SandboxConfig::default(),
+        workspaces: Default::default(),
         session_agents: SessionAgentsConfig::default(),
     };
     let tools = Arc::new(tools_engine::tools::ToolRegistry::new());

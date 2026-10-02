@@ -127,6 +127,7 @@ async fn load_from_config_populates_registry() {
         plugins_registry: None,
         llm: neurox::config::LlmConfig::default(),
         sandbox: SandboxConfig::default(),
+        workspaces: Default::default(),
         session_agents: SessionAgentsConfig::default(),
         auth: neurox::config::AuthConfigSection::default(),
     };

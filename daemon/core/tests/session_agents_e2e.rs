@@ -131,6 +131,7 @@ impl TestRig {
             plugins_registry: None,
             llm: LlmConfig::default(),
             sandbox: SandboxConfig::default(),
+        workspaces: Default::default(),
             session_agents: SessionAgentsConfig { agents: specs },
             auth: neurox::config::AuthConfigSection::default(),
         };

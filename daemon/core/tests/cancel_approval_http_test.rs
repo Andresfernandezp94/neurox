@@ -83,6 +83,7 @@ async fn cancel_endpoint_marks_session_inactive() {
         plugins_registry: None,
         llm: neurox::config::LlmConfig::default(),
         sandbox: SandboxConfig::default(),
+        workspaces: Default::default(),
         session_agents: SessionAgentsConfig::default(),
         auth: neurox::config::AuthConfigSection::default(),
     };
@@ -312,6 +313,7 @@ async fn approval_endpoint_create_and_respond() {
         plugins_registry: None,
         llm: neurox::config::LlmConfig::default(),
         sandbox: SandboxConfig::default(),
+        workspaces: Default::default(),
         session_agents: SessionAgentsConfig::default(),
         auth: neurox::config::AuthConfigSection::default(),
     };

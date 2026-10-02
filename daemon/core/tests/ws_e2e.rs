@@ -79,6 +79,7 @@ async fn ws_stream_emits_session_started_and_done() {
         plugins_registry: None,
         llm: neurox::config::LlmConfig::default(),
         sandbox: SandboxConfig::default(),
+        workspaces: Default::default(),
         session_agents: SessionAgentsConfig::default(),
         auth: neurox::config::AuthConfigSection::default(),
     };
