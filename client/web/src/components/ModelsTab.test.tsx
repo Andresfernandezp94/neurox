@@ -200,6 +200,72 @@ describe("ModelsTab", () => {
 // La carpeta del modelo bajo MODELS_DIR ES la categoría. El listado del
 // daemon ya viene agrupado y ordenado, así que la UI agrupa sin reordenar.
 
+describe("ModelsTab hugging face results", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    vi.mocked(modelsApi.getLocalModels).mockResolvedValue({
+      dir: "/models",
+      env_var: "NEUROX_MODELS_DIR",
+      models: [],
+    } as never);
+    vi.mocked(llmApi.getProviders).mockResolvedValue({
+      providers: [],
+      default_provider: "",
+      default_model: "",
+    } as never);
+  });
+
+  function hfModel(i: number) {
+    return {
+      id: `org/model-${i}`,
+      display_name: `Model ${i}`,
+      gated: false,
+      downloads: 1000 + i,
+    };
+  }
+
+  it("renders every result and scrolls inside a fixed-height wrapper", async () => {
+    // Lo que se VE son 3 (HF_VISIBLE), pero los 30 se renderizan y el
+    // wrapper scrollea. Si se hiciera `slice(0, 3)` la lista no tendria nada
+    // que scrollear.
+    const many = Array.from({ length: 30 }, (_, i) => hfModel(i));
+    vi.mocked(modelsApi.searchHfModels).mockResolvedValue({
+      models: many,
+    } as never);
+
+    render(<ModelsTab />);
+    const search = await screen.findByPlaceholderText(/search hugging face/i);
+    fireEvent.change(search, { target: { value: "qwen" } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("models-hf-list")).toBeInTheDocument();
+    });
+    // El wrapper con scroll existe y envuelve la lista.
+    const wrapper = screen.getByTestId("models-hf-scroll");
+    expect(wrapper).toContainElement(screen.getByTestId("models-hf-list"));
+    // Los 30 results existen en el DOM.
+    expect(screen.getByText("Model 0")).toBeInTheDocument();
+    expect(screen.getByText("Model 29")).toBeInTheDocument();
+    expect(screen.getAllByText(/^Model /)).toHaveLength(30);
+  });
+
+  it("still reports the real total when results fit", async () => {
+    vi.mocked(modelsApi.searchHfModels).mockResolvedValue({
+      models: [hfModel(0), hfModel(1)],
+    } as never);
+
+    render(<ModelsTab />);
+    const search = await screen.findByPlaceholderText(/search hugging face/i);
+    fireEvent.change(search, { target: { value: "qwen" } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("models-hf-list")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("hf-results-badge")).toHaveTextContent("2 results");
+  });
+});
+
 describe("ModelsTab categories", () => {
   beforeEach(() => {
     cleanup();

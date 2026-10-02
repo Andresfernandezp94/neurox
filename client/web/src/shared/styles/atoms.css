@@ -375,25 +375,36 @@
  * El recorte de cantidad (HF_VISIBLE en ModelsTab) y este scroll son cosas
  * distintas: el recorte muestra menos resultados, el scroll deja
  * alcanzables los que ya se muestran. */
+/* Wrapper con ALTO FIJO y scroll propio.
+ *
+ * El alto visible lo fija esta caja, no la columna: sin esto la lista
+ * crece con los resultados y arrastra la altura de la fila entera, que es
+ * lo que desalineaba la columna con la card de Local service.
+ *
+ * Es el único elemento con `overflow-y`: la lista interior (`hf-list`) es
+ * flow normal y por eso no necesita nada de esto. */
+.models-panel__hf-scroll {
+  height: 20rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* El scrollbar aparece siempre en esta caja aunque el contenido entre:
+   * con `auto` y contenido corto no hay barra y el operador no sabe que la
+   * lista scrollea. Es un resultado de scroll, no la pagina. */
+  scrollbar-gutter: stable;
+  /* Aire alrededor del contenido scrolleable, y del lado de la barra: sin
+   * esto las cards quedan pegadas al borde del wrapper y a la barra, que se
+   * lee como un recorte y no como un scroll. */
+  padding: 4px 8px 4px 4px;
+  /* El padding suma al alto declarado: sin esto el wrapper mide
+   * 20rem + 8px y la lista scrollea 8px antes de tiempo. */
+  box-sizing: border-box;
+}
+
+/* Lista interior: flow normal, sin alto ni overflow propios. */
 .models-panel__hf-list {
   display: flex;
   flex-direction: column;
   gap: var(--gap-card-grid);
-  /* Ocupa el alto disponible y scrollea si no alcanza. Sin `max-height`
-   * fijo: con 3 resultados la lista mide menos que un `max-height` de
-   * 26rem, nunca desborda, y la barra de scroll no aparece nunca — que es
-   * lo que pasaba. El alto lo decide la columna, que ya está estirada a la
-   * altura de la card de Local service. */
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 4px;
-  /* Imprescindible: el <Card> que envuelve la lista es un flex column, y
-   * un item flex con `max-height` pero sin `min-height: 0` tiene su
-   * `min-height` automático en `auto`, o sea no baja de su contenido. El
-   * navegador lo agranda a la altura de los resultados y nunca aparece la
-   * barra de scroll: el `max-height` queda sin efecto. */
-  min-height: 0;
 }
 
 .models-panel__hf-card {
@@ -401,14 +412,14 @@
   flex-shrink: 0;
 }
 
-/* La columna derecha y su <Card> son flex column para que `flex: 1` de la
- * lista pueda estirarse. Sin esto, la lista no tiene alto definido contra
- * el cual scrollear. */
-.models-tab__col,
-.models-tab__col > .provider-card {
+/* La columna izquierda (Local service) y la derecha (HF) se estiran a la
+ * misma altura, la que marque la mas alta: asi los bordes de las cajas
+ * quedan alineados. El `max-height` no va en la columna porque el alto de
+ * la lista scrolleable ya lo fija su wrapper. */
+.models-tab__col {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-width: 0;
 }
 
 .models-panel__hf-more {
