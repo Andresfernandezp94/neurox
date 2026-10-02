@@ -12,6 +12,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { Sidebar, type NavId } from "./Sidebar";
 import { StoreProvider } from "../../store/StoreContext";
 import { AuthProvider } from "../../hooks/useAuth";
+import { __resetAppFullscreenForTests } from "../hooks/useAppFullscreen";
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(
@@ -26,6 +27,15 @@ describe("Sidebar", () => {
 
   beforeEach(() => {
     onTabChange.mockClear();
+    // El store de fullscreen es de nivel de modulo (a proposito: lo
+    // comparten el sidebar y el chat), asi que su estado sobrevive entre
+    // tests. Sin resetear, un test que entra en fullscreen ensucia el
+    // siguiente.
+    __resetAppFullscreenForTests();
+    Object.defineProperty(document, "fullscreenElement", {
+      configurable: true,
+      value: null,
+    });
   });
 
   it("renders every navigation item", () => {
@@ -121,6 +131,139 @@ describe("Sidebar", () => {
       expect(btn.className).toContain("active");
       unmount();
     }
+  });
+
+  describe("menu de acciones del avatar", () => {
+    const avatar = () => screen.getByTestId("user-avatar");
+    const footer = () => screen.getByTestId("sidebar-footer");
+
+    it("arranca cerrado", () => {
+      renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
+      expect(footer().className).not.toContain("sidebar-panel__footer--actions-open");
+      expect(avatar().getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("el avatar es el trigger: lo alterna como un toggle", () => {
+      renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
+
+      fireEvent.click(avatar());
+      expect(footer().className).toContain("sidebar-panel__footer--actions-open");
+      expect(avatar().getAttribute("aria-expanded")).toBe("true");
+
+      // Segundo toque: cierra. Un toggle, no un abrir.
+      fireEvent.click(avatar());
+      expect(footer().className).not.toContain("sidebar-panel__footer--actions-open");
+      expect(avatar().getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("Escape cierra el menu", () => {
+      renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
+
+      fireEvent.click(avatar());
+      expect(footer().className).toContain("sidebar-panel__footer--actions-open");
+
+      // Sin esto el unico modo de cerrarlo en mobile es volver a tocar el
+      // avatar, y no hay teclado a la vista.
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(footer().className).not.toContain("sidebar-panel__footer--actions-open");
+    });
+
+    it("las cuatro acciones siguen montadas con el menu cerrado", () => {
+      // El menu se oculta con CSS (visibility), no se desmonta: si se
+      // desmontara, cerrarlo perderia el estado del theme toggle.
+      renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
+
+      expect(screen.getByTestId("sidebar-bell")).toBeInTheDocument();
+      expect(screen.getByTestId("theme-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("sidebar-maximize")).toBeInTheDocument();
+      expect(screen.getByTestId("sidebar-logout")).toBeInTheDocument();
+    });
+
+    it("el boton de pantalla completa esta entre el tema y el logout", () => {
+      // Orden pedido: notificaciones, tema, pantalla completa, logout.
+      renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
+
+      const acciones = document.querySelector(".sidebar-footer-actions");
+      expect(acciones).not.toBeNull();
+      const orden = Array.from(acciones!.querySelectorAll("[data-testid]")).map(
+        (c) => c.getAttribute("data-testid"),
+      );
+      expect(orden).toEqual([
+        "sidebar-bell",
+        "theme-toggle",
+        "sidebar-maximize",
+        "sidebar-logout",
+      ]);
+    });
+
+    it("maximizar pide fullscreen sobre el shell .app, no sobre documentElement", () => {
+      // Pobrelo sobre documentElement esconderia la sidebar, que vive
+      // adentro de `.app`. Es el punto de pedir el boton en la barra.
+      renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
+
+      const shell = document.createElement("div");
+      shell.className = "app";
+      const requestFullscreen = vi.fn().mockResolvedValue(undefined);
+      (shell as unknown as { requestFullscreen: unknown }).requestFullscreen =
+        requestFullscreen;
+      document.body.appendChild(shell);
+
+      try {
+        fireEvent.click(screen.getByTestId("sidebar-maximize"));
+        expect(requestFullscreen).toHaveBeenCalledTimes(1);
+      } finally {
+        shell.remove();
+      }
+    });
+
+    it("maximizar cierra el menu", () => {
+      // El menu flota sobre la barra: dejarlo abierto taparia el contenido
+      // que se acaba de expandir a pantalla completa.
+      renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
+
+      fireEvent.click(avatar());
+      expect(footer().className).toContain("sidebar-panel__footer--actions-open");
+
+      fireEvent.click(screen.getByTestId("sidebar-maximize"));
+      expect(footer().className).not.toContain("sidebar-panel__footer--actions-open");
+    });
+
+    it("el boton se resincroniza si el fullscreen sale desde el navegador", () => {
+      // Salir con el ESC del sistema no pasa por ningun boton de la app: lo
+      // detecta el listener de `fullscreenchange`, que vive en el modulo y
+      // no en un efecto de ChatPanel (que en mobile no esta montado).
+      renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
+
+      const btn = () => screen.getByTestId("sidebar-maximize");
+      expect(btn().getAttribute("aria-pressed")).toBe("false");
+      expect(btn().getAttribute("aria-label")).toBe("Pantalla completa");
+
+      const shell = document.createElement("div");
+      shell.className = "app";
+      (shell as unknown as { requestFullscreen: unknown }).requestFullscreen =
+        vi.fn().mockResolvedValue(undefined);
+      document.body.appendChild(shell);
+
+      try {
+        Object.defineProperty(document, "fullscreenElement", {
+          configurable: true,
+          value: shell,
+        });
+        fireEvent(document, new Event("fullscreenchange"));
+
+        expect(btn().getAttribute("aria-pressed")).toBe("true");
+        expect(btn().getAttribute("aria-label")).toBe("Salir de pantalla completa");
+
+        Object.defineProperty(document, "fullscreenElement", {
+          configurable: true,
+          value: null,
+        });
+        fireEvent(document, new Event("fullscreenchange"));
+        expect(btn().getAttribute("aria-pressed")).toBe("false");
+      } finally {
+        shell.remove();
+      }
+    });
   });
 
 });

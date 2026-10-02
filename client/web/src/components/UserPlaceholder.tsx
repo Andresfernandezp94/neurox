@@ -29,9 +29,16 @@ export interface UserPlaceholderProps {
   footer?: ReactNode;
   /** Click handler para el trigger del avatar (para abrir menú). */
   onTriggerClick?: () => void;
+  /**
+   * Estado del menu que abre el avatar. En mobile es lo unico que hay en el
+   * pie, asi que el trigger tiene que anunciar si esta abierto: sin
+   * `aria-expanded`, un lector de pantalla no distingue "avatar" de "avatar
+   * con el menu abierto".
+   */
+  actionsOpen?: boolean;
 }
 
-export function UserPlaceholder({ avatarClassName, footer, onTriggerClick }: UserPlaceholderProps = {}) {
+export function UserPlaceholder({ avatarClassName, footer, onTriggerClick, actionsOpen }: UserPlaceholderProps = {}) {
   const { user } = useAuth();
 
   const initials = initialsFrom(user?.username);
@@ -46,6 +53,7 @@ export function UserPlaceholder({ avatarClassName, footer, onTriggerClick }: Use
           onClick={onTriggerClick}
           role="button"
           tabIndex={0}
+          aria-expanded={actionsOpen === undefined ? undefined : actionsOpen}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onTriggerClick?.(); }}
         >
           <span className="user-avatar">

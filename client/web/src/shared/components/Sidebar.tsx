@@ -29,6 +29,8 @@ import {
   IconGrid,
   IconRobot,
   IconPlug,
+  IconMaximize,
+  IconMinimize,
 } from "./Icons";
 import { UserPlaceholder } from "../../components/UserPlaceholder";
 import { ThemeToggle } from "./ThemeToggle";
@@ -36,6 +38,7 @@ import { useI18n } from "../hooks/useI18n";
 import { useConnectionState, useStore } from "../../store/StoreContext";
 import { useAuth } from "../../hooks/useAuth";
 import { logout } from "../../api/auth";
+import { useAppFullscreen } from "../hooks/useAppFullscreen";
 
 export type NavId = "status" | "chat" | "intelligence" | "mcp" | "config";
 
@@ -62,6 +65,42 @@ export function Sidebar({ view, onTabChange, hidden = false, onLogout }: Sidebar
   const { state } = useStore();
   const pendingApprovals = state.approvals.size;
   const connAvatarClass = useConnAvatarClass();
+  // 2026-10-02: menu de acciones del avatar. En mobile el pie es una
+  // bottom-bar de 3.5rem y no entra avatar + 4 iconos: quedaria todo
+  // apretado. El avatar queda solo y abre las acciones como una fila
+  // flotante que se despliega sobre la barra, de derecha a izquierda.
+  // En desktop el menu no se usa (las acciones viven en linea en el
+  // footer), asi que el estado arranca cerrado y solo se abre al tocar.
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const { isExpanded, toggle: toggleFullscreen } = useAppFullscreen();
+
+  // Escape cierra el menu. Sin esto el unico modo de cerrarlo es volver a
+  // tocar el avatar, y en mobile no hay teclado a la vista.
+  useEffect(() => {
+    if (!actionsOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setActionsOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [actionsOpen]);
+
+  // Al pasar a desktop el menu se cierra solo: las acciones vuelven a estar
+  // en linea en el footer y un `actions-open` colgado haria el DOM mentiroso.
+  //
+  // Se escucha el breakpoint y no se chequea en cada render a proposito: un
+  // `if (!isMobile()) setActionsOpen(false)` sin deps correria en cada render
+  // y dejaria el menu imposible de abrir en cualquier lado que no sea mobile.
+  // Solo interesa la TRANSICION, asi que va por `change`.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(max-width: 1024px)");
+    const onChange = () => {
+      if (!mq.matches) setActionsOpen(false);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
   // EP-0024: en mobile (max-width: 1024px) la sidebar es bottom-bar, no aplica
   // el concepto de expand/collapse (siempre se muestra como barra horizontal).
   // Declarada como `function` (no `const arrow`) para que se hoisted y
@@ -158,7 +197,12 @@ export function Sidebar({ view, onTabChange, hidden = false, onLogout }: Sidebar
 
         <div className="sidebar-panel__spacer" />
 
-        <div className="sidebar-panel__footer">
+        <div
+          className={`sidebar-panel__footer${
+            actionsOpen ? " sidebar-panel__footer--actions-open" : ""
+          }`}
+          data-testid="sidebar-footer"
+        >
           {/* EP-2026-09-02: solo la tarjeta del usuario. El indicador de
               conexión (ok/degraded/unreachable) vive en el halo del
               avatar vía .conn-avatar. El badge con versión + estado +
@@ -166,10 +210,18 @@ export function Sidebar({ view, onTabChange, hidden = false, onLogout }: Sidebar
               rompía la jerarquía visual del footer. */}
           <UserPlaceholder
             avatarClassName={connAvatarClass}
+            /* El avatar es el trigger del menu de acciones. En mobile es el
+             * unico control del pie, asi que sin esto no habria forma de
+             * llegar a la campana, al tema o al logout. */
+            onTriggerClick={() => setActionsOpen((o) => !o)}
+            actionsOpen={actionsOpen}
             footer={
-              /* Acciones de sesión al pie: campana · tema · logout. La
-               * campana muestra las aprobaciones pendientes, que es data
-               * real del store y lo único accionable hoy. */
+              /* Acciones de sesión al pie: campana · tema · pantalla
+               * completa · logout. La campana muestra las aprobaciones
+               * pendientes, que es data real del store y lo único
+               * accionable hoy. En mobile esta fila se convierte en el menu
+               * flotante que abre el avatar (ver .sidebar-footer-actions
+               * dentro del breakpoint de 1024px). */
               <div className="sidebar-footer-actions">
                 <button
                   type="button"
@@ -198,6 +250,29 @@ export function Sidebar({ view, onTabChange, hidden = false, onLogout }: Sidebar
                   )}
                 </button>
                 <ThemeToggle className="sidebar-footer-action" />
+                {/* Maximizar. El estado viene del store de modulo
+                 * (useAppFullscreen) y no de este componente, porque el
+                 * chat footer tiene otro boton para lo mismo: si cada uno
+                 * guardara su propio estado, los dos iconos podrian
+                 * contradecirse —peor todavia desde mobile, donde
+                 * ChatPanel ni siquiera esta montado—. */}
+                <button
+                  type="button"
+                  className="sidebar-maximize sidebar-footer-action"
+                  title={isExpanded ? "Salir de pantalla completa" : "Pantalla completa"}
+                  aria-label={isExpanded ? "Salir de pantalla completa" : "Pantalla completa"}
+                  aria-pressed={isExpanded}
+                  data-testid="sidebar-maximize"
+                  onClick={() => {
+                    toggleFullscreen();
+                    // Maximizar no es una accion de menu: se cierra para
+                    // no dejar la fila flotando encima del contenido que
+                    // se acaba de expandir.
+                    setActionsOpen(false);
+                  }}
+                >
+                  {isExpanded ? <IconMinimize /> : <IconMaximize />}
+                </button>
                 <button
                   type="button"
                   className="sidebar-logout sidebar-footer-action"
