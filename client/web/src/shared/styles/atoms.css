@@ -5862,10 +5862,16 @@
    * van `absolute` y se acomodan solos. Como el contenedor es `fixed` con
    * `pointer-events: none`, que no ocupe lugar no molesta a nadie.
    *
-   * El `padding-top` es mas grande que el resto a proposito: el bloque
-   * arranca separado del borde superior de la app. Pegado al borde se leia
-   * como parte de la barra de arriba y no como un aviso flotando. */
-  padding: 1.5rem 0.75rem 0.75rem;
+   * SIN padding aca a proposito. Los hijos absolutos se posicionan contra
+   * la PADDING BOX del ancestro, no contra su content box, asi que un
+   * `padding` en el contenedor no los mueve: quedan pegados al borde
+   * igual. El margen vive en los custom properties de abajo, que los
+   * hijos si respetan. */
+  --notification-inset: 0.75rem;
+  /* Mas arriba que a los lados: el bloque arranca separado del borde
+   * superior de la app. Pegado ahi se leia como parte de la barra de
+   * arriba y no como un aviso flotando. */
+  --notification-inset-top: 1.5rem;
   pointer-events: none;
   /* Misma duracion y curva que la transicion de `.app-main`, para que la
    * franja se mueva CON la sidebar y no se desincronice. */
@@ -5900,18 +5906,18 @@ body[data-sidebar-hidden="true"] .notification-stack {
   /* Profundidad en el mazo: 0 es el aviso de al frente. La setter cada
    * nth-last-child de mas abajo. */
   --depth: 0;
-  /* Cada aviso es independiente y ocupa la banda completa: uno debajo del
-   * otro, sin ancho de columna. Los mensajes son largos (un error de tool
-   * trae la tool, la ruta y el sandbox) y angostarlos los hacia ilegibles
-   * o los parte en mas renglones. */
-  width: 100%;
   pointer-events: auto;
   /* Todos en el mismo lugar: el de al frente los tapa y de cada uno de
-   * atras asoma solo una franja, que es la que dice "hay mas". */
+   * atras asoma solo una franja, que es la que dice "hay mas".
+   *
+   * El inset viene de los custom properties del contenedor, que es donde
+   * el padding del contenedor no puede hacer el trabajo (ver ahi). Con
+   * `left` y `right` fijados la caja toma el ancho sola, asi que no hace
+   * falta `width`. */
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  top: var(--notification-inset-top);
+  left: var(--notification-inset);
+  right: var(--notification-inset);
   /* Cuanto se corre cada uno hacia abajo. 0.5rem era muy pegado: los de
    * atras se leian como un borde y no se entendia que eran avisos
    * separados. 1.5rem deja ver la franja de cada uno, asi que el mazo se
@@ -6017,7 +6023,8 @@ body[data-sidebar-hidden="true"] .notification-stack {
 @media (max-width: 1024px) {
   .notification-stack {
     left: 0;
-    padding: 1rem 0.5rem 0.5rem;
+    --notification-inset: 0.5rem;
+    --notification-inset-top: 1rem;
   }
 }
 
