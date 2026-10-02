@@ -79,16 +79,10 @@ pub async fn put_sandbox(
         new_cfg.max_recursion_depth = depth;
     }
 
-    // Set the sandbox on the engine (real effect) AND update workspace
-    // state for legacy callers.
-    let engine_sandbox: Arc<tokio::sync::RwLock<Box<dyn tools_engine::SandboxConfig>>> = Arc::new(
-        tokio::sync::RwLock::new(Box::new(new_cfg.clone())),
-    );
-    state.engine.set_sandbox(engine_sandbox).await;
-    {
-        let mut s = state.workspace.sandbox.write().await;
-        *s = Box::new(new_cfg.clone());
-    }
+    // Un solo Arc: el del engine (compartido con todas las tools) y el del
+    // `WorkspaceLayer` son el mismo objeto. Por eso alcanza con escribir una
+    // vez, via `set_sandbox`, que ademas es la via que usan las tools.
+    state.engine.set_sandbox(Box::new(new_cfg.clone())).await;
 
     tracing::info!(
         new_enabled = new_cfg.enabled,

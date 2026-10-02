@@ -197,20 +197,23 @@ impl Engine {
 
     // ─── Provider / LlmConfig surface (EP-0004 wave 1) ──────────────
 
-    /// EP-0015: atomically swap the sandbox config. Tools read the
-    /// current value per execution, so the next tool call sees the new
-    /// config without a daemon restart.
+    /// EP-0015: reemplaza el sandbox activo. Las tools leen el valor
+    /// actual en cada ejecucion, asi que el siguiente tool call ya ve la
+    /// config nueva, sin reiniciar el daemon.
     ///
-    /// Note: tools hold their own `Arc<RwLock<Box<dyn SandboxConfig>>>`
-    /// snapshot from when the engine was built. Updates take effect on
-    /// the engine's state immediately and on subsequent tool executions
-    /// that re-read from `engine.sandbox`. A full propagation would
-    /// require storing tools in the engine's `Arc<RwLock<...>>` (future
-    /// refactor — see EP-0013 router partition).
-    pub async fn set_sandbox(&self, new: Arc<RwLock<Box<dyn SandboxConfig>>>) {
-        let _ = new;
-        // TODO: propagate to tool copies. For now, only the engine's
-        // own state is updated. Documented as known limitation.
+    /// Se ESCRIBE DENTRO del `RwLock` compartido en vez de cambiar el
+    /// `Arc`. Es lo que hace que la propagacion sea gratis: `register_defaults`
+    /// le pasa a cada tool un `sandbox.clone()` de ESTE mismo Arc, asi que
+    /// todas comparten la celda de memoria. Reemplazar el Arc dejaria a las
+    /// tools apuntando al viejo, que es justo el bug que habia antes.
+    ///
+    /// Antes el cuerpo era `let _ = new;`: descartaba el valor y el
+    /// comentario de al lado decia que solo se actualizaba el estado del
+    /// engine, lo cual era falso. `PUT /v1/sandbox` validaba los paths,
+    /// construia la config, y no pasaba nada.
+    pub async fn set_sandbox(&self, new: Box<dyn SandboxConfig>) {
+        let mut guard = self.sandbox.write().await;
+        *guard = new;
     }
 
     /// EP-0004 wave 1: seed SQLite providers from a YAML list if the
@@ -638,5 +641,149 @@ impl Engine {
             // The daemon's session store owns the actual session count;
             // we expose the engine-only view here.
         })
+    }
+}
+
+#[cfg(test)]
+mod sandbox_propagation_tests {
+    //! El sandbox tiene que propagarse a las tools.
+    //!
+    //! Estas tools se construyen con un `Arc` al sandbox y lo leen en cada
+    //! ejecucion. Como todas comparten la misma celda, actualizar el sandbox
+    //! se Propaga Es escribir adentro de esa celda.
+    //!
+    //! Antes `set_sandbox` hacia `let _ = new;` (descartaba el valor) con un
+    //! comentario que decia que solo se actualizaba el estado del engine.
+    //! Ademas el engine y el `WorkspaceLayer` tenian DOS Arcs distintos
+    //! construidos desde los mismos valores iniciales, asi que configurar el
+    //! sandbox desde la UI no llegaba a ninguna tool: estas seguian leyendo
+    //! su propio Arc, que nadie mutaba. Editar los paths no hacia nada.
+
+    use super::*;
+    use crate::sandbox::SandboxConfig;
+    use crate::tools::read::read_file::ReadFileTool;
+    use crate::tools::Tool;
+    use crate::tools::{register_defaults, ToolRegistry};
+    use std::path::{Path, PathBuf};
+    use tokio::sync::RwLock;
+
+    /// Sandbox de test que se puede reconfigurar, para poder observar si el
+    /// cambio llego a la tool o no.
+    ///
+    /// `readable_paths_resolved` es lo que consulta `ReadFileTool` para
+    /// resolver un path. Si no se overridea, el default del trait devuelve
+    /// vacio y la tool solo acepta el workspace root.
+    struct SwitchableSandbox {
+        readable: Vec<PathBuf>,
+    }
+
+    impl SandboxConfig for SwitchableSandbox {
+        fn enabled(&self) -> bool {
+            true
+        }
+        fn is_writable(&self, _p: &Path) -> bool {
+            false
+        }
+        fn is_readable(&self, path: &Path) -> bool {
+            self.readable.iter().any(|r| path.starts_with(r))
+        }
+        fn readable_paths_resolved(&self, _workspace_root: &Path) -> Vec<PathBuf> {
+            self.readable.clone()
+        }
+    }
+
+    fn ctx() -> crate::ExecuteContext {
+        crate::ExecuteContext {
+            agent_id: "test".into(),
+            cancel: None,
+            http_client: None,
+        }
+    }
+
+    /// El caso que reportaba el usuario: la UI cambia los paths y la tool
+    /// tiene que verlos en la siguiente ejecucion, sin reiniciar nada.
+    #[tokio::test]
+    async fn a_tool_sees_the_sandbox_change_made_after_it_was_built() {
+        // El workspace y el archivo estan en directorios distintos, asi que
+        // con la lista de legibles vacia la tool lo rechaza.
+        let workspace = tempfile::TempDir::new().unwrap();
+        let fuera = tempfile::TempDir::new().unwrap();
+        let file = fuera.path().join("dato.txt");
+        std::fs::write(&file, "hola").unwrap();
+
+        let sandbox: Arc<RwLock<Box<dyn SandboxConfig>>> = Arc::new(RwLock::new(Box::new(
+            SwitchableSandbox { readable: vec![] },
+        )));
+
+        // La tool se construye con el sandbox cerrado. Mismo camino que
+        // produccion: `register_defaults` le pasa un clon del Arc.
+        let read_file = ReadFileTool {
+            workspace_root: workspace.path().to_path_buf(),
+            sandbox: sandbox.clone(),
+        };
+
+        let antes = read_file
+            .execute(&ctx(), serde_json::json!({ "path": file.to_string_lossy() }))
+            .await;
+        assert!(
+            antes.is_err(),
+            "precondicion: sin readable_paths la tool tiene que rechazar, dio: {:?}",
+            antes
+        );
+
+        // Esto es lo que hace `PUT /v1/sandbox`: agregar el path.
+        let tools = Arc::new(ToolRegistry::with_state_path(None));
+        register_defaults(&tools, workspace.path().to_path_buf(), sandbox.clone());
+        let engine =
+            Engine::for_testing(tools, workspace.path().to_path_buf(), sandbox.clone())
+                .await
+                .unwrap();
+        engine
+            .set_sandbox(Box::new(SwitchableSandbox {
+                readable: vec![fuera.path().to_path_buf()],
+            }))
+            .await;
+
+        // La MISMA instancia de la tool, que antes rechazaba, tiene que poder
+        // leer ahora. Si `set_sandbox` reemplazara el Arc en vez de escribir
+        // en la celda, esta seguiria viendo el viejo y fallaria.
+        let despues = read_file
+            .execute(&ctx(), serde_json::json!({ "path": file.to_string_lossy() }))
+            .await;
+        // `read_file` devuelve las lineas numeradas (`1| ...`), asi que se
+        // compara contra ese formato y no contra el contenido crudo.
+        let salida = despues.expect("la tool tiene que poder leer ahora");
+        assert!(
+            salida.contains("hola"),
+            "la tool tiene que ver el sandbox nuevo: el cambio se aplico por el \
+             Arc que compartio, no por un Arc nuevo. Salida: {salida:?}"
+        );
+    }
+
+    /// El valor queda en la celda compartida, que es la misma que leen las
+    /// tools. Antes el valor se descartaba.
+    #[tokio::test]
+    async fn set_sandbox_writes_into_the_shared_cell() {
+        let sandbox: Arc<RwLock<Box<dyn SandboxConfig>>> = Arc::new(RwLock::new(Box::new(
+            SwitchableSandbox { readable: vec![] },
+        )));
+        let tools = Arc::new(ToolRegistry::with_state_path(None));
+        register_defaults(&tools, PathBuf::from("/tmp"), sandbox.clone());
+        let engine = Engine::for_testing(tools, PathBuf::from("/tmp"), sandbox.clone())
+            .await
+            .unwrap();
+
+        let granted = PathBuf::from("/tmp");
+        engine
+            .set_sandbox(Box::new(SwitchableSandbox {
+                readable: vec![granted.clone()],
+            }))
+            .await;
+
+        // Se lee por el Arc de las tools, no por el del engine.
+        assert!(
+            sandbox.read().await.is_readable(&granted),
+            "el valor tiene que estar en la celda compartida"
+        );
     }
 }
