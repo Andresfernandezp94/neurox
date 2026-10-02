@@ -201,6 +201,20 @@ svg {
   --bg-elevated: #f5f5f7;
   --surface-translucent: rgba(255, 255, 255, 0.78);
   --bg-tertiary: rgba(245, 245, 248, 0.7);
+  /* Faltaba en claro: el token solo estaba definido en el tema oscuro, asi
+   * que en `[data-theme="light"]` `var(--surface-deep)` caia a transparente
+   * y el cuerpo de todas las cards quedaba sin fondo (molecules.css
+   * `.card__body`), igual que las listas de tools de plugins
+   * (`.plugin-card__tools`) y las filas del panel de Sandbox.
+   *
+   * El valor sale de la propia rampa del tema claro, no de un color
+   * inventado: `--surface-deep` es el contenedor hundido y `--bg-elevated`
+   * son los items que popean encima. En oscuro va de #131313 a #1a1a1a
+   * (mismo criterio, un paso por debajo de `--surface` = #0a0a0a). En claro
+   * el escalon va al revés porque "elevated" es mas oscuro sobre fondo
+   * claro: --surface #ffffff -> --surface-deep #fafafa -> --bg-elevated
+   * #f5f5f7. */
+  --surface-deep: #fafafa;
   /* Ver el token oscuro: un solo color para los tres kinds. En claro la
    * consola de AWS usa el pizarra solo sobre el navy; sobre blanco el
    * equivalente legible es el gris de superficie secundaria (#f2f3f3)
