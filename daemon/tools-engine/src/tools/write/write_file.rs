@@ -74,7 +74,12 @@ impl Tool for WriteFileTool {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| "missing 'content' for create".to_string())?;
                 atomic_write(&resolved, content.as_bytes()).await?;
-                Ok(format!("wrote {} bytes to {}", content.len(), path))
+                // El path resuelto, no el argumento: con `${workspace}/notas.md` el
+                // mensaje decia "wrote 4 bytes to ${workspace}/notas.md", que
+                // hace pensar que se escribio en un directorio literal
+                // llamado ${workspace}. El archivo si va al root del
+                // workspace; el mensaje era el que mentia.
+                Ok(format!("wrote {} bytes to {}", content.len(), resolved.display()))
             }
             "strReplace" => {
                 let old_str = args
