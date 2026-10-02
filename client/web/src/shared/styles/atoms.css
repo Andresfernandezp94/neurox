@@ -365,55 +365,135 @@
 
 /* ─── Modelos locales: lista densa + editor ─── */
 
-/* La columna de la lista es un poco mas ancha que la del editor: los
- * filenames de GGUF son largos (`Qwen_Qwen3-4B-Thinking-2507-Q4_K_M.gguf`)
- * y con mitades iguales el nombre se corta justo antes de lo importante. */
+/* La lista tiene ancho FIJO y el editor se lleva todo lo que sobra.
+ *
+ * Al reves que antes: la lista con `1.15fr` y el editor con `1fr`. El editor
+ * necesita el ancho — son labels largos como `tokens_per_second` y textareas
+ * de stop_sequences y system — mientras que la lista tiene un nombre que se
+ * recorta con ellipsis sin dejar de ser legible. */
 .models-tab__cols--models {
-  grid-template-columns: 1.15fr 1fr;
+  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
 }
 
-/* Fila de modelo. Es un <button> entero, no una card con un boton de
+/* Contenedor de las filas de una categoria.
+ *
+ * El gap va acá y no en la fila: las filas son `<button>` secuenciales y el
+ * browser no pone espacio entre inline-blocks ni entre flex items sin gap.
+ * Sin esto se leian como texto pegado, que es el sintoma de "no tiene
+ * estilos". */
+.models-tab__model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Fila de modelo. Es un `<button>` entero, no una card con un boton de
  * edicion: la fila ES la accion de seleccionar, asi que el area clickeable
- * es toda la fila y no un icono de 2rem en la esquina. */
+ * es toda la fila y no un icono de 2rem en la esquina.
+ *
+ * `font: inherit` es obligatorio, no cosmetico: el proyecto no tiene reset
+ * global de `button`, asi que sin esto cada fila se renderiza con la
+ * tipografia por defecto del navegador (Times en varios) y con el fondo
+ * gris del user agent. Eso es exactamente "una card sin estilos".
+ *
+ * El fondo en reposo es `--surface`, no transparente: la fila tiene que
+ * leerse como una superficie—even sin estar seleccionada— para que la lista
+ * no se lea como texto suelto sobre el fondo de la tab. */
 .models-tab__model-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   width: 100%;
-  padding: 0.375rem 0.5rem;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  color: inherit;
+  padding: 0.5rem 0.625rem;
+  /* Mismo tratamiento que el átomo `.card`: velo translúcido + blur de lo que
+   * hay detrás, rim interior y sombra.
+   *
+   * OJO: no usar `--surface` acá. Ese token es `#0a0a0a` y el fondo de la tab
+   * es `rgba(0,0,0,0.92)`: casi negro sobre casi negro. La fila quedaba sin
+   * contraste y se leía como texto suelto, que era el sintoma reportado.
+   * `.card` tampoco lo usa: usa `--glass-card-bg`, que es `--bg-elevated`
+   * mezclado con transparente. */
+  background: var(--glass-card-bg);
+  backdrop-filter: var(--glass-card-blur);
+  -webkit-backdrop-filter: var(--glass-card-blur);
+  /* Borde propio, mas presente que `--border` (que es 8% de negro).
+   *
+   * En claro el rim del cristal es blanco sobre blanco: invisible. Y
+   * `--shadow-card` tiene spread negativo (`-8px`), o sea la sombra cae
+   * pegada al borde y no levanta nada. Con las dos señales asi, la fila se
+   * leia como texto sobre un fondo apenas distinto: "plana".
+   *
+   * El radio es el de card (`--radius-card`) y no el de control: son cards,
+   * no campos de formulario, y se sienta al lado de la card de
+   * configuracion. */
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card), var(--glass-card-rim);
+  color: var(--text-primary);
+  /* El proyecto no tiene reset global de `button`: sin esto cada fila sale
+   * con la tipografía del navegador (Times en varios) y el fondo gris del
+   * user agent. */
   font: inherit;
+  font-size: 0.8125rem;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--duration-fast) var(--ease-standard),
+  transition: box-shadow var(--duration-fast) var(--ease-standard),
               border-color var(--duration-fast) var(--ease-standard);
 }
 
 .models-tab__model-row:hover {
-  background: var(--bg-elevated);
-}
-
-.models-tab__model-row--selected {
-  /* Mismo tratamiento que `.card` de cristal, para que la fila seleccionada
-   * se lea como la superficie que se esta configurando y no como un hover
-   * que se quedó pegado. */
-  background: var(--glass-card-bg);
   border-color: var(--border-hover);
-  backdrop-filter: var(--glass-card-blur);
-  -webkit-backdrop-filter: var(--glass-card-blur);
+  box-shadow: var(--shadow-card-hover), var(--glass-card-rim);
 }
 
+/* El rim del cristal no aporta nada en claro (blanco sobre blanco), asi que
+ * la profundidad la carga una sombra con mas alcance. Solo en claro: en
+ * oscuro el rim claro es el que da la lectura de vidrio y una sombra mas
+ * fuerte lo embarreria. */
+[data-theme="light"] .models-tab__model-row {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 4px 12px -4px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .models-tab__model-row:hover {
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.08),
+    0 8px 20px -6px rgba(0, 0, 0, 0.14);
+}
+
+/* Seleccionada: la misma caja de cristal, con el borde en accent para que se
+ * lea como la superficie que se esta configurando a la derecha y no como un
+ * hover que se quedo pegado. */
+.models-tab__model-row--selected {
+  border-color: var(--accent);
+}
+
+.models-tab__model-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* El modelo que carga al arrancar el servicio. El ACTIVE ya lo marca el
+ * badge; aqui solo el nombre, para que se lea sin depender del color. */
 .models-tab__model-row--active .models-tab__model-name {
-  color: var(--status-active, var(--accent));
+  color: var(--accent);
+  font-weight: 500;
 }
 
 .models-tab__model-name {
-  flex: 1 1 auto;
+  /* `flex: 1 1 auto` NO alcanza: con basis `auto` el item empieza en el ancho
+   * de su contenido, así que con un nombre corto (`bge-m3-q8_0.gguf`) no
+   * absorbe el espacio libre y el tamaño queda pegado al nombre en vez de al
+   * borde derecho de la fila.
+   *
+   * `basis: 0` obliga a que el item ocupe siempre todo el espacio
+   * disponible, largo o corto. `min-width: 0` sigue haciendo falta para que
+   * un nombre largo pueda encogerse y cortar con ellipsis en vez de
+   * desbordar. */
+  flex: 1 1 0;
   min-width: 0;
-  font-size: 0.8125rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -422,6 +502,9 @@
 .models-tab__model-size {
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+  /* Red de seguridad: ancla el tamaño al borde derecho aunque el nombre no
+   * llegara a crecer (por ejemplo si la fila pierde `display: flex`). */
+  margin-left: auto;
 }
 
 /* Header de categoría dentro de la lista densa. */
