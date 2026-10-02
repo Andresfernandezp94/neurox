@@ -908,8 +908,8 @@ mod workspace_id_tests {
         let id = Uuid::new_v4();
         s.start_session(id, "default").await.unwrap();
 
-        s.set_workspace_id(id, Some("sixbell")).await.unwrap();
-        assert_eq!(s.get_workspace_id(id).await.unwrap().as_deref(), Some("sixbell"));
+        s.set_workspace_id(id, Some("alfa")).await.unwrap();
+        assert_eq!(s.get_workspace_id(id).await.unwrap().as_deref(), Some("alfa"));
 
         // Volver a None la deja en el global.
         s.set_workspace_id(id, None).await.unwrap();
@@ -941,10 +941,10 @@ mod workspace_id_tests {
         let (_d, s) = store().await;
         let id = Uuid::new_v4();
         s.start_session(id, "default").await.unwrap();
-        s.set_workspace_id(id, Some("sixbell")).await.unwrap();
+        s.set_workspace_id(id, Some("alfa")).await.unwrap();
 
         let rows = s.list_sessions(10).await.unwrap();
         let r = rows.iter().find(|r| r.session_id == id.to_string()).unwrap();
-        assert_eq!(r.workspace_id.as_deref(), Some("sixbell"));
+        assert_eq!(r.workspace_id.as_deref(), Some("alfa"));
     }
 }

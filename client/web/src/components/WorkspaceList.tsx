@@ -6,8 +6,7 @@
 // las acciones; el estado y las llamadas viven en `WorkspaceViewer`.
 //
 // Antes la lista era presentacional sobre un array hardcodeado en
-// `WorkspaceViewer` (el objeto "Sixbell"), con `onAdd` y `onDelete`
-// cableados a handlers vacios.
+// `WorkspaceViewer`, con `onAdd` y `onDelete` cableados a handlers vacios.
 
 import { useMemo, useState } from "react";
 import { Card } from "../shared/components/molecules/Card";

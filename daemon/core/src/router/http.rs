@@ -2141,10 +2141,9 @@ pub async fn get_session_agent(
 ///
 /// El override por sesion: el agente tiene su `workspace_id` por default y
 /// esto lo aparta sin tocar el agente. Es lo que permite tener una
-/// conversacion de trabajo en Sixbell y otra en projects con el mismo
-/// agente.
+/// dos conversaciones del mismo agente en dos entornos distintos.
 ///
-/// Body: `{"workspace_id": "sixbell"}` o `{"workspace_id": null}` para
+/// Body: `{"workspace_id": "mi-entorno"}` o `{"workspace_id": null}` para
 /// volver al sandbox global.
 pub async fn set_session_workspace(
     State(state): State<Arc<AppState>>,

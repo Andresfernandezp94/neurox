@@ -140,7 +140,7 @@ export function WorkspaceFormModal({
             id="workspace-form-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Sixbell"
+            placeholder="Alfa"
             data-testid="workspace-form-name"
           />
         </div>
@@ -153,7 +153,7 @@ export function WorkspaceFormModal({
             id="workspace-form-root"
             value={root}
             onChange={(e) => setRoot(e.target.value)}
-            placeholder="/home/andres_fernandez/Sixbell"
+            placeholder="/srv/alfa"
             data-testid="workspace-form-root"
           />
           <p className="workspace-form__hint">

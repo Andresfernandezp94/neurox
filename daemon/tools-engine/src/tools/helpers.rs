@@ -347,7 +347,7 @@ pub fn expand_tilde(path: &str) -> Result<String, String> {
 mod placeholder_tests {
     use super::*;
 
-    const WS: &str = "/srv/sixbell";
+    const WS: &str = "/srv/alfa";
 
     /// `${workspace}` en el ARGUMENTO del path se expande contra el root
     /// del workspace. Antes no se expandia y el paso 4 lo dejaba pasar como
@@ -362,7 +362,7 @@ mod placeholder_tests {
             false,
         )
         .unwrap();
-        assert_eq!(r, std::path::Path::new("/srv/sixbell"));
+        assert_eq!(r, std::path::Path::new("/srv/alfa"));
     }
 
     #[test]
@@ -374,7 +374,7 @@ mod placeholder_tests {
             false,
         )
         .unwrap();
-        assert_eq!(r, std::path::Path::new("/srv/sixbell/notas/hoy.md"));
+        assert_eq!(r, std::path::Path::new("/srv/alfa/notas/hoy.md"));
         assert!(
             !r.to_string_lossy().contains("${workspace}"),
             "no puede quedar el placeholder en el path final"
@@ -386,7 +386,7 @@ mod placeholder_tests {
     #[test]
     fn el_root_es_el_del_workspace_de_la_llamada() {
         let a = resolve_under_workspace(
-            std::path::Path::new("/srv/sixbell"),
+            std::path::Path::new("/srv/alfa"),
             "${workspace}/dato.txt",
             &[],
             false,
@@ -399,7 +399,7 @@ mod placeholder_tests {
             false,
         )
         .unwrap();
-        assert_eq!(a, std::path::Path::new("/srv/sixbell/dato.txt"));
+        assert_eq!(a, std::path::Path::new("/srv/alfa/dato.txt"));
         assert_eq!(b, std::path::Path::new("/srv/projects/dato.txt"));
     }
 
@@ -423,7 +423,7 @@ mod placeholder_tests {
     #[test]
     fn sin_placeholder_no_cambia_nada() {
         let r = resolve_under_workspace(std::path::Path::new(WS), "notas/x.md", &[], false).unwrap();
-        assert_eq!(r, std::path::Path::new("/srv/sixbell/notas/x.md"));
+        assert_eq!(r, std::path::Path::new("/srv/alfa/notas/x.md"));
 
         let r = resolve_under_workspace(std::path::Path::new(WS), "/opt/x.md", &[], false);
         assert!(r.is_err(), "fuera del workspace y sin paths, se rechaza");

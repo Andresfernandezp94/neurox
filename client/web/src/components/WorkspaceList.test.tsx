@@ -5,10 +5,10 @@ import type { Workspace } from "../api/workspaces";
 
 function ws(over: Partial<Workspace> = {}): Workspace {
   return {
-    id: "sixbell",
-    name: "Sixbell",
+    id: "alfa",
+    name: "Alfa",
     description: "product team",
-    root: "/home/andres_fernandez/Sixbell",
+    root: "/srv/alfa",
     status: "active",
     icon: "IconIntegrations",
     is_default: false,
@@ -38,22 +38,22 @@ function buscar(q: string) {
 describe("WorkspaceList: filtro", () => {
   const lista = [
     ws(),
-    ws({ id: "projects", name: "Projects", root: "/home/andres_fernandez/projects" }),
+    ws({ id: "beta", name: "Beta", root: "/srv/beta" }),
     ws({ id: "notas", name: "Notas", description: "cosas del casa", root: "/tmp/notas" }),
   ];
 
   it("muestra todas cuando no hay busqueda", () => {
     render(<WorkspaceList workspaces={lista} />);
-    expect(screen.getByText("Sixbell")).toBeInTheDocument();
-    expect(screen.getByText("Projects")).toBeInTheDocument();
+    expect(screen.getByText("Alfa")).toBeInTheDocument();
+    expect(screen.getByText("Beta")).toBeInTheDocument();
     expect(screen.getByText("Notas")).toBeInTheDocument();
   });
 
   it("filtra por nombre", async () => {
     render(<WorkspaceList workspaces={lista} />);
-    buscar("proj");
-    expect(screen.getByText("Projects")).toBeInTheDocument();
-    expect(screen.queryByText("Sixbell")).toBeNull();
+    buscar("bet");
+    expect(screen.getByText("Beta")).toBeInTheDocument();
+    expect(screen.queryByText("Alfa")).toBeNull();
     expect(screen.queryByText("Notas")).toBeNull();
   });
 
@@ -62,14 +62,14 @@ describe("WorkspaceList: filtro", () => {
     render(<WorkspaceList workspaces={lista} />);
     buscar("/tmp/");
     expect(screen.getByText("Notas")).toBeInTheDocument();
-    expect(screen.queryByText("Sixbell")).toBeNull();
+    expect(screen.queryByText("Alfa")).toBeNull();
   });
 
   it("filtra por descripcion", async () => {
     render(<WorkspaceList workspaces={lista} />);
     buscar("casa");
     expect(screen.getByText("Notas")).toBeInTheDocument();
-    expect(screen.queryByText("Projects")).toBeNull();
+    expect(screen.queryByText("Beta")).toBeNull();
   });
 
   it("avisa cuando no hay coincidencias", async () => {
@@ -116,7 +116,7 @@ describe("WorkspaceList: la card no anida botones", () => {
     // que existir en el CSS; sin ella el borrar se caia del flujo.
     const card = ws();
     render(<WorkspaceList workspaces={[card]} onDelete={() => {}} />);
-    expect(screen.getByTestId("workspace-delete-sixbell")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-delete-alfa")).toBeInTheDocument();
   });
 });
 
@@ -165,7 +165,7 @@ describe("WorkspaceList: acciones", () => {
         workspaces={[ws({ is_default: true }), ws({ id: "p2", name: "P2", status: "draft" })]}
       />,
     );
-    const card = screen.getByTestId("workspace-card-sixbell");
+    const card = screen.getByTestId("workspace-card-alfa");
     expect(within(card).getByText("default")).toBeInTheDocument();
     const card2 = screen.getByTestId("workspace-card-p2");
     expect(within(card2).getByText("draft")).toBeInTheDocument();
@@ -186,8 +186,8 @@ describe("WorkspaceList: acciones", () => {
         ]}
       />,
     );
-    const card = screen.getByTestId("workspace-card-sixbell");
-    expect(within(card).getByText("/home/andres_fernandez/Sixbell")).toBeInTheDocument();
+    const card = screen.getByTestId("workspace-card-alfa");
+    expect(within(card).getByText("/srv/alfa")).toBeInTheDocument();
     expect(within(card).getByText("1 readable")).toBeInTheDocument();
     expect(within(card).getByText("1 writable")).toBeInTheDocument();
     expect(within(card).getByText("depth 5")).toBeInTheDocument();
@@ -201,14 +201,14 @@ describe("WorkspaceList: acciones", () => {
         ]}
       />,
     );
-    const card = screen.getByTestId("workspace-card-sixbell");
+    const card = screen.getByTestId("workspace-card-alfa");
     expect(within(card).getByText("no sandbox paths")).toBeInTheDocument();
   });
 
   it("muestra el error sin perder la lista", () => {
     render(<WorkspaceList workspaces={[ws()]} error="boom" />);
     expect(screen.getByTestId("workspace-error")).toHaveTextContent("boom");
-    expect(screen.getByText("Sixbell")).toBeInTheDocument();
+    expect(screen.getByText("Alfa")).toBeInTheDocument();
   });
 
   it("distingue 'cargando' de 'no hay workspaces'", () => {

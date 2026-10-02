@@ -1,7 +1,7 @@
 // API de workspaces — entornos aislados (EP-0026-UX).
 //
 // Reemplaza el mock que estaba hardcodeado en `WorkspaceViewer` (el objeto
-// "Sixbell"). Cada workspace tiene su directorio raiz y su propio sandbox;
+// "Alfa"). Cada workspace tiene su directorio raiz y su propio sandbox;
 // `readable_paths` / `writable_paths` se guardan SIN resolver, asi que
 // `${workspace}` lo expande el daemon contra la raiz de ESE workspace.
 //

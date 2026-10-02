@@ -22,11 +22,11 @@ type WorkspaceTab = "general" | "sandbox" | "agents" | "mcp";
 
 // WorkspaceViewer — tabbed view con General, Sandbox, Agents y MCP.
 //
-// La tab General lista los workspaces contra `/v1/workspaces`. Antes era un
-// objeto "Sixbell" hardcodeado a nivel de modulo (const WORKSPACES), sin
-// estado ni fetch: agregar o borrar no hacia nada porque los handlers eran
-// no-ops con un TODO, y el boton "Save changes" de la vista de config estaba
-// permanentemente deshabilitado.
+// La tab General lista los workspaces contra `/v1/workspaces`. Antes la
+// lista era un `const` de modulo con un workspace inventado hardcodeado,
+// sin estado ni fetch: agregar o borrar no hacia nada porque los handlers
+// eran no-ops con un TODO, y el boton "Save changes" de la vista de config
+// estaba permanentemente deshabilitado.
 //
 // El fetch usa el patron de los otros paneles (`useState` + `useCallback` +
 // `useEffect` + `ErrorBanner` al tope, ver EnvTab).

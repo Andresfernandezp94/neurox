@@ -29,7 +29,10 @@ const CATEGORIES: ToolCategory[] = [
   { id: "web", label: "Web", icon: IconGlobe, match: (n) => /^(web_fetch|web_search)$/.test(n) },
   { id: "desktop", label: "Desktop", icon: IconMonitor, match: (n) => /^(clipboard_|screenshot|ocr_screen)/.test(n) },
   { id: "generation", label: "Generation", icon: IconSparkles, match: (n) => /^generate_/.test(n) },
-  { id: "delegation", label: "Delegation", icon: IconLink, match: (n) => n === "kiro_sixbell" },
+  // Por convencion de nombre, como las demas categorias. Antes comparaba
+  // contra un unico nombre hardcodeado que no era un tool del daemon, con
+  // lo que la grupo nunca tenia nada y ni se renderizaba.
+  { id: "delegation", label: "Delegation", icon: IconLink, match: (n) => /^(delegate|delegation|spawn_agent|subagent)/.test(n) },
   { id: "other", label: "Other", icon: IconZap, match: () => true },
 ];
 

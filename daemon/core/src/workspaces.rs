@@ -557,16 +557,16 @@ mod tests {
     async fn create_lista_y_trae_el_workspace() {
         let (_d, s) = store().await;
         let creado = s
-            .create("Sixbell", "/tmp/sixbell", &patch_readable(&["/tmp/sixbell"]))
+            .create("Alfa", "/tmp/alfa", &patch_readable(&["/tmp/alfa"]))
             .await
             .unwrap();
-        assert_eq!(creado.id, "sixbell", "el id sale del nombre, en minuscula");
-        assert_eq!(creado.name, "Sixbell");
-        assert_eq!(creado.sandbox.readable_paths, vec!["/tmp/sixbell"]);
+        assert_eq!(creado.id, "alfa", "el id sale del nombre, en minuscula");
+        assert_eq!(creado.name, "Alfa");
+        assert_eq!(creado.sandbox.readable_paths, vec!["/tmp/alfa"]);
 
         let todos = s.list().await.unwrap();
         assert_eq!(todos.len(), 1);
-        assert_eq!(s.get("sixbell").await.unwrap().unwrap().id, "sixbell");
+        assert_eq!(s.get("alfa").await.unwrap().unwrap().id, "alfa");
         assert!(s.get("nope").await.unwrap().is_none());
     }
 
@@ -586,11 +586,11 @@ mod tests {
     async fn patch_parcial_no_pisa_los_otros_campos() {
         let (_d, s) = store().await;
         s.create(
-            "Sixbell",
-            "/tmp/sixbell",
+            "Alfa",
+            "/tmp/alfa",
             &WorkspacePatch {
                 description: Some(Some("equipo".into())),
-                sandbox_readable_paths: Some(vec!["/tmp/sixbell".into()]),
+                sandbox_readable_paths: Some(vec!["/tmp/alfa".into()]),
                 ..Default::default()
             },
         )
@@ -599,27 +599,27 @@ mod tests {
 
         let upd = s
             .update(
-                "sixbell",
+                "alfa",
                 &WorkspacePatch {
-                    name: Some("Sixbell renombrado".into()),
+                    name: Some("Alfa renombrado".into()),
                     ..Default::default()
                 },
             )
             .await
             .unwrap();
-        assert_eq!(upd.name, "Sixbell renombrado");
+        assert_eq!(upd.name, "Alfa renombrado");
         assert_eq!(upd.description.as_deref(), Some("equipo"), "no se pierde");
-        assert_eq!(upd.sandbox.readable_paths, vec!["/tmp/sixbell"], "no se pierde");
+        assert_eq!(upd.sandbox.readable_paths, vec!["/tmp/alfa"], "no se pierde");
     }
 
     #[tokio::test]
     async fn delete_saca_la_fila_y_no_falla_dos_veces() {
         let (_d, s) = store().await;
-        s.create("Sixbell", "/tmp/sixbell", &WorkspacePatch::default()).await.unwrap();
-        s.delete("sixbell").await.unwrap();
-        assert!(s.get("sixbell").await.unwrap().is_none());
+        s.create("Alfa", "/tmp/alfa", &WorkspacePatch::default()).await.unwrap();
+        s.delete("alfa").await.unwrap();
+        assert!(s.get("alfa").await.unwrap().is_none());
         // El segundo delete tiene que fallar, no dejar un fantasma.
-        assert!(s.delete("sixbell").await.is_err());
+        assert!(s.delete("alfa").await.is_err());
     }
 
     /// Solo un default a la vez.
@@ -760,15 +760,15 @@ mod tests {
         let global: Arc<RwLock<Box<dyn tools_engine::SandboxConfig>>> =
             Arc::new(RwLock::new(Box::new(SandboxConfig::default())));
         let reg = WorkspaceRegistry::new(global.clone());
-        s.create("Sixbell", "/srv/sixbell", &patch_readable(&["${workspace}"])).await.unwrap();
+        s.create("Alfa", "/srv/alfa", &patch_readable(&["${workspace}"])).await.unwrap();
         reg.load_from(&s).await.unwrap();
 
-        let sc = resolve_scope(&s, &reg, Some("sixbell"), Path::new("/root")).await;
-        assert_eq!(sc.id.as_deref(), Some("sixbell"));
-        assert_eq!(sc.root, PathBuf::from("/srv/sixbell"));
+        let sc = resolve_scope(&s, &reg, Some("alfa"), Path::new("/root")).await;
+        assert_eq!(sc.id.as_deref(), Some("alfa"));
+        assert_eq!(sc.root, PathBuf::from("/srv/alfa"));
         assert_eq!(
             sc.sandbox.read().await.readable_paths_resolved(&sc.root),
-            vec![PathBuf::from("/srv/sixbell")],
+            vec![PathBuf::from("/srv/alfa")],
             "en un sandbox por workspace, `${{workspace}}` es el root de ese workspace"
         );
     }

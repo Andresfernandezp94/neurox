@@ -329,3 +329,86 @@ async fn los_defaults_anunciados_son_los_reales() {
         real.readable_paths.len()
     );
 }
+
+/// El switch `workspaces.enabled: false` apaga la APLICACION, no el
+/// almacen: el CRUD sigue vivo para poder preparar los entornos con el
+/// feature apagado y activarlos despues.
+mod master_switch {
+    use super::*;
+
+    #[tokio::test]
+    async fn apagado_el_scope_de_la_sesion_cae_al_global() {
+        let (state, _t) = build_state(false).await;
+        create(&state, "Alfa", "/srv/alfa", &["${workspace}"]).await;
+
+        let sid = uuid::Uuid::new_v4();
+        state
+            .lifecycle
+            .session
+            .start_session_for_user(sid, "default", &uuid::Uuid::new_v4().to_string())
+            .await
+            .unwrap();
+        state.lifecycle.session.set_workspace_id(sid, Some("alfa")).await.unwrap();
+
+        // El id esta en la sesion, pero el switch lo ignora.
+        let sc = state.scope_for_session(sid).await;
+        assert_eq!(sc.id, None, "con el switch apagado no se aplica el workspace");
+        assert_eq!(sc.root, PathBuf::from("/tmp"), "el root es el global del test");
+    }
+
+    #[tokio::test]
+    async fn apagado_el_scope_del_agente_tambien_cae_al_global() {
+        let (state, _t) = build_state(false).await;
+        create(&state, "Alfa", "/srv/alfa", &["${workspace}"]).await;
+        let sc = state.scope_for_agent("default").await;
+        assert_eq!(sc.id, None);
+        assert_eq!(sc.root, PathBuf::from("/tmp"));
+    }
+
+    #[tokio::test]
+    async fn apagado_el_crud_sigue_funcionando() {
+        let (state, _t) = build_state(false).await;
+        // Se puede seguir creando, leyendo y editando.
+        create(&state, "Alfa", "/srv/alfa", &["${workspace}"]).await;
+        let res = list_workspaces(State(Arc::new(state.clone())), Extension(admin())).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_of(res)["workspaces"].as_array().unwrap().len(), 1);
+
+        let res = update_workspace(
+            State(Arc::new(state.clone())),
+            Extension(admin()),
+            AxumPath("alfa".into()),
+            Json(WorkspacePatch { name: Some("Renombrado".into()), ..Default::default() }),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_of(res)["workspace"]["name"], "Renombrado");
+    }
+
+    /// Encendido, el workspace se aplica: es el otro lado del switch.
+    #[tokio::test]
+    async fn encendido_el_workspace_se_aplica() {
+        let (state, _t) = build_state(true).await;
+        create(&state, "Alfa", "/srv/alfa", &["${workspace}"]).await;
+        let sid = uuid::Uuid::new_v4();
+        state
+            .lifecycle
+            .session
+            .start_session_for_user(sid, "default", &uuid::Uuid::new_v4().to_string())
+            .await
+            .unwrap();
+        state.lifecycle.session.set_workspace_id(sid, Some("alfa")).await.unwrap();
+
+        let sc = state.scope_for_session(sid).await;
+        assert_eq!(sc.id.as_deref(), Some("alfa"));
+        assert_eq!(sc.root, PathBuf::from("/srv/alfa"));
+    }
+
+    /// El default del config es activado: con la tabla vacia no hay nada
+    /// que aplicar y el feature queda inerte solo.
+    #[tokio::test]
+    async fn el_default_del_config_esta_encendido() {
+        let d = crate::config::WorkspacesSection::default();
+        assert!(d.enabled, "con la tabla vacia no aplica nada; se opta por el opt-out");
+    }
+}
