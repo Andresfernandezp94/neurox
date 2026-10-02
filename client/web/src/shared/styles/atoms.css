@@ -404,7 +404,11 @@
 .models-panel__hf-list {
   display: flex;
   flex-direction: column;
-  gap: var(--gap-card-grid);
+  /* Compacto, no `--gap-card-grid`: ese token vale 1.25rem porque la sombra
+   * de una card de provider se extiende ~8px y sin ese aire se funden
+   * entre sí. Estas son rows de resultados, densas y sin intención de
+   * click en la fila entera, así que van apretadas. */
+  gap: 0.5rem;
 }
 
 .models-panel__hf-card {
