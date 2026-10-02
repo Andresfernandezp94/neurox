@@ -93,6 +93,9 @@ async fn cancel_endpoint_marks_session_inactive() {
     let tasks = Arc::new(TaskManager::new());
     let approvals = Arc::new(ApprovalManager::default());
     let session = Arc::new(SessionStore::open(&db_path).await.unwrap());
+    // Se clona antes de que el Arc se mueva al LifecycleLayer: el test
+    // necesita escribir en la base para comprobar la lista de activas.
+    let session_for_test = session.clone();
     let session_agents = Arc::new(SessionAgentPool::new(
         SessionAgentsConfig::default().agents,
     ));
@@ -220,6 +223,69 @@ async fn cancel_endpoint_marks_session_inactive() {
         }
     }
     assert!(got_ended, "should have received session_ended event");
+
+    // ── La distincion que faltaba ────────────────────────────────────────
+    //
+    // El nombre de este test prometia "marks_session_inactive" pero solo
+    // miraba la respuesta HTTP y el evento de WS: nunca comprobaba que la
+    // sesion saliera de la lista de activas. Por eso `cancel` pudo seguir
+    // sin escribir `ended_at` sin que nada lo detectara, y las ventanas
+    // cerradas reaparecian al recargar.
+    //
+    // Un mensaje primero: la lista de activas exige al menos uno, porque
+    // una sesion que nunca se uso no es una pestana.
+
+    async fn active_ids(base: &str, token: &str) -> Vec<String> {
+        let v: serde_json::Value = reqwest::Client::new()
+            .get(format!("{base}/v1/sessions"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        v["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["session_id"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    session_for_test
+        .log_message(session_uuid, "user", "hola", None)
+        .await
+        .unwrap();
+    assert!(
+        active_ids(&base, &token).await.contains(&sid),
+        "precondicion: con un mensaje la sesion esta entre las activas"
+    );
+
+    // `cancel` para el TURNO, no cierra la ventana. Esta distincion es la
+    // que hace falta para que el boton de stop no archive la conversacion.
+    assert!(
+        active_ids(&base, &token).await.contains(&sid),
+        "cancel para el turno: la sesion tiene que seguir activa"
+    );
+
+    // `end` si cierra la ventana.
+    let ended: serde_json::Value = reqwest::Client::new()
+        .post(format!("{base}/v1/sessions/{sid}/end"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(ended["ended"], serde_json::json!(sid));
+
+    assert!(
+        !active_ids(&base, &token).await.contains(&sid),
+        "end cierra la ventana: si no escribe `ended_at`, la sesion vuelve \
+         a salir como pestana al recargar"
+    );
 
     let _ = ws.close(None).await;
     supervisor.shutdown_all().await;

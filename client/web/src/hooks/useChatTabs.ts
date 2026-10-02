@@ -21,7 +21,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message, MessageMetrics } from "../types";
 import type { ModelSelection } from "../components/ModelSelector";
 import { apiGet, apiPost, getToken } from "../api/client";
-import { createSession } from "../api/sessions";
+import { createSession, endSession } from "../api/sessions";
 import { setSessionModel } from "../api/llm";
 import {
   applyStreamChunk as applyChunkToMessage,
@@ -629,16 +629,24 @@ export function useChatTabs(defaultAgentId: string | null = null) {
   );
 
   const closeTab = useCallback(async (id: string) => {
-    // Find the session_id of the tab we're closing. If it has one,
-    // tell the daemon to deactivate it (set ended_at). The WS event
-    // will also remove the tab from local state — we dedupe by
-    // matching session_id.
+    // Find the session_id of the tab we're closing. If it has one, tell
+    // the daemon to close it (`POST /end`, which writes `ended_at`).
+    //
+    // Antes decia `POST /cancel`, que solo para el turno en curso y NO
+    // escribe `ended_at`: la sesion seguia contando como activa y
+    // reaparecia como ventana en el siguiente F5. `cancel` no servia
+    // para cerrar; archivar y destruir son cosas distintas de parar un
+    // turno, asi que hay tres endpoints: `cancel` para el turno, `end`
+    // para cerrar la ventana, `DELETE` para destruirla.
+    //
+    // El WS emite `session_ended` y tambien saca la tab; acá se saca
+    // igual para no depender de esa conexion.
     const tab = tabs.find((t) => t.id === id);
     if (tab?.sessionId) {
       try {
-        await apiPost(`/v1/sessions/${tab.sessionId}/cancel`);
+        await endSession(tab.sessionId);
       } catch (e) {
-        console.error("useChatTabs: cancel failed", e);
+        console.error("useChatTabs: end failed", e);
       }
       seenSessions.current.delete(tab.sessionId);
     }

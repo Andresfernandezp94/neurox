@@ -79,6 +79,9 @@ pub fn router(state: AppState) -> axum::Router {
         .route("/v1/sessions/:id/tool-mode", put(http::set_session_tool_mode))
         .route("/v1/sessions/:id/temperature", put(http::set_session_temperature))
         .route("/v1/sessions/:id/cancel", post(http::cancel_session))
+        // Cierra la ventana (archiva). Distinto de `cancel`, que solo
+        // para el turno en curso y deja la sesion viva.
+        .route("/v1/sessions/:id/end", post(http::end_session_http))
         .route("/v1/approvals", get(http::list_approvals))
         .route("/v1/approvals/:id/respond", post(http::respond_approval))
         .route("/v1/events", get(ws::ws_events))

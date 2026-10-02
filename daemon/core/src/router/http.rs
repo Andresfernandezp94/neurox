@@ -1799,6 +1799,51 @@ fn sse_response(mut rx: mpsc::Receiver<serde_json::Value>) -> Response {
         .unwrap()
 }
 
+/// Verifica que la sesion exista y sea del usuario. Devuelve 404 sin
+/// distinguir "no existe" de "no es tuya", para no filtrar ids ajenos.
+async fn require_session_owner(
+    state: &AppState,
+    user: &UserContext,
+    session_id: Uuid,
+) -> Result<(), (StatusCode, String)> {
+    let owner = state
+        .lifecycle
+        .session
+        .get_session_user(session_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    match owner {
+        Some(uid) if uid == user.user_id.to_string() => Ok(()),
+        _ => Err((StatusCode::NOT_FOUND, "session not found".to_string())),
+    }
+}
+
+/// Corta el trabajo en curso de una sesion: cancela el turno, las
+/// aprobaciones pendientes y el subproceso del agente. No toca la fila de
+/// la sesion en la base.
+///
+/// Compartido por `cancel` (parar el turno) y `end` (cerrar la ventana).
+/// El primer elemento es el conteo de turnos cancelados (`tasks.cancel` no
+/// devuelve un bool), el segundo si se detuvo el subproceso del agente.
+async fn stop_session_work(state: &AppState, session_id: Uuid) -> (usize, bool) {
+    let was_active = state.lifecycle.tasks.cancel(session_id).await;
+    state.lifecycle.approvals.cancel_session(session_id).await;
+    let agent_stopped = state
+        .lifecycle
+        .session_agents
+        .stop(session_id)
+        .await
+        .map(|_| true)
+        .unwrap_or(false);
+    (was_active, agent_stopped)
+}
+
+/// POST /v1/sessions/:id/cancel — para el turno en curso. La sesion sigue
+/// viva: no escribe `ended_at`.
+///
+/// Que no la cierre es lo que la distingue de `end`. Parar una respuesta
+/// en streaming no puede archivar la conversacion, asi que el front usa
+/// `cancel` para el boton de stop y `end` para cerrar la ventana.
 pub async fn cancel_session(
     State(state): State<Arc<AppState>>,
     user: UserContext,
@@ -1809,38 +1854,53 @@ pub async fn cancel_session(
     // without a `user_id` (legacy or unowned) are NOT accessible —
     // strict ownership required. New sessions always have user_id via
     // `create_session` → `start_session_for_user`.
-    let owner = state
-        .lifecycle
-        .session
-        .get_session_user(session_id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    match owner {
-        Some(uid) if uid == user.user_id.to_string() => {}
-        _ => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                "session not found".to_string(),
-            ));
-        }
-    }
+    require_session_owner(&state, &user, session_id).await?;
 
-    // Trigger cooperative cancellation
-    let was_active = state.lifecycle.tasks.cancel(session_id).await;
-    state.lifecycle.approvals.cancel_session(session_id).await;
-    // Kill the per-session subprocess if any. Idempotent on no-op.
-    let agent_stopped = state.lifecycle
-        .session_agents
-        .stop(session_id)
-        .await
-        .map(|_| true)
-        .unwrap_or(false);
+    // Trigger cooperative cancellation. La fila de la sesion NO se toca:
+    // este endpoint es "para el turno", no "cierra la ventana".
+    let (was_active, agent_stopped) = stop_session_work(&state, session_id).await;
     state.emit(Event::SessionEnded {
         session_id,
         summary: Some("cancelled".to_string()),
     });
     Ok(Json(json!({
         "cancelled": session_id,
+        "was_active": was_active,
+        "agent_stopped": agent_stopped,
+    })))
+}
+
+/// POST /v1/sessions/:id/end — cierra la ventana de chat: para el trabajo
+/// en curso y escribe `ended_at`, de modo que la sesion sale de la lista de
+/// activas y no vuelve a abrirse como pestana al recargar.
+///
+/// Archiva, no borra: los mensajes quedan y la sesion se puede reabrir con
+/// `reactivate` o desde el historial. Para destruirla esta `DELETE`.
+///
+/// Idempotente. Devuelve 404 si la sesion no existe o no es del usuario.
+pub async fn end_session_http(
+    State(state): State<Arc<AppState>>,
+    user: UserContext,
+    Path(session_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    require_session_owner(&state, &user, session_id).await?;
+    let (was_active, agent_stopped) = stop_session_work(&state, session_id).await;
+
+    // Esto es lo que faltaba: sin escribir `ended_at` la sesion seguia
+    // contando como activa y reaparecia como ventana en el siguiente F5.
+    state
+        .lifecycle
+        .session
+        .end_session(session_id, Some("closed"))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    state.emit(Event::SessionEnded {
+        session_id,
+        summary: Some("closed".to_string()),
+    });
+    Ok(Json(json!({
+        "ended": session_id,
         "was_active": was_active,
         "agent_stopped": agent_stopped,
     })))

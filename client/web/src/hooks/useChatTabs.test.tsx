@@ -3,7 +3,9 @@
 // The hook now treats the daemon as the source of truth:
 //   - On mount it GETs /v1/sessions and builds tabs from the response
 //   - New tabs are POSTed to the daemon first, then added locally
-//   - Closing a tab POSTs /v1/sessions/:id/cancel (sets ended_at)
+//   - Closing a tab POSTs /v1/sessions/:id/end (writes `ended_at`, so the
+//     window does not come back on reload). NOT /cancel: that one only
+//     stops the turn in flight and leaves the session open.
 //   - The WS subscription reacts to SessionStarted/Ended events
 //   - Stream chunks (content / thinking / tool_call / tool_result)
 //     arrive via WS broadcast from other devices and are applied via
@@ -187,6 +189,64 @@ describe("useChatTabs — daemon-synced tabs", () => {
     expect(result.current.tabs[0]!.title).toBe("Chat 1");
     expect(result.current.tabs[0]!.sessionId).toBeNull();
     expect(result.current.activeId).toBe(result.current.tabs[0]!.id);
+  });
+
+  it("closing a tab POSTs /end (archiva), no /cancel (solo para el turno)", async () => {
+    // `cancel` no escribe `ended_at`, asi que la sesion seguia contando
+    // como activa y la ventana reaparecia al recargar. `end` la archiva.
+    // Y `cancel` tiene que seguir existiendo aparte: es lo que usa el
+    // boton de stop para parar una respuesta sin archivar la conversacion.
+    const calls: string[] = [];
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <StoreProvider eventsPath="/__test_no_ws__">{children}</StoreProvider>
+    );
+    global.fetch = vi.fn((url: string | URL | Request, init?: RequestInit) => {
+      const u = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+      const method = (init?.method ?? "GET").toUpperCase();
+      calls.push(`${method} ${u}`);
+      let body: Record<string, unknown> = {};
+      if (u.includes("/v1/agents")) {
+        body = { in_process: [], persistent: [], ephemeral_templates: [], running: [] };
+      } else if (u.includes("/v1/sessions") && method === "GET") {
+        body = {
+          sessions: [
+            {
+              session_id: "sess-x",
+              agent_id: TEST_AGENT_ID,
+              started_at: "2026-09-05T00:00:00Z",
+              ended_at: null,
+              summary: null,
+            },
+          ],
+        };
+      } else if (u.includes("/v1/approvals")) {
+        body = { pending: [] };
+      } else if (u.includes("/health")) {
+        body = { status: "ok", service: "neurox", version: "0.0.0-test", auth_required: false };
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }) as typeof fetch;
+
+    const { result } = renderHook(() => useChatTabs(), { wrapper });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const tabId = result.current.tabs[0]!.id;
+    expect(result.current.tabs[0]!.sessionId).toBe("sess-x");
+
+    await act(async () => {
+      await result.current.closeTab(tabId);
+    });
+
+    expect(calls.some((c) => c.includes("/v1/sessions/sess-x/end"))).toBe(true);
+    expect(calls.some((c) => c.includes("/v1/sessions/sess-x/cancel"))).toBe(false);
   });
 });
 

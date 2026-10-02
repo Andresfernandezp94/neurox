@@ -27,10 +27,19 @@ export function renameSession(id: string, name: string): Promise<unknown> {
 }
 
 export function cancelSession(id: string): Promise<unknown> {
-  // POST /v1/sessions/:id/cancel — stop the running agent but keep the
-  // session record (the message log stays). Use `deleteSession` to
-  // remove the session entirely.
+  // POST /v1/sessions/:id/cancel — para el turno en curso. La sesion sigue
+  // viva: no escribe `ended_at`, asi que sigue contando como pestana
+  // activa. Usar para el boton de stop, no para cerrar la ventana.
   return apiPost(`/v1/sessions/${encodeURIComponent(id)}/cancel`);
+}
+
+export function endSession(id: string): Promise<unknown> {
+  // POST /v1/sessions/:id/end — cierra la ventana: para el trabajo en
+  // curso y escribe `ended_at`, asi que la sesion sale de la lista de
+  // activas y no reaparece como pestana al recargar. Archiva, no borra:
+  // los mensajes quedan y se puede reabrir desde el historial. Para
+  // destruirla, `deleteSession`.
+  return apiPost(`/v1/sessions/${encodeURIComponent(id)}/end`);
 }
 
 export function deleteSession(id: string): Promise<unknown> {
