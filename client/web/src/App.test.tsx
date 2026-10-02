@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import App from "./App";
 
@@ -155,6 +155,27 @@ describe("App", () => {
     await screen.findByTestId("sidebar-nav-chat");
     expect(screen.getByTestId("sidebar-nav-config")).toBeInTheDocument();
     expect(screen.getByTestId("status-panel")).toBeInTheDocument();
+  });
+
+  it("monta el panel de Intelligence y sus tabs de agentes", async () => {
+    // Que el boton de la nav exista no dice nada de que el panel monte: el
+    // render por tab en App.tsx es un `activeTab === "..."` mas, y un id
+    // agregado a la nav sin su bloque de render deja la pantalla en blanco.
+    window.localStorage.setItem("active-tab", "intelligence");
+    window.history.replaceState({}, "", "/app");
+    render(<App />);
+
+    // El panel existe y trae el AgentsPanel adentro, no otra cosa.
+    const panel = await screen.findByTestId("intelligence-panel");
+    expect(panel).toBeInTheDocument();
+    expect(within(panel).getByTestId("agents-tab-agents")).toBeInTheDocument();
+    expect(within(panel).getByTestId("agents-tab-skills")).toBeInTheDocument();
+    expect(within(panel).getByTestId("agents-tab-tools")).toBeInTheDocument();
+
+    // Y el item queda marcado como activo.
+    expect(screen.getByTestId("sidebar-nav-intelligence").className).toContain("active");
+
+    window.localStorage.removeItem("active-tab");
   });
 
   it("offers a way back to the landing from the login", () => {

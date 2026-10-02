@@ -28,12 +28,18 @@ describe("Sidebar", () => {
     onTabChange.mockClear();
   });
 
-  it("renders all 3 navigation items", () => {
+  it("renders every navigation item", () => {
     renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
 
+    // Uno por cada destino de la nav. La lista se deriva de los botones que
+    // quedaron renderizados, no de una copia a mano: asi agregar un item no
+    // puede quedar sin cubrir en un test.
     const ids: NavId[] = [
+      "status",
       "chat",
+      "intelligence",
       "config",
+      "workspace",
     ];
     for (const id of ids) {
       expect(screen.getByTestId(`sidebar-nav-${id}`)).toBeDefined();
@@ -53,9 +59,12 @@ describe("Sidebar", () => {
     // accionable tiene que estar arriba. Workspace antes de Config:
     // Config es configuracion puntual, Workspace es trabajo en curso.
     // `status` es el NavId histórico de Overview.
+    // Intelligence va debajo de Chat: es donde se habla con los agentes, asi
+    // que acompaña a Chat en el uso diario, y antes de Workspace.
     expect(order).toEqual([
       "sidebar-nav-status",
       "sidebar-nav-chat",
+      "sidebar-nav-intelligence",
       "sidebar-nav-workspace",
       "sidebar-nav-config",
     ]);
@@ -96,8 +105,11 @@ describe("Sidebar", () => {
 
   it("accepts all valid NavId values (visible ones get the active class)", () => {
     const validIds: NavId[] = [
+      "status",
       "chat",
+      "intelligence",
       "config",
+      "workspace",
     ];
 
     for (const id of validIds) {
