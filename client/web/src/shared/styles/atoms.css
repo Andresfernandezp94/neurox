@@ -86,14 +86,25 @@
 }
 .badge--success { background: var(--status-success-bg, rgba(76, 175, 80, 0.15)); border-color: var(--status-success, #4caf50); color: var(--status-success, #4caf50); }
 /* ACTIVE pill — matches the sidebar's AiChatProviderModal badge:
- * solid accent fill, dark text, bold, square corners. */
+ * solid accent fill, dark text, bold.
+ *
+ * El radio es el mismo token que usa `.badge` (`--radius-sm`), no cero.
+ * Con 0 las esquinas quedaban vivas y el pill se leia como una etiqueta
+ * pegada, sobre todo en sus usos compactos (el badge ACTIVE de
+ * ProvidersPanel, el rol de UsersPanel). Como la regla es compartida, el
+ * redondeo aplica a todos los badges iguales de una: ProvidersPanel,
+ * ModelsTab (x2), UsersPanel, EnvTab y el Overview. */
 .badge--active {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--bg);
   font-weight: 700;
-  border-radius: 0;
-  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.625rem;
+  /* Un paso abajo del 0.75rem de `.badge`: con el padding de la fila
+   * anterior la caja quedaba alta y el pill se leia mas grande que la fila
+   * que lo contiene. 0.6875rem es la escala de texto chico de la app. */
+  font-size: 0.6875rem;
   letter-spacing: 0.03em;
 }
 .badge--warn    { background: var(--status-warn-bg); border-color: var(--status-warn); color: var(--status-warn); }
