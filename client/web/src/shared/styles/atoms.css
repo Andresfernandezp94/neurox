@@ -357,7 +357,62 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--gap-card-grid);
-  align-items: start;
+  /* `stretch`, no `start`: las dos columnas quedan a la MISMA altura, la
+   * que marque la más alta. Con `start` cada una mide lo suyo y las cajas
+   * quedan desalineadas. */
+  align-items: stretch;
+}
+
+/* Lista de resultados de Hugging Face dentro de la columna derecha.
+ *
+ * El `max-height` con scroll estaba en un `style` inline; vive acá ahora.
+ *
+ * El scroll NO es lo que desalineaba las columnas: eso era que el inline
+ * fijaba el alto del CONTENEDOR mientras la card de Local service crecía
+ * con su contenido, y quedaban dos filas de alturas distintas. El alto de
+ * la card vecina no depende de esta lista.
+ *
+ * El recorte de cantidad (HF_VISIBLE en ModelsTab) y este scroll son cosas
+ * distintas: el recorte muestra menos resultados, el scroll deja
+ * alcanzables los que ya se muestran. */
+.models-panel__hf-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-card-grid);
+  /* Ocupa el alto disponible y scrollea si no alcanza. Sin `max-height`
+   * fijo: con 3 resultados la lista mide menos que un `max-height` de
+   * 26rem, nunca desborda, y la barra de scroll no aparece nunca — que es
+   * lo que pasaba. El alto lo decide la columna, que ya está estirada a la
+   * altura de la card de Local service. */
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px;
+  /* Imprescindible: el <Card> que envuelve la lista es un flex column, y
+   * un item flex con `max-height` pero sin `min-height: 0` tiene su
+   * `min-height` automático en `auto`, o sea no baja de su contenido. El
+   * navegador lo agranda a la altura de los resultados y nunca aparece la
+   * barra de scroll: el `max-height` queda sin efecto. */
+  min-height: 0;
+}
+
+.models-panel__hf-card {
+  padding: 0.75rem;
+  flex-shrink: 0;
+}
+
+/* La columna derecha y su <Card> son flex column para que `flex: 1` de la
+ * lista pueda estirarse. Sin esto, la lista no tiene alto definido contra
+ * el cual scrollear. */
+.models-tab__col,
+.models-tab__col > .provider-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.models-panel__hf-more {
+  margin: 0;
 }
 
 /* Por debajo de ~64rem las dos columnas quedan ilegibles: la card de

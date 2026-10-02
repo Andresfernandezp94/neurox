@@ -41,6 +41,17 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+/** Resultados de Hugging Face visibles a la vez.
+ *
+ * La lista completa de HF puede traer 40 resultados, y la columna tiene que
+ * quedar a la misma altura que la card de Local service: si crece sin
+ * limite, arrastra la altura de toda la fila y descuadra la columna vecina.
+ * Tres es lo que entra sin pasarse.
+ *
+ * El recorte es de lo que se MUESTRA, no de lo que se pide: la búsqueda
+ * sigue trayendo todo y el contador de resultados muestra el total real. */
+const HF_VISIBLE = 3;
+
 /** Categoría `unclassified`: el .gguf está en la raíz, sin carpeta que lo
  *  organice. No es una categoría de verdad: es el estado "el operador todavía
  *  no lo organizó", y tiene que leerse distinto en la UI. */
@@ -313,17 +324,8 @@ export function ModelsTab() {
           <div
             className="models-panel__hf-list"
             data-testid="models-hf-list"
-            style={{
-              maxHeight: "26rem",
-              overflowY: "auto",
-              overflowX: "hidden",
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-              padding: 4,
-            }}
           >
-            {hf.map((m) => {
+            {hf.slice(0, HF_VISIBLE).map((m) => {
             const fam = familyOf(m.id);
             return (
               <Card key={m.id} className="models-panel__hf-card">
@@ -356,6 +358,11 @@ export function ModelsTab() {
             );
           })}
           </div>
+        )}
+        {hf.length > HF_VISIBLE && (
+          <p className="muted text-sm models-panel__hf-more">
+            Showing {HF_VISIBLE} of {hf.length}. Narrow the search to see the rest.
+          </p>
         )}
       </Card>
 
