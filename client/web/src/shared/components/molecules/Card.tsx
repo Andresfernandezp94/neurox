@@ -42,11 +42,16 @@ export function Card({
   className = "",
   as: Tag = "div",
   gap = "md",
+  ...rest
 }: CardProps) {
   const classes = ["card", gapClass[gap], className]
     .filter(Boolean)
     .join(" ");
-  return <Tag className={classes}>{children}</Tag>;
+  return (
+    <Tag className={classes} {...rest}>
+      {children}
+    </Tag>
+  );
 }
 
 interface SubProps {

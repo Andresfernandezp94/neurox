@@ -80,7 +80,7 @@ afterEach(() => {
 });
 
 describe("ModelsTab", () => {
-  it("renderiza los modelos locales como cards estilo providers", async () => {
+  it("renderiza los modelos locales como filas seleccionables", async () => {
     vi.mocked(modelsApi.getLocalModels).mockResolvedValue({
       dir: "/models",
       env_var: "MODELS_DIR",
@@ -96,7 +96,12 @@ describe("ModelsTab", () => {
     // la lista de GGUF. Lo que se verifica es que esté en la lista.
     expect(names.length).toBeGreaterThan(0);
     expect(screen.getByText("1.02 GB")).toBeInTheDocument();
-    expect(screen.getByTestId("set-active-button")).toBeInTheDocument();
+    // La fila es un botón: el área clickeable es toda la fila, no un icono.
+    expect(
+      screen.getByTestId("model-row-qwen2.5-1.5b-instruct-Q4_K_M.gguf"),
+    ).toHaveAttribute("type", "button");
+    // El set-as-active vive en el panel de config, no en cada fila.
+    expect(screen.queryByTestId("set-active-button")).toBeNull();
   });
 
   it("Start arranca el servicio local (ollama serve) y cambia a Stop", async () => {
@@ -199,6 +204,216 @@ describe("ModelsTab", () => {
 //
 // La carpeta del modelo bajo MODELS_DIR ES la categoría. El listado del
 // daemon ya viene agrupado y ordenado, así que la UI agrupa sin reordenar.
+
+describe("ModelsTab inline configuration panel", () => {
+  const chatA = {
+    filename: "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    path: "/models/chat/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    size_bytes: 1_066_000_000,
+    category: "chat",
+  };
+  const chatB = {
+    filename: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    path: "/models/chat/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    size_bytes: 2_382_000_000,
+    category: "chat",
+  };
+
+  beforeEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    vi.mocked(llmApi.getProviders).mockResolvedValue({
+      providers: [],
+      default_provider: "",
+      default_model: "",
+    } as never);
+    vi.mocked(llmApi.updateProvider).mockResolvedValue({} as never);
+    vi.mocked(modelsApi.putModelConfig).mockResolvedValue({} as never);
+  });
+
+  function mockLocal() {
+    vi.mocked(modelsApi.getLocalModels).mockResolvedValue({
+      dir: "/models",
+      env_var: "NEUROX_MODELS_DIR",
+      models: [chatA, chatB],
+    } as never);
+  }
+
+  it("keeps the panel visible with no selection instead of hiding it", async () => {
+    // Si la caja desaparece, el operador no sabe que puede configurar nada.
+    mockLocal();
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(screen.getByTestId("configure-panel")).toBeInTheDocument();
+    });
+    expect(screen.getByText("No model selected")).toBeInTheDocument();
+    expect(
+      screen.getByText(/pick a model on the left/i),
+    ).toBeInTheDocument();
+  });
+
+  it("loads and shows the config of the model the operator clicked", async () => {
+    mockLocal();
+    vi.mocked(modelsApi.getModelConfig).mockResolvedValue({
+      temperature: 0.7,
+      max_tokens: 4096,
+    } as never);
+
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+      ).toBeInTheDocument();
+    });
+    fireEvent.click(
+      screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("cfg-temperature")).toHaveValue(0.7);
+    });
+    expect(screen.getByTestId("cfg-max-tokens")).toHaveValue(4096);
+    expect(modelsApi.getModelConfig).toHaveBeenCalledWith(chatA.filename);
+  });
+
+  it("switches config when another model is selected, without a modal", async () => {
+    mockLocal();
+    vi.mocked(modelsApi.getModelConfig).mockImplementation(async (f: string) =>
+      ({ temperature: f === chatA.filename ? 0.3 : 0.9 }) as never
+    );
+
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+      ).toBeInTheDocument();
+    });
+    fireEvent.click(
+      screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("cfg-temperature")).toHaveValue(0.3);
+    });
+
+    fireEvent.click(
+      screen.getByTestId("model-row-Qwen3-4B-Instruct-2507-Q4_K_M.gguf"),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("cfg-temperature")).toHaveValue(0.9);
+    });
+    // Nunca hay overlay: comparar dos modelos no requiere cerrar nada.
+    expect(document.querySelector(".modal-backdrop")).toBeNull();
+  });
+
+  it("marks the selected row so the operator knows which one is being edited", async () => {
+    mockLocal();
+    vi.mocked(modelsApi.getModelConfig).mockResolvedValue({} as never);
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+      ).toBeInTheDocument();
+    });
+
+    const rowA = screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf");
+    const rowB = screen.getByTestId("model-row-Qwen3-4B-Instruct-2507-Q4_K_M.gguf");
+    expect(rowA).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(rowA);
+    await waitFor(() => {
+      expect(rowA).toHaveAttribute("aria-pressed", "true");
+    });
+    expect(rowB).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("saves the config of the selected model", async () => {
+    mockLocal();
+    vi.mocked(modelsApi.getModelConfig).mockResolvedValue({
+      temperature: 0.7,
+    } as never);
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+      ).toBeInTheDocument();
+    });
+    fireEvent.click(
+      screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("cfg-temperature")).toHaveValue(0.7);
+    });
+
+    fireEvent.change(screen.getByTestId("cfg-temperature"), {
+      target: { value: "0.2" },
+    });
+    fireEvent.click(screen.getByTestId("cfg-save"));
+
+    await waitFor(() => {
+      expect(modelsApi.putModelConfig).toHaveBeenCalledWith(
+        chatA.filename,
+        expect.objectContaining({ temperature: 0.2 }),
+      );
+    });
+  });
+
+  it("sets the selected model as active from the panel", async () => {
+    mockLocal();
+    vi.mocked(modelsApi.getModelConfig).mockResolvedValue({} as never);
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+      ).toBeInTheDocument();
+    });
+    fireEvent.click(
+      screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("set-active-button")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("set-active-button"));
+
+    await waitFor(() => {
+      // El id lo define LocalServiceCard; antes vivia hardcodeado aca
+      // como "local-llama" y ya no coincidia con el servicio real.
+      expect(llmApi.updateProvider).toHaveBeenCalledWith("local-llama-server", {
+        local_model_path: chatA.path,
+      });
+    });
+  });
+
+  it("does not leak a slow response into a newly selected model", async () => {
+    mockLocal();
+    vi.mocked(modelsApi.getModelConfig).mockImplementation(
+      (f: string) =>
+        new Promise((resolve) =>
+          f === chatA.filename
+            ? setTimeout(() => resolve({ temperature: 0.1 } as never), 50)
+            : resolve({ temperature: 0.9 } as never),
+        ),
+    );
+    render(<ModelsTab />);
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+      ).toBeInTheDocument();
+    });
+    fireEvent.click(
+      screen.getByTestId("model-row-qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+    );
+    fireEvent.click(
+      screen.getByTestId("model-row-Qwen3-4B-Instruct-2507-Q4_K_M.gguf"),
+    );
+    // El fetch lento del primero no debe pisar el valor del segundo.
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("cfg-temperature")).toHaveValue(0.9);
+      },
+      { timeout: 500 },
+    );
+  });
+});
 
 describe("ModelsTab hugging face results", () => {
   beforeEach(() => {

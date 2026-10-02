@@ -363,6 +363,131 @@
   align-items: stretch;
 }
 
+/* ─── Modelos locales: lista densa + editor ─── */
+
+/* La columna de la lista es un poco mas ancha que la del editor: los
+ * filenames de GGUF son largos (`Qwen_Qwen3-4B-Thinking-2507-Q4_K_M.gguf`)
+ * y con mitades iguales el nombre se corta justo antes de lo importante. */
+.models-tab__cols--models {
+  grid-template-columns: 1.15fr 1fr;
+}
+
+/* Fila de modelo. Es un <button> entero, no una card con un boton de
+ * edicion: la fila ES la accion de seleccionar, asi que el area clickeable
+ * es toda la fila y no un icono de 2rem en la esquina. */
+.models-tab__model-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard),
+              border-color var(--duration-fast) var(--ease-standard);
+}
+
+.models-tab__model-row:hover {
+  background: var(--bg-elevated);
+}
+
+.models-tab__model-row--selected {
+  /* Mismo tratamiento que `.card` de cristal, para que la fila seleccionada
+   * se lea como la superficie que se esta configurando y no como un hover
+   * que se quedó pegado. */
+  background: var(--glass-card-bg);
+  border-color: var(--border-hover);
+  backdrop-filter: var(--glass-card-blur);
+  -webkit-backdrop-filter: var(--glass-card-blur);
+}
+
+.models-tab__model-row--active .models-tab__model-name {
+  color: var(--status-active, var(--accent));
+}
+
+.models-tab__model-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.8125rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.models-tab__model-size {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Header de categoría dentro de la lista densa. */
+.models-tab__cat-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0 0.5rem;
+}
+
+/* Editor de la derecha. Sticky para que siga visible al hacer scroll en
+ * una lista larga: es el panel que se esta usando, perderlo arriba es
+ * justo lo que un modal resolvía pero con el contexto de la lista al lado. */
+.models-tab__config {
+  position: sticky;
+  top: 0.5rem;
+  align-self: start;
+}
+
+.models-tab__config-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.models-tab__config-name {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.models-tab__config-name .strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Label sobre control, no al lado: los nombres de estos parametros son
+ * largos (`tokens_per_second`) y en fila se les comes el input. */
+.models-tab__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.models-tab__field label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.models-tab__field .text-sm {
+  margin: 0;
+}
+
+.models-tab__config-cat {
+  font-family: var(--font-mono);
+  text-transform: lowercase;
+}
+
 /* Lista de resultados de Hugging Face dentro de la columna derecha.
  *
  * El `max-height` con scroll estaba en un `style` inline; vive acá ahora.
@@ -436,6 +561,12 @@
 @media (max-width: 64rem) {
   .models-tab__cols {
     grid-template-columns: 1fr;
+  }
+
+  /* Apiladas, el sticky del editor no sirve: se pegaria al borde de una
+   * columna que ya es la pantalla entera. */
+  .models-tab__config {
+    position: static;
   }
 }
 

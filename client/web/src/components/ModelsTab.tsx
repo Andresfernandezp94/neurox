@@ -16,7 +16,7 @@ import { SearchBar } from "../shared/components/molecules/SearchBar";
 import { Badge } from "../shared/components/atoms/Badge";
 import { ProviderLogo } from "../shared/components/ProviderLogo";
 import { FamilyLogo } from "../shared/components/FamilyLogo";
-import { IconCheck, IconDownload, IconEdit } from "../shared/components/Icons";
+import { IconCheck, IconDownload } from "../shared/components/Icons";
 import {
   getLocalModels,
   searchHfModels,
@@ -32,7 +32,7 @@ import {
   updateProvider,
   type LlmProviderStatus,
 } from "../api/llm";
-import { LocalServiceCard } from "./LocalServiceCard";
+import { LocalServiceCard, LOCAL_SERVICE_ID } from "./LocalServiceCard";
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -65,6 +65,37 @@ function categoryLabel(category: string): string {
   return CATEGORY_LABELS[category] ?? category;
 }
 
+/**
+ * Familias de modelo que el selector de logo reconoce por substring del
+ * nombre del archivo.
+ *
+ * A scope de modulo: `familyOf` la usan el componente y `ConfigurePanel`,
+ * que vive fuera del componente.
+ */
+const HF_FAMILIES = [
+  { id: "qwen", name: "Qwen", query: "qwen", hint: "Alibaba" },
+  { id: "llama", name: "Llama", query: "llama", hint: "Meta" },
+  { id: "mistral", name: "Mistral", query: "mistral", hint: "Mistral AI" },
+  { id: "gemma", name: "Gemma", query: "gemma", hint: "Google" },
+  { id: "phi", name: "Phi", query: "phi", hint: "Microsoft" },
+  { id: "deepseek", name: "DeepSeek", query: "deepseek", hint: "DeepSeek" },
+  { id: "whisper", name: "Whisper", query: "whisper", hint: "OpenAI (audio)" },
+  { id: "nemotron", name: "Nemotron", query: "nemotron", hint: "NVIDIA" },
+] as const;
+
+/**
+ * Logo de familia para un filename (ej. `qwen2.5-...gguf` → Qwen).
+ *
+ * A scope de modulo y no dentro del componente: `ConfigurePanel` vive fuera
+ * y lo necesita, y duplicar la tabla para que cada uno tenga la suya es
+ * exactamente el tipo de copia que después se desincroniza.
+ */
+function familyOf(s: string): string | null {
+  const lower = s.toLowerCase();
+  const fam = HF_FAMILIES.find((f) => lower.includes(f.query));
+  return fam ? fam.id : null;
+}
+
 export function ModelsTab() {
   const [local, setLocal] = useState<LocalModel[]>([]);
   // `null` = el directorio de MODELS_DIR no existe. No es lo mismo que
@@ -80,7 +111,6 @@ export function ModelsTab() {
   const [editing, setEditing] = useState<LocalModel | null>(null);
   // EP-0025: selector runtime del modelo a cargar.
   const [activeLocalPath, setActiveLocalPath] = useState<string | null>(null);
-  const [setting, setSetting] = useState<string | null>(null);
 
   // Agrupa por categoría. El daemon ya devuelve los resultados ordenados
   // por categoría, así que el orden de aparición respeta el del daemon sin
@@ -160,25 +190,6 @@ export function ModelsTab() {
     }
   }, [isLocalProvider]);
 
-  // EP-0025: aplicar el path seleccionado al provider local. NO recarga
-  // el modelo en runtime (eso requiere Stop+Start).
-  const handleSetActive = useCallback(
-    async (filename: string, path: string) => {
-      setSetting(filename);
-      setError(null);
-      try {
-        await updateProvider("local-llama", { local_model_path: path });
-        setActiveLocalPath(path);
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setSetting(null);
-      }
-    },
-    [],
-  );
-
-
   useEffect(() => {
     void load();
   }, [load]);
@@ -222,17 +233,6 @@ export function ModelsTab() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const HF_FAMILIES = [
-    { id: "qwen", name: "Qwen", query: "qwen", hint: "Alibaba" },
-    { id: "llama", name: "Llama", query: "llama", hint: "Meta" },
-    { id: "mistral", name: "Mistral", query: "mistral", hint: "Mistral AI" },
-    { id: "gemma", name: "Gemma", query: "gemma", hint: "Google" },
-    { id: "phi", name: "Phi", query: "phi", hint: "Microsoft" },
-    { id: "deepseek", name: "DeepSeek", query: "deepseek", hint: "DeepSeek" },
-    { id: "whisper", name: "Whisper", query: "whisper", hint: "OpenAI (audio)" },
-    { id: "nemotron", name: "Nemotron", query: "nemotron", hint: "NVIDIA" },
-  ] as const;
-
   const handleDownload = useCallback(async (id: string) => {
     setDownloading(id);
     setError(null);
@@ -245,13 +245,6 @@ export function ModelsTab() {
       setDownloading(null);
     }
   }, [load]);
-
-  // Logo de familia para el filename local (ej. qwen2.5-...gguf → Qwen).
-  const familyOf = useCallback((s: string): string | null => {
-    const lower = s.toLowerCase();
-    const fam = HF_FAMILIES.find((f) => lower.includes(f.query));
-    return fam ? fam.id : null;
-  }, []);
 
 
   return (
@@ -357,156 +350,187 @@ export function ModelsTab() {
         </section>
       </div>
 
-      {/* ─── Local GGUF models ─── */}
-      <div className="providers-list__section-head">
-        <h4 className="muted">Local GGUF models</h4>
-        <span className="muted text-sm">
-          {localByCategory.length > 0
-            ? `${local.length} in ${localByCategory.length} ${localByCategory.length === 1 ? "category" : "categories"}`
-            : `Models: 0`}
-        </span>
-      </div>
+      {/* ─── Modelos locales + configuración ───
+          Dos columnas: la lista a la izquierda, el editor a la derecha.
+          El editor NO es un modal: antes había que cerrar un overlay para
+          ver los parámetros, y comparar dos modelos requería abrir, leer,
+          cerrar y abrir el otro. Con el editor siempre visible, seleccionar
+          un modelo muestra su config al lado y el operador puede ir de uno
+          a otro sin perder el contexto de la lista. */}
+      <div className="models-tab__cols models-tab__cols--models">
+        <section className="models-tab__col">
+          <div className="providers-list__section-head">
+            <h4 className="muted">Local GGUF models</h4>
+            <span className="muted text-sm">
+              {localByCategory.length > 0
+                ? `${local.length} in ${localByCategory.length} ${localByCategory.length === 1 ? "category" : "categories"}`
+                : `Models: 0`}
+            </span>
+          </div>
 
-      {modelsDir && (
-        <p className="muted text-sm providers-panel__description">
-          <code>{modelsDir}</code> · category = subfolder
-        </p>
-      )}
-
-      {loading && <p className="muted">Loading local models…</p>}
-
-      {!loading && local.length === 0 && (
-        <EmptyState>
-          {modelsDir === null ? (
-            <>
-              <EmptyState.Title>Models directory not found</EmptyState.Title>
-              <EmptyState.Hint>
-                <code>{modelsEnvVar}</code> points at a directory that does not
-                exist. Create it, or point it at an existing one from the
-                Environment tab. This is NOT the same as an empty directory:
-                downloading a model would fail.
-              </EmptyState.Hint>
-            </>
-          ) : (
-            <>
-              <EmptyState.Title>No local models</EmptyState.Title>
-              <EmptyState.Hint>
-                <code>{modelsDir}</code> has no .gguf files. Download one from
-                Hugging Face below, or organize existing ones into
-                subfolders to categorize them.
-              </EmptyState.Hint>
-            </>
+          {modelsDir && (
+            <p className="muted text-sm providers-panel__description">
+              <code>{modelsDir}</code> · category = subfolder
+            </p>
           )}
-        </EmptyState>
-      )}
 
-      {/* Un grupo por categoría. El orden y el label vienen del daemon, que
-          ya los ordena por categoria para que la UI no reshuffle. */}
-      {localByCategory.map(({ category, items }) => (
-        <Fragment key={category}>
-          {items.length > 0 && (
-            <div className="providers-list__section-head">
-              <h5 className="muted models-tab__category">{categoryLabel(category)}</h5>
-              <span className="muted text-sm">{items.length}</span>
-            </div>
+          {loading && <p className="muted">Loading local models…</p>}
+
+          {!loading && local.length === 0 && (
+            <EmptyState>
+              {modelsDir === null ? (
+                <>
+                  <EmptyState.Title>Models directory not found</EmptyState.Title>
+                  <EmptyState.Hint>
+                    <code>{modelsEnvVar}</code> points at a directory that does
+                    not exist. Create it, or point it at an existing one from
+                    the Environment tab. This is NOT the same as an empty
+                    directory: downloading a model would fail.
+                  </EmptyState.Hint>
+                </>
+              ) : (
+                <>
+                  <EmptyState.Title>No local models</EmptyState.Title>
+                  <EmptyState.Hint>
+                    <code>{modelsDir}</code> has no .gguf files. Download one
+                    from Hugging Face above, or organize existing ones into
+                    subfolders to categorize them.
+                  </EmptyState.Hint>
+                </>
+              )}
+            </EmptyState>
           )}
-          {items.map((m) => {
-            const isActive = m.path === activeLocalPath;
-            const fam = familyOf(m.filename);
-            return (
-              <Card
-                key={m.path}
-                className={`provider-card ${isActive ? "provider-card--active" : ""}`}
-              >
-                <header className="provider-card__header">
-                  <div className="provider-card__identity">
+
+          {/* Lista densa: una fila por modelo, seleccionable. El click en
+              la fila la selecciona y actualiza el editor de la derecha; el
+              botón de lapic es redundante con eso y queda solo para el
+              "set as active", que es otra acción. */}
+          {localByCategory.map(({ category, items }) => (
+            <Fragment key={category}>
+              {items.length > 0 && (
+                <div className="models-tab__cat-head">
+                  <span className="models-tab__category">{categoryLabel(category)}</span>
+                  <span className="muted text-sm">{items.length}</span>
+                </div>
+              )}
+              {items.map((m) => {
+                const isActive = m.path === activeLocalPath;
+                const isSelected = editing?.path === m.path;
+                const fam = familyOf(m.filename);
+                return (
+                  <button
+                    key={m.path}
+                    type="button"
+                    className={`models-tab__model-row${isSelected ? " models-tab__model-row--selected" : ""}${isActive ? " models-tab__model-row--active" : ""}`}
+                    aria-pressed={isSelected}
+                    title={m.path}
+                    data-testid={`model-row-${m.filename}`}
+                    onClick={() => setEditing(m)}
+                  >
                     {fam ? (
                       <FamilyLogo id={fam} className="provider-logo" />
                     ) : (
                       <ProviderLogo id={m.filename} kind="local" className="provider-logo" />
                     )}
-                    <strong className="strong">{m.filename}</strong>
-                  </div>
-                  <div className="provider-card__actions">
-                    {!isActive && (
-                      <button
-                        type="button"
-                        disabled={setting === m.filename}
-                        className="provider-action provider-action--save"
-                        title="Set as active model"
-                        data-testid="set-active-button"
-                        onClick={() => handleSetActive(m.filename, m.path)}
-                      >
-                        {setting === m.filename ? <span>…</span> : <IconCheck />}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="provider-action"
-                      title="Configure model"
-                      onClick={() => setEditing(m)}
-                    >
-                      <IconEdit />
-                    </button>
-                    {isActive && (
-                      <Badge className="badge--active">ACTIVE</Badge>
-                    )}
-                  </div>
-                </header>
-                <hr className="provider-card__divider" />
+                    <span className="models-tab__model-name">{m.filename}</span>
+                    <span className="muted text-sm models-tab__model-size">
+                      {formatSize(m.size_bytes)}
+                    </span>
+                    {isActive && <Badge className="badge--active">ACTIVE</Badge>}
+                  </button>
+                );
+              })}
+            </Fragment>
+          ))}
+        </section>
 
-                <div className="provider-meta provider-meta--right">{formatSize(m.size_bytes)}</div>
-              </Card>
-            );
-          })}
-        </Fragment>
-      ))}
+        {/* Editor, siempre visible. Sin selección muestra un hint en vez de
+            desaparecer: si la caja no está, el operador no sabe que puede
+            configurar nada. */}
+        <section className="models-tab__col">
+          <ConfigurePanel
+            model={editing}
+            isActive={editing ? editing.path === activeLocalPath : false}
+            onSetActive={(path) => setActiveLocalPath(path)}
+            onSaved={async () => {
+              await load();
+            }}
+          />
+        </section>
+      </div>
 
-      {editing && (
-        <ConfigureModal
-          model={editing}
-          onClose={() => setEditing(null)}
-          onSaved={async () => {
-            setEditing(null);
-            await load();
-          }}
-        />
-      )}
     </div>
   );
 }
-
-interface ConfigureModalProps {
-  model: LocalModel;
-  onClose: () => void;
-  onSaved: () => void;
+interface ConfigurePanelProps {
+  /** Modelo seleccionado. `null` muestra un hint: el panel siempre está,
+   *  aunque todavía no haya nada que configurar. */
+  model: LocalModel | null;
+  /** Si este modelo es el que carga al arrancar el servicio. */
+  isActive: boolean;
+  /** EP-0025: aplicar el path al provider local. NO recarga el modelo en
+   *  runtime (eso requiere Stop+Start). */
+  onSetActive: (path: string) => Promise<void> | void;
+  onSaved: () => Promise<void> | void;
 }
 
-function ConfigureModal({ model, onClose, onSaved }: ConfigureModalProps) {
+/**
+ * Editor de parámetros de sampling de un modelo local.
+ *
+ * Inline y siempre visible, no un modal. Antes había que cerrar un overlay
+ * para ver los parámetros, y comparar dos modelos exigía abrir, leer,
+ * cerrar y abrir el otro. Con el panel al lado, seleccionar un modelo
+ * muestra su config y el operador puede pasar de uno a otro sin perder el
+ * contexto de la lista.
+ */
+function ConfigurePanel({
+  model,
+  isActive,
+  onSetActive,
+  onSaved,
+}: ConfigurePanelProps) {
   const [config, setConfig] = useState<ModelConfig>({});
-  const [loading, setLoading] = useState(true);
+  const [setting, setSetting] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Cambiar de modelo pide la config de ese modelo. El flag `cancelled`
+  // descarta la respuesta si el operador ya clickeó otro: el fetch por
+  // filename no se cancela, pero el resultado tardío no debe pisar el
+  // modelo nuevo.
   useEffect(() => {
+    if (!model) {
+      setConfig({});
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
     void (async () => {
       try {
         const data = await getModelConfig(model.filename);
-        setConfig(data);
+        if (!cancelled) setConfig(data);
       } catch (e) {
-        setError((e as Error).message);
+        if (!cancelled) setError((e as Error).message);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [model.filename]);
+    return () => {
+      cancelled = true;
+    };
+  }, [model]);
 
   const handleSave = async () => {
+    if (!model) return;
     setSaving(true);
     setError(null);
     try {
       await putModelConfig(model.filename, config);
-      onSaved();
+      await onSaved();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -514,132 +538,212 @@ function ConfigureModal({ model, onClose, onSaved }: ConfigureModalProps) {
     }
   };
 
+  const handleSetActive = async () => {
+    if (!model) return;
+    setSetting(true);
+    setError(null);
+    try {
+      // El id del servicio local lo define LocalServiceCard. Antes vivía
+      // hardcodeado acá como "local-llama" y ya no coincidía.
+      await updateProvider(LOCAL_SERVICE_ID, { local_model_path: model.path });
+      await onSetActive(model.path);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSetting(false);
+    }
+  };
+
+  const asNum = (v: string) => {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  const asInt = (v: string) => {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : undefined;
+  };
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <Card className="modal models-panel__configure-modal" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-        <h3>Configure {model.filename}</h3>
-        {error && <ErrorBanner>{error}</ErrorBanner>}
-        {loading && <p className="muted">Loading config…</p>}
-        {!loading && (
-          <Stack gap="sm">
-            <Row justify="between" align="center">
-              <Label>temperature</Label>
-              <Input
-                type="number"
-                step={0.05}
-                min={0}
-                max={2}
-                value={config.temperature ?? ""}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    temperature: parseFloat(e.target.value) || undefined,
-                  })
-                }
-              />
-            </Row>
-            <Row justify="between" align="center">
-              <Label>top_p</Label>
-              <Input
-                type="number"
-                step={0.05}
-                min={0}
-                max={1}
-                value={config.top_p ?? ""}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    top_p: parseFloat(e.target.value) || undefined,
-                  })
-                }
-              />
-            </Row>
-            <Row justify="between" align="center">
-              <Label>top_k</Label>
-              <Input
-                type="number"
-                min={0}
-                value={config.top_k ?? ""}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    top_k: parseInt(e.target.value, 10) || undefined,
-                  })
-                }
-              />
-            </Row>
-            <Row justify="between" align="center">
-              <Label>max_tokens</Label>
-              <Input
-                type="number"
-                min={1}
-                value={config.max_tokens ?? ""}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    max_tokens: parseInt(e.target.value, 10) || undefined,
-                  })
-                }
-              />
-            </Row>
-            <Row justify="between" align="center">
-              <Label>tokens_per_second</Label>
-              <Input
-                type="number"
-                min={0}
-                value={config.tokens_per_second ?? ""}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    tokens_per_second:
-                      parseInt(e.target.value, 10) || undefined,
-                  })
-                }
-              />
-            </Row>
-            <Stack gap="sm">
-              <Label>stop_sequences (one per line)</Label>
-              <textarea
-                className="input"
-                rows={3}
-                value={(config.stop_sequences ?? []).join("\n")}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    stop_sequences: e.target.value
-                      .split("\n")
-                      .map((s) => s.trim())
-                      .filter((s) => s.length > 0),
-                  })
-                }
-              />
-            </Stack>
-            <Stack gap="sm">
-              <Label>system</Label>
-              <textarea
-                className="input"
-                rows={3}
-                value={config.system ?? ""}
-                onChange={(e) =>
-                  setConfig({ ...config, system: e.target.value })
-                }
-              />
-            </Stack>
-          </Stack>
+    <Card className="provider-card models-tab__config" data-testid="configure-panel">
+      <div className="providers-list__section-head">
+        <h4 className="muted">Configuration</h4>
+        {model && (
+          <span className="muted text-sm models-tab__config-cat">
+            {model.category && model.category !== "unclassified"
+              ? model.category
+              : "sin categoría"}
+          </span>
         )}
-        <Row justify="end" gap="sm">
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={loading || saving}
-            onClick={handleSave}
-          >
-            {saving ? "Saving…" : "Save"}
-          </Button>
-        </Row>
-      </Card>
-    </div>
+      </div>
+
+      {!model ? (
+        <EmptyState>
+          <EmptyState.Title>No model selected</EmptyState.Title>
+          <EmptyState.Hint>
+            Pick a model on the left to see and edit its sampling parameters.
+          </EmptyState.Hint>
+        </EmptyState>
+      ) : (
+        <>
+          <div className="models-tab__config-head">
+            {familyOf(model.filename) ? (
+              <FamilyLogo
+                id={familyOf(model.filename) as string}
+                className="provider-logo"
+              />
+            ) : (
+              <ProviderLogo
+                id={model.filename}
+                kind="local"
+                className="provider-logo"
+              />
+            )}
+            <div className="models-tab__config-name">
+              <strong className="strong">{model.filename}</strong>
+              <span className="muted text-sm">{formatSize(model.size_bytes)}</span>
+            </div>
+            {isActive ? (
+              <Badge className="badge--active">ACTIVE</Badge>
+            ) : (
+              <button
+                type="button"
+                disabled={setting}
+                className="provider-action provider-action--save"
+                title="Set as active model"
+                aria-label={`Set ${model.filename} as active model`}
+                data-testid="set-active-button"
+                onClick={() => void handleSetActive()}
+              >
+                {setting ? <span>…</span> : <IconCheck />}
+              </button>
+            )}
+          </div>
+
+          {error && <ErrorBanner>{error}</ErrorBanner>}
+          {loading && <p className="muted text-sm">Loading config…</p>}
+
+          {!loading && (
+            <Stack gap="sm">
+              <div className="models-tab__field">
+                <Label htmlFor="cfg-temperature">temperature</Label>
+                <Input
+                  id="cfg-temperature"
+                  type="number"
+                  step={0.05}
+                  min={0}
+                  max={2}
+                  value={config.temperature ?? ""}
+                  onChange={(e) =>
+                    setConfig({ ...config, temperature: asNum(e.target.value) })
+                  }
+                  data-testid="cfg-temperature"
+                />
+              </div>
+              <div className="models-tab__field">
+                <Label htmlFor="cfg-top-p">top_p</Label>
+                <Input
+                  id="cfg-top-p"
+                  type="number"
+                  step={0.05}
+                  min={0}
+                  max={1}
+                  value={config.top_p ?? ""}
+                  onChange={(e) =>
+                    setConfig({ ...config, top_p: asNum(e.target.value) })
+                  }
+                  data-testid="cfg-top-p"
+                />
+              </div>
+              <div className="models-tab__field">
+                <Label htmlFor="cfg-top-k">top_k</Label>
+                <Input
+                  id="cfg-top-k"
+                  type="number"
+                  min={0}
+                  value={config.top_k ?? ""}
+                  onChange={(e) =>
+                    setConfig({ ...config, top_k: asInt(e.target.value) })
+                  }
+                  data-testid="cfg-top-k"
+                />
+              </div>
+              <div className="models-tab__field">
+                <Label htmlFor="cfg-max-tokens">max_tokens</Label>
+                <Input
+                  id="cfg-max-tokens"
+                  type="number"
+                  min={1}
+                  value={config.max_tokens ?? ""}
+                  onChange={(e) =>
+                    setConfig({ ...config, max_tokens: asInt(e.target.value) })
+                  }
+                  data-testid="cfg-max-tokens"
+                />
+              </div>
+              <div className="models-tab__field">
+                <Label htmlFor="cfg-tps">tokens_per_second</Label>
+                <Input
+                  id="cfg-tps"
+                  type="number"
+                  min={0}
+                  value={config.tokens_per_second ?? ""}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      tokens_per_second: asInt(e.target.value),
+                    })
+                  }
+                  data-testid="cfg-tps"
+                />
+              </div>
+              <div className="models-tab__field">
+                <Label htmlFor="cfg-stop">stop_sequences</Label>
+                <textarea
+                  id="cfg-stop"
+                  className="input"
+                  rows={3}
+                  placeholder="One per line"
+                  value={(config.stop_sequences ?? []).join("\n")}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      stop_sequences: e.target.value
+                        .split("\n")
+                        .map((s) => s.trim())
+                        .filter((s) => s.length > 0),
+                    })
+                  }
+                  data-testid="cfg-stop"
+                />
+                <span className="muted text-sm">One per line.</span>
+              </div>
+              <div className="models-tab__field">
+                <Label htmlFor="cfg-system">system</Label>
+                <textarea
+                  id="cfg-system"
+                  className="input"
+                  rows={4}
+                  placeholder="System prompt for this model"
+                  value={config.system ?? ""}
+                  onChange={(e) => setConfig({ ...config, system: e.target.value })}
+                  data-testid="cfg-system"
+                />
+              </div>
+            </Stack>
+          )}
+
+          <Row justify="end" gap="sm">
+            <Button
+              variant="primary"
+              disabled={loading || saving || !model}
+              onClick={() => void handleSave()}
+              data-testid="cfg-save"
+            >
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </Row>
+        </>
+      )}
+    </Card>
   );
 }
