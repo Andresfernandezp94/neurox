@@ -341,6 +341,38 @@
   letter-spacing: 0.01em;
 }
 
+/* Local service (izquierda) y Download from Hugging Face (derecha) van
+ * lado a lado: son la misma tarea —conseguir un modelo para servirlo— en
+ * sus dos direcciones, y el operador alterna entre bajar uno y arrancar el
+ * servicio. Apilados obligaban a recorrer la pantalla entera para pasar de
+ * uno al otro.
+ *
+ * El grid es del contenedor de la tab, no `.providers-list`: este último es
+ * `auto-fill minmax(24rem, 1fr)`, y con dos columnas fijas quedaría
+ * desbalanceado según el ancho. Acá cada columna ocupa la mitad exacta. */
+.models-tab__cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap-card-grid);
+  align-items: start;
+}
+
+/* Por debajo de ~64rem las dos columnas quedan ilegibles: la card de
+ * servicio tiene un form con label + control, y a la mitad de ancho el
+ * input queda corto para una ruta de GGUF. Se apila. */
+@media (max-width: 64rem) {
+  .models-tab__cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* El header de sección dentro de una columna no necesita `grid-column:
+ * 1 / -1` (eso era para el grid de la tab, donde el head debe ocupar las
+ * columnas). Acá es el primer hijo de su propia columna. */
+.models-tab__col > .providers-list__section-head {
+  grid-column: auto;
+}
+
 /* Campos del formulario de la card del servicio local. Un bloque por
  * campo (label + control + ayuda) para que el operador pueda escanear la
  * configuración sin que el label flote suelto. */

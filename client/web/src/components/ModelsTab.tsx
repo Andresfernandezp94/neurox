@@ -268,10 +268,99 @@ export function ModelsTab() {
           key, y mezclarlo con los remotos lo hace indistinguible de algo que
           necesita un key. El lugar donde se configura es donde se ven los
           GGUF que va a servir. */}
+      <div className="models-tab__cols">
+        <section className="models-tab__col">
+          <div className="providers-list__section-head">
+            <h4 className="muted">Local service</h4>
+          </div>
+          <LocalServiceCard chatModels={chatModels} onChanged={load} />
+        </section>
+
+        <section className="models-tab__col">
+      {/* ─── Hugging Face search ─── */}
       <div className="providers-list__section-head">
-        <h4 className="muted">Local service</h4>
+        <h4 className="muted">Download from Hugging Face</h4>
       </div>
-      <LocalServiceCard chatModels={chatModels} onChanged={load} />
+      <Card className="provider-card">
+        <Row gap="sm" align="center">
+          <div style={{ flex: 1 }}>
+            <SearchBar
+              placeholder="Search Hugging Face (e.g. qwen2.5)"
+              value={search}
+              onChange={setSearch}
+            />
+          </div>
+          {searching && (
+            <span className="badge badge--muted" data-testid="hf-searching-badge">
+              searching…
+            </span>
+          )}
+          {!searching && search.trim() && hf.length > 0 && (
+            <span className="badge badge--accent" data-testid="hf-results-badge">
+              {hf.length} result{hf.length === 1 ? "" : "s"}
+            </span>
+          )}
+        </Row>
+
+        {searching && <p className="muted">Searching…</p>}
+        {!searching && hf.length === 0 && search && (
+          <EmptyState>
+            <EmptyState.Title>No results</EmptyState.Title>
+            <EmptyState.Hint>Try a different query.</EmptyState.Hint>
+          </EmptyState>
+        )}
+        {hf.length > 0 && (
+          <div
+            className="models-panel__hf-list"
+            data-testid="models-hf-list"
+            style={{
+              maxHeight: "26rem",
+              overflowY: "auto",
+              overflowX: "hidden",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              padding: 4,
+            }}
+          >
+            {hf.map((m) => {
+            const fam = familyOf(m.id);
+            return (
+              <Card key={m.id} className="models-panel__hf-card">
+                <Row justify="between" align="center">
+                  <Row gap="md" align="center">
+                    {fam && <FamilyLogo id={fam} className="provider-logo" />}
+                    <strong className="strong">{m.display_name || m.id}</strong>
+                    {m.gated && (
+                      <span className="badge badge--warn">gated</span>
+                    )}
+                  </Row>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={downloading === m.id}
+                    onClick={() => handleDownload(m.id)}
+                  >
+                    {downloading === m.id ? "…" : "Download"}
+                  </Button>
+                </Row>
+                <Row justify="between" align="center">
+                  <div className="muted text-sm">
+                    <code>{m.id}</code>
+                  </div>
+                  <span className="badge badge--down">
+                    <IconDownload /> {m.downloads.toLocaleString()}
+                  </span>
+                </Row>
+              </Card>
+            );
+          })}
+          </div>
+        )}
+      </Card>
+
+        </section>
+      </div>
 
       {/* ─── Local GGUF models ─── */}
       <div className="providers-list__section-head">
@@ -377,88 +466,6 @@ export function ModelsTab() {
           })}
         </Fragment>
       ))}
-
-      {/* ─── Hugging Face search ─── */}
-      <div className="providers-list__section-head">
-        <h4 className="muted">Download from Hugging Face</h4>
-      </div>
-      <Card className="provider-card">
-        <Row gap="sm" align="center">
-          <div style={{ flex: 1 }}>
-            <SearchBar
-              placeholder="Search Hugging Face (e.g. qwen2.5)"
-              value={search}
-              onChange={setSearch}
-            />
-          </div>
-          {searching && (
-            <span className="badge badge--muted" data-testid="hf-searching-badge">
-              searching…
-            </span>
-          )}
-          {!searching && search.trim() && hf.length > 0 && (
-            <span className="badge badge--accent" data-testid="hf-results-badge">
-              {hf.length} result{hf.length === 1 ? "" : "s"}
-            </span>
-          )}
-        </Row>
-
-        {searching && <p className="muted">Searching…</p>}
-        {!searching && hf.length === 0 && search && (
-          <EmptyState>
-            <EmptyState.Title>No results</EmptyState.Title>
-            <EmptyState.Hint>Try a different query.</EmptyState.Hint>
-          </EmptyState>
-        )}
-        {hf.length > 0 && (
-          <div
-            className="models-panel__hf-list"
-            data-testid="models-hf-list"
-            style={{
-              maxHeight: "26rem",
-              overflowY: "auto",
-              overflowX: "hidden",
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-              padding: 4,
-            }}
-          >
-            {hf.map((m) => {
-            const fam = familyOf(m.id);
-            return (
-              <Card key={m.id} className="models-panel__hf-card">
-                <Row justify="between" align="center">
-                  <Row gap="md" align="center">
-                    {fam && <FamilyLogo id={fam} className="provider-logo" />}
-                    <strong className="strong">{m.display_name || m.id}</strong>
-                    {m.gated && (
-                      <span className="badge badge--warn">gated</span>
-                    )}
-                  </Row>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    disabled={downloading === m.id}
-                    onClick={() => handleDownload(m.id)}
-                  >
-                    {downloading === m.id ? "…" : "Download"}
-                  </Button>
-                </Row>
-                <Row justify="between" align="center">
-                  <div className="muted text-sm">
-                    <code>{m.id}</code>
-                  </div>
-                  <span className="badge badge--down">
-                    <IconDownload /> {m.downloads.toLocaleString()}
-                  </span>
-                </Row>
-              </Card>
-            );
-          })}
-          </div>
-        )}
-      </Card>
 
       {editing && (
         <ConfigureModal
