@@ -317,9 +317,14 @@
     padding: 0.75rem 1rem;
   }
 
-  /* El nav de anchors no aporta en mobile: se oculta para que el
-     header no se desborde en dos líneas. */
-  .home__nav {
+  /* Solo se ocultan los ANCHORS de seccion. Antes la regla era
+     `.home__nav { display: none }`, y `.home__nav` es el grupo entero:
+     los links, el theme toggle y el boton Entrar. Con eso el header de
+     mobile se quedaba sin forma de entrar al panel y sin cambiar de
+     tema, que es justo lo unico accionable en una pantalla chica.
+     Los anchors apuntan a secciones de la propia pagina, que en mobile
+     ya se llegan scrolleando. */
+  .home__nav-links {
     display: none;
   }
 
