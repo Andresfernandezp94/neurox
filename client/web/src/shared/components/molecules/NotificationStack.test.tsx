@@ -159,6 +159,78 @@ describe("NotificationStack", () => {
     expect(depth).toEqual(["2", "1", "0"]);
   });
 
+  it("con 8 avisos la profundidad visual se acota pero ninguno se pierde", () => {
+    // El tope acota el escalonado, no la cantidad. Los 8 siguen en el DOM
+    // (se cierran de a uno) y los mas viejos se acumulan en la maxima
+    // profundidad, que es lo que evita que el mazo crezca sin limite.
+    function Push8() {
+      const notify = useNotifications();
+      return (
+        <button
+          type="button"
+          data-testid="push8"
+          onClick={() => {
+            for (let i = 0; i < 8; i += 1) notify.error(`e${i}`);
+          }}
+        >
+          x8
+        </button>
+      );
+    }
+    const { container } = render(
+      <NotificationsProvider>
+        <Push8 />
+        <NotificationStack />
+      </NotificationsProvider>,
+    );
+    fireEvent.click(screen.getByTestId("push8"));
+
+    const rows = Array.from(container.querySelectorAll<HTMLElement>(".notification"));
+    expect(rows).toHaveLength(8);
+    const depth = rows.map((r) => Number(r.style.getPropertyValue("--depth")));
+    // DOM de atras hacia adelante, con el piso en MAX_VISUAL_DEPTH.
+    expect(depth).toEqual([4, 4, 4, 4, 3, 2, 1, 0]);
+    // Solo el de al frente muestra su contenido; los demas, solo la franja.
+    expect(container.querySelectorAll(".notification--front")).toHaveLength(1);
+    expect(container.querySelectorAll(".notification--behind")).toHaveLength(7);
+  });
+
+  it("cerrar el de al frente promueve el siguiente: se van de a uno", () => {
+    function Push2() {
+      const notify = useNotifications();
+      return (
+        <button
+          type="button"
+          data-testid="push2"
+          onClick={() => {
+            notify.error("viejo");
+            notify.error("nuevo");
+          }}
+        >
+          x2
+        </button>
+      );
+    }
+    const { container } = render(
+      <NotificationsProvider>
+        <Push2 />
+        <NotificationStack />
+      </NotificationsProvider>,
+    );
+    fireEvent.click(screen.getByTestId("push2"));
+
+    // Al frente esta "nuevo". Cerrandolo, "viejo" pasa a ser el de al
+    // frente y queda cerrable: es lo que hace que en un mazo todos se
+    // puedan cerrar sin tener que destaparlos a mano.
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar aviso: nuevo" }));
+    expect(screen.queryByText("nuevo")).not.toBeInTheDocument();
+    expect(container.querySelectorAll(".notification--front")).toHaveLength(1);
+    expect(screen.getByText("viejo")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Cerrar aviso: viejo" }),
+    ).toBeInTheDocument();
+  });
+
   it("un proceso usa role=status y no interrumpe al lector", () => {
     // Un spinner no debe cortar lo que el usuario esta leyendo, asi que
     // va como `status` y no como `alert`.

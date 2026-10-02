@@ -14,6 +14,7 @@ import type { CSSProperties } from "react";
 import { Spinner } from "../atoms/Spinner";
 import { IconAlert, IconClose, IconInfo, IconWarning } from "../Icons";
 import {
+  MAX_VISUAL_DEPTH,
   useNotificationItems,
   useNotifications,
   type Notification,
@@ -84,9 +85,15 @@ export function NotificationStack() {
     <div className="notification-stack" data-testid="notification-stack">
       {/* El DOM va en orden de llegada (viejo -> nuevo) y el CSS pone el
           ultimo al frente con `z-index`. La profundidad se cuenta desde
-          atras: el ultimo es 0, el anterior 1, y asi. */}
+          atras: el ultimo es 0, el anterior 1, y asi.
+          `MAX_VISUAL_DEPTH` acota el escalonado, no la cantidad: los
+          avisos siguen todos en el DOM y se cierran de a uno. */}
       {items.map((n, i) => (
-        <NotificationRow key={n.id} n={n} depth={items.length - 1 - i} />
+        <NotificationRow
+          key={n.id}
+          n={n}
+          depth={Math.min(items.length - 1 - i, MAX_VISUAL_DEPTH)}
+        />
       ))}
     </div>
   );

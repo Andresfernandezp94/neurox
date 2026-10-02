@@ -34,11 +34,16 @@ export interface Notification {
 }
 
 /**
- * Tope de notificaciones visibles a la vez. Pasado el tope cae la mas
- * vieja: las nuevas pesan mas que una de hace rato que el usuario todavia
- * no leyo, y el stack no puede terminar tapando la pantalla.
+ * Profundidad visual maxima del mazo.
+ *
+ * NO es un tope de notificaciones: la cantidad es ilimitada y cada aviso
+ * permanece hasta que se lo cierra. Esto acota solo cuanto se achica y se
+ * corre cada uno, para que el bloque no crezca sin limite. Mas alla de esta
+ * profundidad los avisos quedan apilados en la misma posicion, Hidden uno
+ * detras del otro; se van cerrando de a uno, empezando por el de al
+ * frente.
  */
-export const MAX_VISIBLE = 5;
+export const MAX_VISUAL_DEPTH = 4;
 
 export interface NotificationsApi {
   /** Agrega una notificacion y devuelve su id. */
@@ -72,11 +77,6 @@ interface NotificationsContextValue {
 
 const NotificationsContext = createContext<NotificationsContextValue | null>(null);
 
-/** Recorta la lista al tope, tirando lo mas viejo. */
-function cap(list: Notification[]): Notification[] {
-  return list.length > MAX_VISIBLE ? list.slice(list.length - MAX_VISIBLE) : list;
-}
-
 export function NotificationsProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<Notification[]>([]);
   const seq = useRef(0);
@@ -100,7 +100,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     // identico al de arriba. Agruparlos con un contador ("x3") se leia
     // como un resumen, y lo que se quiere ver son los avisos uno debajo
     // del otro, que es como se entienden los que importan.
-    setItems((prev) => cap([...prev, { id, kind, message: text }]));
+    setItems((prev) => [...prev, { id, kind, message: text }]);
     return id;
   }, []);
 
@@ -130,10 +130,8 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         return;
       }
       setItems((prev) =>
-        cap(
-          prev.map((n) =>
-            n.id === id ? { ...n, kind: "error" as const, message: text } : n,
-          ),
+        prev.map((n) =>
+          n.id === id ? { ...n, kind: "error" as const, message: text } : n,
         ),
       );
     },

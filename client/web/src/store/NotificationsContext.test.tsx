@@ -3,7 +3,6 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import {
   NotificationsProvider,
-  MAX_VISIBLE,
   useNotificationItems,
   useNotifications,
 } from "./NotificationsContext";
@@ -66,17 +65,20 @@ describe("NotificationsContext", () => {
     expect(result.current.messages).toEqual(["mismo", "mismo", "mismo"]);
   });
 
-  it("descarta las mas viejas pasado el tope", () => {
+  it("NO descarta ninguna: todas permanecen hasta que se las cierra", () => {
+    // Hubo un tope de 5 que se comia la mas vieja al llegar la sexta. Eso
+    // contradice directamente "permanecen hasta que las cierre": un aviso
+    // que el usuario nunca vio desaparecer se le iba solo.
+    const total = 14;
     const { result } = setup();
     act(() => {
-      for (let i = 0; i < MAX_VISIBLE + 3; i += 1) {
+      for (let i = 0; i < total; i += 1) {
         result.current.api.error(`e${i}`);
       }
     });
-    expect(result.current.itemsLength).toBe(MAX_VISIBLE);
-    // La mas nueva esta; la primera se cayo.
-    expect(result.current.messages).not.toContain("e0");
-    expect(result.current.messages).toContain(`e${MAX_VISIBLE + 2}`);
+    expect(result.current.itemsLength).toBe(total);
+    // La primera sigue en su lugar, al principio de la lista.
+    expect(result.current.messages[0]).toBe("e0");
   });
 
   it("dismiss saca solo la del id", () => {
