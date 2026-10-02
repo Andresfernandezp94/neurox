@@ -372,20 +372,23 @@ pub struct CoreConfig {
 /// `workspace` or `writable_paths`. `max_recursion_depth` caps
 /// `glob`/`grep` traversal.
 ///
-/// Default: enabled, no writable paths, depth 10.
+/// Default: enabled, alcance `/` en lectura y escritura, depth 10.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct SandboxConfig {
     /// Whether the sandbox is enforced. Default true.
     pub enabled: bool,
-    /// Paths where write tools (write_file, shell) are allowed. Default [].
-    /// Empty means read-only everywhere (writes are rejected).
+    /// Paths where write tools (write_file, shell) are allowed.
+    ///
+    /// Default `["/"]`: el agente trabaja sobre `/`, no acotado al home.
+    /// Asi puede usar paths fuera de el, del tipo `/tmp/neurox/*`.
+    ///
+    /// Dejarlo VACIO si es lo que restringe: con la lista vacia, lo unico
+    /// permitido es lo que cuelgue del `workspace_root`.
     pub writable_paths: Vec<String>,
     /// Paths where read tools are allowed but writes are rejected.
     /// Read+write is `writable_paths` (read tools also work there).
-    /// When `enabled` is true, paths outside `writable_paths` and
-    /// `readable_paths` are denied for read tools too.
-    /// Default: empty (read tools can only see the workspace root).
+    /// Default `["/"]`, por la misma razon que `writable_paths`.
     pub readable_paths: Vec<String>,
     /// Max recursion depth for glob/grep. Default 10.
     pub max_recursion_depth: usize,
@@ -395,9 +398,12 @@ impl Default for SandboxConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            writable_paths: Vec::new(),
+            // `/` y no el home: el sandbox no acota al usuario a su carpeta.
+            // El root del workspace sigue siendo la base de los paths
+            // relativos y el cwd del shell, pero el alcance es el sistema.
+            writable_paths: vec!["/".to_string()],
             max_recursion_depth: 10,
-            readable_paths: Vec::new(),
+            readable_paths: vec!["/".to_string()],
         }
     }
 }
@@ -1458,15 +1464,54 @@ llm:
 
     // ─── SandboxConfig (EP-0019-03) ────────────────────────────────────────
 
+    /// El default da alcance `/`. El agente trabaja sobre el sistema, no
+    /// acotado al home: asi puede usar paths del tipo `/tmp/neurox/*`.
     #[test]
-    fn sandbox_config_default_is_strict() {
+    fn sandbox_config_default_covers_the_whole_filesystem() {
         let cfg = SandboxConfig::default();
         assert!(cfg.enabled, "sandbox should default to enabled");
-        assert!(
-            cfg.writable_paths.is_empty(),
-            "no writable paths by default"
+        assert_eq!(
+            cfg.writable_paths,
+            vec!["/".to_string()],
+            "escritura abierta por default"
+        );
+        assert_eq!(
+            cfg.readable_paths,
+            vec!["/".to_string()],
+            "lectura abierta por default"
         );
         assert_eq!(cfg.max_recursion_depth, 10);
+    }
+
+    /// Lo que restringe es dejar la lista VACIA, no el default: con la
+    /// lista vacia solo pasa lo que cuelgue del `workspace_root`.
+    #[test]
+    fn sandbox_config_with_empty_lists_is_restricted_to_the_root() {
+        let yaml = "sandbox:\n  writable_paths: []\n  readable_paths: []\n";
+        let cfg: CoreConfig = serde_yml::from_str(yaml).expect("parse yaml");
+        assert!(cfg.sandbox.writable_paths.is_empty());
+        assert!(cfg.sandbox.readable_paths.is_empty());
+
+        // `/tmp` queda fuera del root y no esta en ninguna lista.
+        let resolved =
+            cfg.sandbox
+                .readable_paths_resolved(std::path::Path::new("/home/alguien"));
+        assert!(resolved.is_empty(), "sin listas, el alcance es el root solo");
+    }
+
+    /// El default resuelto cubre cualquier path, no solo los que arrancan
+    /// con el root del workspace.
+    #[test]
+    fn el_default_resuelto_alcanza_paths_fuera_del_root() {
+        let cfg = SandboxConfig::default();
+        let root = std::path::Path::new("/home/alguien");
+        for p in ["/tmp/neurox", "/etc", "/home/alguien", "/var/log"] {
+            let r = cfg.readable_paths_resolved(root);
+            assert!(
+                r.iter().any(|r_| std::path::Path::new(p).starts_with(r_)),
+                "el default deberia alcanzar {p}"
+            );
+        }
     }
 
     #[test]
@@ -1494,8 +1539,8 @@ sandbox:
 "#;
         let cfg: CoreConfig = serde_yml::from_str(yaml).expect("parse yaml");
         assert!(!cfg.sandbox.enabled);
-        // Other fields still default
-        assert!(cfg.sandbox.writable_paths.is_empty());
+        // Other fields still default: el alcance sigue siendo `/`.
+        assert_eq!(cfg.sandbox.writable_paths, vec!["/".to_string()]);
         assert_eq!(cfg.sandbox.max_recursion_depth, 10);
     }
 
@@ -1564,5 +1609,74 @@ impl tools_engine::SandboxConfig for SandboxConfig {
 
     fn readable_paths_resolved(&self, workspace_root: &Path) -> Vec<PathBuf> {
         SandboxConfig::readable_paths_resolved(self, workspace_root)
+    }
+}
+
+#[cfg(test)]
+mod sandbox_alcance_tests {
+    //! El sandbox por default tiene que alcanzar `/tmp/neurox/*` y no solo
+    //! lo que cuelgue del `workspace_root`.
+    //!
+    //! Antes el default eran listas vacias y `workspace_root` era el home:
+    //! todo lo que colgaba del home pasaba por el atajo de
+    //! `resolve_under_workspace`, y `/tmp` caia en el chequeo de lista, con
+    //! lista vacia, o sea rechazado.
+
+    use super::*;
+    use std::path::Path;
+
+    fn default_cfg() -> SandboxConfig {
+        SandboxConfig::default()
+    }
+
+    #[test]
+    fn el_default_alcanza_tmp() {
+        let cfg = default_cfg();
+        let leidos = cfg.readable_paths_resolved(Path::new("/home/alguien"));
+        assert!(Path::new("/tmp/neurox/x").starts_with(&leidos[0]));
+    }
+
+    #[test]
+    fn el_default_alcanza_todo_el_sistema() {
+        let cfg = default_cfg();
+        for root in ["/", "/tmp", "/etc", "/opt", "/var", "/srv"] {
+            assert!(
+                Path::new(root).starts_with("/"),
+                "el alcance es / asi que {root} entra"
+            );
+        }
+        let leidos = cfg.readable_paths_resolved(Path::new("/home/alguien"));
+        assert_eq!(leidos, vec![PathBuf::from("/")]);
+    }
+
+    /// Escribir tambien: el alcance `/` es de lectura Y escritura.
+    #[test]
+    fn el_default_alcanza_escritura_fuera_del_root() {
+        let cfg = default_cfg();
+        let escritos = cfg.writable_paths_resolved(Path::new("/home/alguien"));
+        assert_eq!(escritos, vec![PathBuf::from("/")]);
+        assert!(Path::new("/tmp/neurox/x").starts_with(&escritos[0]));
+    }
+
+    /// Con la lista vacia el alcance vuelve a ser el root solo: dejar la
+    /// lista vacia es la forma de restringir.
+    #[test]
+    fn lista_vacia_revierte_al_alcance_del_root() {
+        let cfg = SandboxConfig {
+            writable_paths: vec![],
+            readable_paths: vec![],
+            ..Default::default()
+        };
+        let leidos = cfg.readable_paths_resolved(Path::new("/home/alguien"));
+        assert!(leidos.is_empty(), "sin listas no hay alcance extra");
+    }
+
+    /// El placeholder `${workspace}` sigue resolviendo contra el root.
+    #[test]
+    fn el_placeholder_workspace_no_se_rompio() {
+        let yaml = "sandbox:\n  writable_paths:\n    - \"${workspace}/.sdd\"\n";
+        let cfg: CoreConfig = serde_yml::from_str(yaml).expect("parse");
+        let resueltos = cfg.sandbox.writable_paths_resolved(Path::new("/srv/ws"));
+        assert_eq!(resueltos, vec![PathBuf::from("/srv/ws/.sdd")]);
     }
 }
