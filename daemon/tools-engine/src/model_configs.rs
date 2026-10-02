@@ -14,14 +14,54 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::path::Path;
 
+/// Serializa un `Option<f32>` redondeando a 6 decimales.
+///
+/// Un f32 se guarda en SQLite como REAL y serde lo emite como f64 con la
+/// expansion EXACTA: `0.3f32` sale `0.30000001192092896`. En la UI el campo
+/// de temperature mostraba esa cadena entera y el operador no tenia forma de
+/// saber que el numero que elia era 0.3.
+///
+/// 6 decimales es de sobra para sampling params (temperature y top_p se
+/// mueven en pasos de centesimas) y deja de aparecer el ruido de coma
+/// flotante. Solo afecta el JSON: el valor en la base sigue siendo el f32
+/// exacto.
+///
+/// None se mantiene como None para no romper `skip_serializing_if`.
+fn ser_f32_opt<S>(v: &Option<f32>, ser: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match v {
+        Some(x) => {
+            let r = (*x as f64 * 1_000_000.0).round() / 1_000_000.0;
+            // f64 → JSON. Si fuera NaN/inf, serde lo rechaza y el operador
+            // veria un error de deserializacion; se cae a null en vez.
+            if r.is_finite() {
+                ser.serialize_f64(r)
+            } else {
+                ser.serialize_none()
+            }
+        }
+        None => ser.serialize_none(),
+    }
+}
+
 /// Inference parameters attached to a single local model. All fields
 /// are optional so the operator can pick which to tune. Sensible
 /// defaults are applied by the inference layer when a field is `None`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModelConfig {
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        serialize_with = "ser_f32_opt"
+    )]
     pub temperature: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        serialize_with = "ser_f32_opt"
+    )]
     pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub top_k: Option<u32>,
