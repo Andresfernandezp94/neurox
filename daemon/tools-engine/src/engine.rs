@@ -962,3 +962,199 @@ mod workspace_scope_tests {
         assert!(leido.contains("ok"));
     }
 }
+
+#[cfg(test)]
+mod sandbox_enabled_tests {
+    //! `sandbox.enabled` tiene que significar algo.
+    //!
+    //! Antes el flag era inerte: los tools de filesystem piden
+    //! `readable_paths_resolved()` / `writable_paths_resolved()` y nunca
+    //! `is_readable()` / `is_writable()`, que son los unicos metodos donde
+    //! el flag se leia. El doc del trait decia que `enabled == false`
+    //! significa "sin restricciones", asi que la casilla del form mentia.
+    //!
+    //! Con el flag apagado el alcance pasa a ser el prefijo `UNRESTRICTED`
+    //! (`/`), que matchea cualquier path absoluto. El `cwd` del shell y el
+    //! root del workspace NO cambian: el agente sigue trabajando adentro del
+    //! entorno, lo que cambia es a que puede llegar.
+
+    use super::*;
+    use crate::sandbox::SandboxConfig as SandboxTrait;
+    use crate::tools::read::read_file::ReadFileTool;
+    use crate::tools::write::write_file::WriteFileTool;
+    use crate::tools::{ExecuteContext, Scope, Tool, WorkspaceScope};
+    use std::path::{Path, PathBuf};
+
+    struct Configurable {
+        enabled: bool,
+        readable: Vec<PathBuf>,
+        writable: Vec<PathBuf>,
+    }
+
+    impl SandboxTrait for Configurable {
+        fn enabled(&self) -> bool {
+            self.enabled
+        }
+        fn is_writable(&self, p: &Path) -> bool {
+            self.writable.iter().any(|r| p.starts_with(r))
+        }
+        fn is_readable(&self, p: &Path) -> bool {
+            self.readable.iter().any(|r| p.starts_with(r))
+        }
+        fn readable_paths_resolved(&self, _ws: &Path) -> Vec<PathBuf> {
+            self.readable.clone()
+        }
+        fn writable_paths_resolved(&self, _ws: &Path) -> Vec<PathBuf> {
+            self.writable.clone()
+        }
+    }
+
+    fn ctx() -> ExecuteContext {
+        ExecuteContext {
+            agent_id: "test".into(),
+            workspace: None,
+            cancel: None,
+            http_client: None,
+        }
+    }
+
+    fn arc(cfg: Configurable) -> Arc<tokio::sync::RwLock<Box<dyn SandboxTrait>>> {
+        Arc::new(tokio::sync::RwLock::new(Box::new(cfg) as Box<dyn SandboxTrait>))
+    }
+
+    /// Apagado: `readable()` devuelve el prefijo de todo el sistema.
+    #[tokio::test]
+    async fn apagado_da_alcance_completo() {
+        let celda = arc(Configurable { enabled: false, readable: vec![], writable: vec![] });
+        let root = PathBuf::from("/srv/ws");
+        let scope = Scope { root: &root, sandbox: &celda };
+
+        assert!(!scope.enforced().await, "tiene que reportarse apagado");
+        assert_eq!(
+            scope.readable().await,
+            vec![PathBuf::from(crate::tools::UNRESTRICTED)]
+        );
+        assert_eq!(
+            scope.writable().await,
+            vec![PathBuf::from(crate::tools::UNRESTRICTED)]
+        );
+    }
+
+    /// Encendido: los limites siguen mandando.
+    #[tokio::test]
+    async fn encendido_sigue_limitando() {
+        let celda = arc(Configurable {
+            enabled: true,
+            readable: vec![PathBuf::from("/srv/lectura")],
+            writable: vec![],
+        });
+        let root = PathBuf::from("/srv/ws");
+        let scope = Scope { root: &root, sandbox: &celda };
+
+        assert!(scope.enforced().await);
+        assert_eq!(scope.readable().await, vec![PathBuf::from("/srv/lectura")]);
+        assert!(scope.writable().await.is_empty());
+    }
+
+    /// El efecto en una tool real: apagado lee fuera del root, encendido no.
+    #[tokio::test]
+    async fn apagando_el_sandbox_se_lee_fuera_del_root() {
+        let ws = tempfile::TempDir::new().unwrap();
+        let fuera = tempfile::TempDir::new().unwrap();
+        let archivo = fuera.path().join("dato.txt");
+        std::fs::write(&archivo, "secreto").unwrap();
+
+        // Apagado: pasa.
+        let apagado = arc(Configurable { enabled: false, readable: vec![], writable: vec![] });
+        let tool_apagado = ReadFileTool {
+            workspace_root: ws.path().to_path_buf(),
+            sandbox: apagado,
+        };
+        assert!(
+            tool_apagado
+                .execute(&ctx(), serde_json::json!({ "path": archivo.to_string_lossy() }))
+                .await
+                .is_ok(),
+            "con el sandbox apagado se lee fuera del root, como promete el doc del trait"
+        );
+
+        // Encendido y sin la ruta en la lista: se rechaza.
+        let encendido = arc(Configurable { enabled: true, readable: vec![], writable: vec![] });
+        let tool_encendido = ReadFileTool {
+            workspace_root: ws.path().to_path_buf(),
+            sandbox: encendido.clone(),
+        };
+        assert!(
+            tool_encendido
+                .execute(&ctx(), serde_json::json!({ "path": archivo.to_string_lossy() }))
+                .await
+                .is_err(),
+            "con el sandbox encendido y la lista vacia, se rechaza"
+        );
+        let _ = &tool_encendido;
+    }
+
+    /// Apagado el sandbox, escribir tambien sale.
+    #[tokio::test]
+    async fn apagando_el_sandbox_se_escribe_fuera_del_root() {
+        let ws = tempfile::TempDir::new().unwrap();
+        let fuera = tempfile::TempDir::new().unwrap();
+        let celda = arc(Configurable { enabled: false, readable: vec![], writable: vec![] });
+        let tool = WriteFileTool {
+            workspace_root: ws.path().to_path_buf(),
+            sandbox: celda,
+        };
+        let destino = fuera.path().join("nuevo.txt");
+        let r = tool
+            .execute(
+                &ctx(),
+                serde_json::json!({ "command": "create", "path": destino.to_string_lossy(), "content": "x" }),
+            )
+            .await;
+        assert!(r.is_ok(), "con el sandbox apagado escribe fuera del root: {r:?}");
+        assert!(destino.exists());
+    }
+
+    /// Apagar el sandbox NO abre el traversal: `normalize_path` corre
+    /// siempre, y un `..` que suba por encima de `/` sigue dando error.
+    #[tokio::test]
+    async fn apagar_el_sandbox_no_abre_el_traversal() {
+        use crate::tools::helpers::resolve_under_workspace;
+        let ws = PathBuf::from("/srv/ws");
+        let r = resolve_under_workspace(&ws, "../../../etc/passwd", &[PathBuf::from("/")], false);
+        assert!(r.is_err(), "el `..` por encima de la raiz tiene que seguir rechazandose");
+    }
+
+    /// El workspace en el contexto manda sobre el sandbox del tool.
+    #[tokio::test]
+    async fn el_workspace_apagado_manda_sobre_un_tool_encendido() {
+        let ws = tempfile::TempDir::new().unwrap();
+        let fuera = tempfile::TempDir::new().unwrap();
+        let archivo = fuera.path().join("dato.txt");
+        std::fs::write(&archivo, "secreto").unwrap();
+
+        // El tool nace cerrado, pero la llamada viene con un workspace
+        // apagado.
+        let cerrado = arc(Configurable { enabled: true, readable: vec![], writable: vec![] });
+        let tool = ReadFileTool {
+            workspace_root: ws.path().to_path_buf(),
+            sandbox: cerrado,
+        };
+        let apagado = arc(Configurable { enabled: false, readable: vec![], writable: vec![] });
+        let c = ExecuteContext {
+            agent_id: "t".into(),
+            workspace: Some(WorkspaceScope {
+                id: Some("w".into()),
+                root: ws.path().to_path_buf(),
+                sandbox: apagado,
+            }),
+            cancel: None,
+            http_client: None,
+        };
+        assert!(
+            tool.execute(&c, serde_json::json!({ "path": archivo.to_string_lossy() }))
+                .await
+                .is_ok()
+        );
+    }
+}

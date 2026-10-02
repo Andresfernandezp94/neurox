@@ -375,8 +375,18 @@ async fn serve(
     info!(
         db_path = %core_config.db_path.display(),
         workspaces = workspaces_count,
+        // `applied = false` con workspaces > 0 es la combinacion que hay que
+        // ver: hay entornos configurados y ninguno se esta usando. Es el
+        // estado de "todavia no los uso".
+        applied = core_config.workspaces.enabled,
         "workspaces store opened"
     );
+    if workspaces_count > 0 && !core_config.workspaces.enabled {
+        info!(
+            "workspaces.enabled is false: los {} workspaces estan configurados pero NO se aplican.              Para activarlos: poné 'workspaces:\n  enabled: true' en el config.yaml",
+            workspaces_count
+        );
+    }
 
     let state = AppState::new(
         lifecycle,

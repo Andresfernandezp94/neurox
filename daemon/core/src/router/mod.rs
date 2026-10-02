@@ -89,6 +89,13 @@ impl AppState {
                 sandbox: self.workspace.sandbox.clone(),
             };
         };
+        if !self.config.workspaces.enabled {
+            return tools_engine::WorkspaceScope {
+                id: None,
+                root: global_root,
+                sandbox: self.workspace.sandbox.clone(),
+            };
+        }
         let workspace_id = self
             .lifecycle
             .session
@@ -110,6 +117,9 @@ impl AppState {
     /// Los agentes con session usan `scope_for_session`, que gana: es el
     /// override por sesión. Este es el default que aplica a los agentes
     /// persistentes y a las sesiones que no elegieron nada.
+    ///
+    /// Con `workspaces.enabled: false` tampoco se consulta el spec: todo cae
+    /// al global.
     pub async fn scope_for_agent(&self, agent_id: &str) -> tools_engine::WorkspaceScope {
         let global_root = self.workspace.workspace_root.clone();
         let Some(layers) = self.workspaces.as_ref() else {
@@ -119,6 +129,13 @@ impl AppState {
                 sandbox: self.workspace.sandbox.clone(),
             };
         };
+        if !self.config.workspaces.enabled {
+            return tools_engine::WorkspaceScope {
+                id: None,
+                root: global_root,
+                sandbox: self.workspace.sandbox.clone(),
+            };
+        }
         // El default del agente: su `workspace_id` en el spec. Si el agente
         // no declara uno, se usa el workspace marcado `is_default`, que es
         // el "entorno por defecto" del operator. Sin ninguno de los dos, el

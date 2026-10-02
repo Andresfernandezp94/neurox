@@ -353,6 +353,9 @@ pub struct CoreConfig {
     /// Sandbox config (EP-0019-03). Missing section → `SandboxConfig::default()`.
     #[serde(default)]
     pub sandbox: SandboxConfig,
+    /// EP-0026-UX: switch de los workspaces. Ver `WorkspacesSection`.
+    #[serde(default)]
+    pub workspaces: WorkspacesSection,
     /// Per-session agent pool. When a session is created with an `agent_id`
     /// that matches a key here, the daemon spawns a fresh subprocess for
     /// that session and dispatches all messages to it. The process is
@@ -387,6 +390,33 @@ pub struct CoreConfig {
 /// Sandbox arrancara sin poder leer nada util. Para restringir hay que
 /// cambiar `readable_paths` por las rutas concretas; la vista escribe eso
 /// y ahora si llega a las tools (ver el fix de `set_sandbox`).
+/// EP-0026-UX: seccion `workspaces` del config.yaml.
+///
+/// `enabled: false` apaga la APLICACION de los workspaces, no el
+///almacen: el CRUD de `/v1/workspaces` sigue vivo, asi que se pueden crear
+/// y configurar entornos con el feature apagado y activarlos despues sin
+/// volver a cargarlos.
+///
+/// Apagado, `scope_for_session` y `scope_for_agent` ignoran el
+/// `workspace_id` de la sesion y del agente y devuelven siempre el scope
+/// global: raiz global y sandbox global, o sea el comportamiento previo al
+/// feature.
+///
+/// Default `true`: con la tabla vacia no hay nada que aplicar, asi que el
+/// feature no hace nada solo.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct WorkspacesSection {
+    /// Si los workspaces se aplican al resolver el scope de una sesion.
+    pub enabled: bool,
+}
+
+impl Default for WorkspacesSection {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct SandboxConfig {
@@ -793,6 +823,7 @@ impl Default for CoreConfig {
             plugins_registry: None,
             llm: LlmConfig::default(),
             sandbox: SandboxConfig::default(),
+            workspaces: WorkspacesSection::default(),
             session_agents: SessionAgentsConfig::default(),
             auth: AuthConfigSection::default(),
         }
@@ -1709,5 +1740,50 @@ impl tools_engine::SandboxConfig for SandboxConfig {
 
     fn readable_paths_resolved(&self, workspace_root: &Path) -> Vec<PathBuf> {
         SandboxConfig::readable_paths_resolved(self, workspace_root)
+    }
+}
+
+#[cfg(test)]
+mod workspaces_section_tests {
+    use super::*;
+
+    /// Sin seccion `workspaces` en el YAML: default, que es encendido.
+    #[test]
+    fn sin_seccion_usa_el_default() {
+        let cfg: CoreConfig = serde_yml::from_str("bind_addr: \"127.0.0.1:7878\"").expect("parse");
+        assert!(cfg.workspaces.enabled);
+    }
+
+    #[test]
+    fn seccion_explicita_apagada() {
+        let cfg: CoreConfig = serde_yml::from_str("workspaces:\n  enabled: false\n").expect("parse");
+        assert!(!cfg.workspaces.enabled);
+    }
+
+    #[test]
+    fn seccion_explicita_encendida() {
+        let cfg: CoreConfig = serde_yml::from_str("workspaces:\n  enabled: true\n").expect("parse");
+        assert!(cfg.workspaces.enabled);
+    }
+
+    /// La seccion no pisa el sandbox: vienen en el mismo archivo.
+    #[test]
+    fn la_seccion_no_toca_el_sandbox() {
+        let yaml = "sandbox:\n  enabled: false\n  readable_paths:\n    - /opt\nworkspaces:\n  enabled: false\n";
+        let cfg: CoreConfig = serde_yml::from_str(yaml).expect("parse");
+        assert!(!cfg.sandbox.enabled, "el sandbox global sigue independiente");
+        assert_eq!(cfg.sandbox.readable_paths, vec!["/opt"]);
+        assert!(!cfg.workspaces.enabled);
+    }
+
+    /// Con `${env:...}` expansion: el switch se puede dejar en el env.
+    #[test]
+    fn el_switch_acepta_env_var() {
+        let yaml = "workspaces:\n  enabled: ${env:NEUROX_WORKSPACES}\n";
+        std::env::set_var("NEUROX_WORKSPACES", "false");
+        let texto = expand_env_vars(yaml);
+        let cfg: CoreConfig = serde_yml::from_str(&texto.text).expect("parse");
+        assert!(!cfg.workspaces.enabled);
+        std::env::remove_var("NEUROX_WORKSPACES");
     }
 }

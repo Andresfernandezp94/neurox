@@ -31,7 +31,13 @@ fn viewer() -> UserContext {
     }
 }
 
+/// `workspaces_enabled = false` deja el CRUD vivo pero la resolucion de
+/// scope ignorando el workspace. Ver `state_apagados`.
 async fn state() -> (AppState, tempfile::TempDir) {
+    build_state(true).await
+}
+
+async fn build_state(workspaces_enabled: bool) -> (AppState, tempfile::TempDir) {
     let tmp = tempfile::tempdir().unwrap();
     let db = tmp.path().join("w.db");
 
@@ -68,7 +74,10 @@ async fn state() -> (AppState, tempfile::TempDir) {
         engine,
         AuthLayer::new(),
         workspace,
-        Arc::new(crate::config::CoreConfig::default()),
+        Arc::new(crate::config::CoreConfig {
+            workspaces: crate::config::WorkspacesSection { enabled: workspaces_enabled },
+            ..Default::default()
+        }),
     )
     .with_workspaces(Arc::new(layers));
 
@@ -116,15 +125,15 @@ async fn listar_devuelve_empty_sin_workspaces() {
 #[tokio::test]
 async fn crear_listar_y_borrar() {
     let (state, _t) = state().await;
-    create(&state, "Sixbell", "/srv/sixbell", &["${workspace}"]).await;
+    create(&state, "Alfa", "/srv/alfa", &["${workspace}"]).await;
 
     let res = list_workspaces(State(Arc::new(state.clone())), Extension(admin())).await;
     let b = body_of(res);
     assert_eq!(b["workspaces"].as_array().unwrap().len(), 1);
-    assert_eq!(b["workspaces"][0]["id"], "sixbell");
-    assert_eq!(b["workspaces"][0]["root"], "/srv/sixbell");
+    assert_eq!(b["workspaces"][0]["id"], "alfa");
+    assert_eq!(b["workspaces"][0]["root"], "/srv/alfa");
 
-    let res = delete_workspace(State(Arc::new(state.clone())), Extension(admin()), AxumPath("sixbell".into())).await;
+    let res = delete_workspace(State(Arc::new(state.clone())), Extension(admin()), AxumPath("alfa".into())).await;
     assert_eq!(res.status(), StatusCode::OK);
     let res = list_workspaces(State(Arc::new(state.clone())), Extension(admin())).await;
     assert_eq!(body_of(res)["workspaces"].as_array().unwrap().len(), 0);
@@ -133,7 +142,7 @@ async fn crear_listar_y_borrar() {
 #[tokio::test]
 async fn sin_rol_de_admin_no_se_puede_tocar_nada() {
     let (state, _t) = state().await;
-    create(&state, "Sixbell", "/srv/sixbell", &[]).await;
+    create(&state, "Alfa", "/srv/alfa", &[]).await;
 
     let req = CreateReq {
         name: "Otro".into(),
@@ -146,7 +155,7 @@ async fn sin_rol_de_admin_no_se_puede_tocar_nada() {
     let res = list_workspaces(State(Arc::new(state.clone())), Extension(viewer())).await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
-    let res = delete_workspace(State(Arc::new(state.clone())), Extension(viewer()), AxumPath("sixbell".into())).await;
+    let res = delete_workspace(State(Arc::new(state.clone())), Extension(viewer()), AxumPath("alfa".into())).await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
     // Y el workspace sigue ahi: un rechazo no deja efectos secundarios.
@@ -217,12 +226,12 @@ async fn paths_de_sandbox_se_validan() {
 #[tokio::test]
 async fn el_workspace_nace_con_su_sandbox_y_no_con_el_global() {
     let (state, _t) = state().await;
-    create(&state, "Sixbell", "/srv/sixbell", &["${workspace}"]).await;
+    create(&state, "Alfa", "/srv/alfa", &["${workspace}"]).await;
 
     let l = state.workspaces.clone().unwrap();
-    let celda = l.registry.sandbox_for("sixbell").await;
-    let leidos = celda.read().await.readable_paths_resolved(Path::new("/srv/sixbell"));
-    assert_eq!(leidos, vec![PathBuf::from("/srv/sixbell")], "el placeholder de workspace apunta a su propio root");
+    let celda = l.registry.sandbox_for("alfa").await;
+    let leidos = celda.read().await.readable_paths_resolved(Path::new("/srv/alfa"));
+    assert_eq!(leidos, vec![PathBuf::from("/srv/alfa")], "el placeholder de workspace apunta a su propio root");
     assert_ne!(
         leidos,
         vec![PathBuf::from("/home")],

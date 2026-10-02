@@ -152,22 +152,39 @@ pub struct Scope<'a> {
     pub sandbox: &'a std::sync::Arc<tokio::sync::RwLock<Box<dyn crate::sandbox::SandboxConfig>>>,
 }
 
+/// Prefijo que significa "todo el sistema". Se usa unicamente cuando el
+/// sandbox esta apagado: `resolve_under_workspace` y el chequeo de `shell`
+/// comparan con `starts_with`, asi que un preimpio de `/` matchea cualquier
+/// path absoluto.
+///
+/// Es una sentinel, no un permiso: `normalize_path` sigue corriendo y el
+/// `..` que suba por encima de `/` sigue dando error, con lo que apagar
+/// el sandbox no abre la puerta al traversal.
+pub const UNRESTRICTED: &str = "/";
+
 impl<'a> Scope<'a> {
+    /// Si el sandbox se esta aplicando. `false` = alcance completo.
+    pub async fn enforced(&self) -> bool {
+        self.sandbox.read().await.enabled()
+    }
+
     /// Alcance de lectura. Incluye los `writable_paths`: leer implicito
     /// donde se puede escribir.
     pub async fn readable(&self) -> Vec<std::path::PathBuf> {
-        self.sandbox
-            .read()
-            .await
-            .readable_paths_resolved(self.root)
+        let guard = self.sandbox.read().await;
+        if !guard.enabled() {
+            return vec![std::path::PathBuf::from(UNRESTRICTED)];
+        }
+        guard.readable_paths_resolved(self.root)
     }
 
     /// Alcance de escritura.
     pub async fn writable(&self) -> Vec<std::path::PathBuf> {
-        self.sandbox
-            .write()
-            .await
-            .writable_paths_resolved(self.root)
+        let guard = self.sandbox.write().await;
+        if !guard.enabled() {
+            return vec![std::path::PathBuf::from(UNRESTRICTED)];
+        }
+        guard.writable_paths_resolved(self.root)
     }
 
     /// Tope de recursion para glob/grep. `None` = default del tool.

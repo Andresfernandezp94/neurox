@@ -347,6 +347,26 @@ pub async fn get_sandbox_defaults(State(state): State<Arc<AppState>>) -> Respons
     }))
 }
 
+/// GET /v1/workspaces/status — si el feature esta aplicado.
+///
+/// Sin rol Admin a proposito: responde si el feature esta activo y cuantos
+/// entornos hay, nada del contenido de cada uno. Es lo que necesita el form
+/// para explicar por que un workspace configurado no se esta aplicando.
+pub async fn workspaces_status(State(state): State<Arc<AppState>>) -> Response {
+    let (enabled, count) = match state.workspaces.as_ref() {
+        Some(l) => (state.config.workspaces.enabled, l.store.list().await.map(|w| w.len()).unwrap_or(0)),
+        None => (false, 0),
+    };
+    ok(serde_json::json!({
+        "ok": true,
+        "enabled": enabled,
+        "count": count,
+        // Con entornos cargados y el switch apagado, la UI tiene que decirlo:
+        // el usuario configured algo y no ve efecto, y sin esto parece un bug.
+        "configured_but_not_applied": count > 0 && !enabled,
+    }))
+}
+
 /// Variante de `list_workspaces` sin el chequeo de rol, para el panel de
 /// chat que solo necesita conocer el default. No expone paths.
 pub async fn list_workspace_names(State(state): State<Arc<AppState>>) -> Response {

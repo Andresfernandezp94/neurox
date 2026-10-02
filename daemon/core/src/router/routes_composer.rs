@@ -166,6 +166,10 @@ pub fn router(state: AppState) -> axum::Router {
             get(crate::router::handlers::workspaces::get_sandbox_defaults),
         )
         .route(
+            "/v1/workspaces/status",
+            get(crate::router::handlers::workspaces::workspaces_status),
+        )
+        .route(
             "/v1/workspaces/:id",
             get(crate::router::handlers::workspaces::get_workspace)
                 .patch(crate::router::handlers::workspaces::update_workspace)
