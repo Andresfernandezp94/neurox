@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -125,6 +125,51 @@ describe("tokens.css: paridad entre tema oscuro y claro", () => {
       `tokens de color usados en var() que no tienen valor en [data-theme="light"].\n` +
         `En claro caen a transparente y la regla se aplica sin fondo.\n` +
         `Si el sharing es intencional, agregalos a COMPARTIDOS_A_PROPOSITO con el motivo.`,
+    ).toEqual([]);
+  });
+
+  /**
+   * Tokens referenciados con `var(--x)` sin fallback y nunca definidos.
+   *
+   * CSS no avisa: `var(--x)` con `--x` inexistente no es un error de
+   * sintaxis, la regla se aplica y la propiedad cae en su valor inicial. Por
+   * eso se Scottish. Eran cinco, con 17 usos:
+   *
+   * - `--bg-hover` en estados `:hover` de filas y nav items -> `--bg-tertiary`
+   * - `--bg-sunken` en contenedores de icono y bloques inset -> `--surface-deep`
+   * - `--status-success` -> `--status-active` (los que existen son
+   *   active/warn/danger/tools)
+   * - `--status-info` -> `--status-tools`
+   * - `--font-sans` en `chat/tool-renderer.css` -> token nuevo, con el mismo
+   *   stack que el body global
+   */
+  it("ningun var() referencia un token inexistente", () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const files: string[] = [];
+    const walk = (d: string) => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const p = join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (p.endsWith(".css")) files.push(p);
+      }
+    };
+    walk(dir);
+
+    const todo = files.map((f) => readFileSync(f, "utf8")).join("\n");
+    const definidos = new Set(
+      [...todo.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((m) => m[1]),
+    );
+    // Los usos con fallback no dependen de que el token exista.
+    const huérfanos = new Set<string>();
+    for (const m of todo.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/g)) {
+      const nombre = m[1];
+      if (nombre !== undefined && !definidos.has(nombre)) huérfanos.add(nombre);
+    }
+
+    expect(
+      [...huérfanos],
+      "var(--x) sin fallback y sin definir: la propiedad cae en su valor " +
+        "inicial sin avisar. Defini el token o usá var(--x, fallback).",
     ).toEqual([]);
   });
 

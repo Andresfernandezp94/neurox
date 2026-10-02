@@ -793,7 +793,7 @@
 }
 
 .table__row:hover {
-  background: var(--bg-hover);
+  background: var(--bg-tertiary);
 }
 
 .table__row--clickable {
@@ -878,7 +878,7 @@
 
 .record-list__item--interactive .record-list__row:hover,
 .record-list__row--clickable:hover {
-  background: var(--bg-hover);
+  background: var(--bg-tertiary);
 }
 
 .record-list__status {
@@ -891,10 +891,10 @@
   box-shadow: 0 0 0 2px var(--bg);
 }
 
-.record-list__status--success { background: var(--status-success); }
+.record-list__status--success { background: var(--status-active); }
 .record-list__status--warn { background: var(--status-warn); }
 .record-list__status--danger { background: var(--status-danger); }
-.record-list__status--info { background: var(--status-info); }
+.record-list__status--info { background: var(--status-tools); }
 .record-list__status--neutral { background: var(--text-muted); }
 
 .record-list__body {
@@ -967,10 +967,10 @@
   word-break: break-word;
 }
 
-.record-list__field-value--success { color: var(--status-success); }
+.record-list__field-value--success { color: var(--status-active); }
 .record-list__field-value--warn { color: var(--status-warn); }
 .record-list__field-value--danger { color: var(--status-danger); }
-.record-list__field-value--info { color: var(--status-info); }
+.record-list__field-value--info { color: var(--status-tools); }
 
 .record-list__meta {
   color: var(--text-muted);
@@ -1829,7 +1829,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--text-secondary);
-  background: var(--bg-sunken);
+  background: var(--surface-deep);
   padding: 0.5rem 0.75rem;
   border-radius: 0.375rem;
   border: 1px solid var(--border);

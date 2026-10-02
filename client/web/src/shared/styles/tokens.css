@@ -69,6 +69,11 @@ svg {
   --bg-glass: rgba(0, 0, 0, 0.45);
   --bg-glass-strong: rgba(0, 0, 0, 0.6);
   --chrome-blur: blur(20px) saturate(140%);
+  /* Stack sans del body. `--font-sans` estaba referenciado en
+   * `chat/tool-renderer.css` sin estar definido, asi que esas tres reglas
+   * caian a la fuente inicial del agente. Es el MISMO stack que declara el
+   * body mas abajo, para que el token no pueda quedar desfasado. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: 'CaskaydiaCove Nerd Font Mono', 'CaskaydiaCove Nerd Font', 'JetBrainsMono Nerd Font Mono', 'JetBrainsMono Nerd Font', 'Caskaydia Mono', 'Cascadia Code', 'Fira Code', 'Menlo', monospace;
   --status-active: #4caf50;
   --status-active-bg: rgba(76, 175, 80, 0.15);
