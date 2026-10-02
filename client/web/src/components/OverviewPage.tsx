@@ -118,6 +118,28 @@ export function OverviewPage() {
         <ConnectionStatus conn={conn} />
       </Row>
 
+      {/* ─── Runtime ─── */}
+      <section className="overview__section">
+        <SectionHeader title="Runtime" />
+        <Card>
+          <div className="overview__runtime">
+            <Stat label="Estado" value={conn.health?.status ?? "—"} />
+            <Stat label="Versión" value={conn.health?.version ?? "—"} />
+            <Stat label="Uptime" value={formatUptime(conn.health?.uptime_seconds)} />
+            <Stat
+              label="Inicio"
+              value={
+                conn.health?.started_at ? formatDate(conn.health.started_at) : "—"
+              }
+            />
+            <Stat
+              label="Auth"
+              value={conn.health?.auth_required ? "requerida" : "no requerida"}
+            />
+          </div>
+        </Card>
+      </section>
+
       {/* ─── Stats ─── */}
       <div className="overview__stats">
         <StatCard label="Agentes" value={agents} icon={<IconRobot />} />
@@ -212,28 +234,6 @@ export function OverviewPage() {
             ))}
           </div>
         )}
-      </section>
-
-      {/* ─── Runtime ─── */}
-      <section className="overview__section">
-        <SectionHeader title="Runtime" />
-        <Card>
-          <div className="overview__runtime">
-            <Stat label="Estado" value={conn.health?.status ?? "—"} />
-            <Stat label="Versión" value={conn.health?.version ?? "—"} />
-            <Stat label="Uptime" value={formatUptime(conn.health?.uptime_seconds)} />
-            <Stat
-              label="Inicio"
-              value={
-                conn.health?.started_at ? formatDate(conn.health.started_at) : "—"
-              }
-            />
-            <Stat
-              label="Auth"
-              value={conn.health?.auth_required ? "requerida" : "no requerida"}
-            />
-          </div>
-        </Card>
       </section>
 
       {/* ─── Catálogo de tools ─── */}

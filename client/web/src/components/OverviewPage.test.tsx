@@ -136,6 +136,29 @@ describe("OverviewPage", () => {
     );
   });
 
+  it("Runtime va primero, apenas abajo del encabezado", async () => {
+    // El orden lo pidio el operador: Runtime es lo primero que se quiere
+    // ver de una pantalla de Overview, antes que las StatCards y antes que
+    // Providers. Fijarlo con un test evita que un append futuro lo corra.
+    render(<OverviewPage />);
+    await waitFor(() => expect(screen.getByText("Runtime")).toBeInTheDocument());
+
+    const titulos = Array.from(document.querySelectorAll(".overview__section-title, .section-header__title"))
+      .map((el) => el.textContent?.trim())
+      .filter(Boolean);
+    expect(titulos.indexOf("Runtime")).toBeGreaterThanOrEqual(0);
+
+    // El orden real del DOM: Runtime antes que el bloque de stats y antes
+    // que Providers.
+    const runtime = screen.getByText("Runtime");
+    const stats = screen.getByText("Agentes");
+    const providers = screen.getByText("Providers LLM");
+    const pos = (el: Element) =>
+      el.compareDocumentPosition(stats) & Node.DOCUMENT_POSITION_FOLLOWING ? 1 : 0;
+    expect(pos(runtime)).toBe(1);
+    expect(runtime.compareDocumentPosition(providers) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("marca el provider activo con el pill accent, no con una variante de color", async () => {
     // El activo usa `badge--active`, el mismo pill solido que
     // ProvidersPanel / ModelsTab / UsersPanel / EnvTab. Con
