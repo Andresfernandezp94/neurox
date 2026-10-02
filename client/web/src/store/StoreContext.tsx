@@ -9,6 +9,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   type Dispatch,
   type ReactNode,
 } from 'react';
@@ -267,12 +268,36 @@ function reduceEvent(state: StoreState, event: DaemonEvent): StoreState {
 
 // ─── Context ────────────────────────────────────────────────────────────
 
+/**
+ * Evento crudo del WS `/v1/events`, ya parseado.
+ *
+ * Se pasa el objeto entero y no un tipo por variante: los consumidores
+ * (hoy `useChatTabs`) filtran por `type` y leen lo que necesitan, y asi
+ * agregar un evento al daemon no obliga a tocar el store.
+ */
+export type DaemonEventPayload = Record<string, unknown>;
+
 export interface StoreContextValue {
   state: StoreState;
   dispatch: React.Dispatch<StoreAction>;
   snapshot: () => Promise<void>;
   /** Selector con shallow-equal para evitar re-renders innecesarios. */
   select: <T>(selector: (s: StoreState) => T) => T;
+  /**
+   * Registra un listener de eventos del WS. Devuelve la baja.
+   *
+   * La app tiene UN solo socket a `/v1/events`, el de este provider, con
+   * backoff y reconexion. Antes `useChatTabs` abria un socket propio al
+   * mismo endpoint y SIN ninguna reconexion: si ese se caia (daemon
+   * reiniciado, red dormida) el chat dejaba de recibir eventos en
+   * silencio, mientras el indicador de conexion decia "conectado" porque
+   * el otro socket si reconectaba.
+   *
+   * Se entrega el evento directo por callback y no por estado a proposito:
+   * pasar por estado perderia eventos entre renders, y los chunks del
+   * stream son ordenados y no se pueden volver a pedir.
+   */
+  subscribeEvents: (fn: (evt: DaemonEventPayload) => void) => () => void;
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -286,6 +311,15 @@ export interface StoreProviderProps {
 }
 
 export function StoreProvider({ children, eventsPath = '/v1/events' }: StoreProviderProps) {
+  // Listeners de eventos del WS. Un Set para que la baja sea O(1) y para
+  // que el mismo handler no se registre dos veces.
+  const eventListenersRef = useRef<Set<(evt: DaemonEventPayload) => void>>(new Set());
+  const subscribeEvents = useCallback((fn: (evt: DaemonEventPayload) => void) => {
+    eventListenersRef.current.add(fn);
+    return () => {
+      eventListenersRef.current.delete(fn);
+    };
+  }, []);
   const [state, dispatch] = useReducer(reducer, initialState);
 
   // EP-0003-05: inicializa el cliente de /v1/commands (singleton).
@@ -377,6 +411,19 @@ export function StoreProvider({ children, eventsPath = '/v1/events' }: StoreProv
         try {
           const parsed = JSON.parse(ev.data) as DaemonEvent;
           dispatch({ type: 'EVENT_RECEIVED', event: parsed });
+          // Se reparte a los listeners registrados (hoy `useChatTabs`).
+          // Se itera sobre una copia: un listener puede darse de baja
+          // durante la llamada (si desmonta mientras llega el evento) y
+          // mutar el Set mientras se recorre.
+          for (const fn of Array.from(eventListenersRef.current)) {
+            try {
+              fn(parsed as unknown as DaemonEventPayload);
+            } catch (e) {
+              // Un listener que tira no puede cortar el WS ni impedir que
+              // los demas reciban el evento.
+              console.error('event listener failed', e);
+            }
+          }
         } catch {
           // ignore
         }
@@ -462,8 +509,8 @@ export function StoreProvider({ children, eventsPath = '/v1/events' }: StoreProv
   }, [state]);
 
   const value = useMemo<StoreContextValue>(
-    () => ({ state, dispatch, snapshot, select }),
-    [state, snapshot, select],
+    () => ({ state, dispatch, snapshot, select, subscribeEvents }),
+    [state, snapshot, select, subscribeEvents],
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

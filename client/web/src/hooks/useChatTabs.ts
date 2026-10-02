@@ -20,7 +20,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Message, MessageMetrics } from "../types";
 import type { ModelSelection } from "../components/ModelSelector";
-import { apiGet, apiPost, getToken } from "../api/client";
+import { apiGet, apiPost } from "../api/client";
+import { useStore } from "../store/StoreContext";
 import { createSession, endSession } from "../api/sessions";
 import { setSessionModel } from "../api/llm";
 import {
@@ -78,6 +79,8 @@ interface SessionRow {
 }
 
 export function useChatTabs(defaultAgentId: string | null = null) {
+  // Socket unico de la app: el de `StoreProvider`.
+  const { subscribeEvents } = useStore();
   const [tabs, setTabs] = useState<ChatTab[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -226,17 +229,13 @@ export function useChatTabs(defaultAgentId: string | null = null) {
   // it clears the per-session accumulator + last-seq so a future
   // stream starts fresh.
   useEffect(() => {
-    const token = getToken();
-    if (!token) return;
-    const url = buildWsUrl("/v1/events", token);
-    const ws = new WebSocket(url);
-    ws.onmessage = (e) => {
-      let evt: Record<string, unknown>;
-      try {
-        evt = JSON.parse(e.data);
-      } catch {
-        return;
-      }
+    // Un SOLO socket a `/v1/events` en toda la app: el de `StoreProvider`,
+    // que tiene backoff y reconexion. Antes este hook abria un socket
+    // propio al mismo endpoint y sin ninguna reconexion, asi que si se
+    // caia (daemon reiniciado, red dormida) el chat dejaba de recibir
+    // eventos en silencio mientras el indicador de conexion decia
+    // "conectado" porque el otro socket si reconectaba.
+    return subscribeEvents((evt) => {
       const type = evt.type;
       const sid = evt.session_id as string | undefined;
       if (type === "session_started" && sid) {
@@ -483,16 +482,16 @@ export function useChatTabs(defaultAgentId: string | null = null) {
         const tab = tabsRef.current.find((t) => t.sessionId === sid);
         if (tab) applyStreamChunk(tab.id, sid, chunk);
       }
-    };
-    return () => {
-      ws.close();
-    };
-    // The socket must live for the WHOLE component lifetime — a single
-    // long-lived subscription to `/v1/events`. Everything the handler
-    // needs is read from refs (`tabsRef`, `activeIdRef`, `seenSessions`,
-    // `streamMessageIdsRef`, `lastSeqRef`) or from stable
-    // `useCallback`s (`upsertSession`, `applyStreamChunk`,
-    // `clearSessionStreamState`), so an empty dep array is correct.
+    });
+    // Devolver la baja de la suscripcion es todo lo que hace falta: el
+    // socket es del store y su ciclo de vida no es de este hook.
+    //
+    // El handler se registra una vez y vive toda la vida del componente.
+    // Todo lo que usa se lee de refs (`tabsRef`, `activeIdRef`,
+    // `seenSessions`, `streamMessageIdsRef`, `lastSeqRef`) o de
+    // `useCallback`s estables (`upsertSession`, `applyStreamChunk`,
+    // `clearSessionStreamState`), asi que un dep array vacio es correcto:
+    // no se re-registra en cada render ni en cada cambio de pestana.
     //
     // BUGFIX (cross-device realtime): the dep array was `[activeId]`,
     // which tore down and re-opened the socket on EVERY tab switch.
@@ -501,8 +500,7 @@ export function useChatTabs(defaultAgentId: string | null = null) {
     // were dropped — the receiving device only caught up on the next
     // full reload (F5) via `/v1/sessions` + `getSessionMessages`. A
     // single persistent socket removes that window.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [subscribeEvents]);
 
   // First-time UX: if the user has no active sessions yet, auto-create
   // an empty "draft" tab so the chat panel isn't empty. The draft has no
@@ -1148,11 +1146,3 @@ export function useChatTabs(defaultAgentId: string | null = null) {
 }
 
 /** Build a ws:// or wss:// URL with the JWT passed as `?token=`. */
-function buildWsUrl(path: string, token: string): string {
-  const base = (import.meta.env?.VITE_API_BASE as string | undefined) ?? "";
-  const isAbsolute = /^https?:\/\//i.test(base);
-  const scheme = isAbsolute
-    ? base.replace(/^http/i, "ws")
-    : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`;
-  return `${scheme}${path}?token=${encodeURIComponent(token)}`;
-}

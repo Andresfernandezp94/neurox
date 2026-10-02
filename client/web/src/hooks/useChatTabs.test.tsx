@@ -785,9 +785,35 @@ describe("useChatTabs — session_started sobre una pestana en borrador", () => 
     constructor(public url: string) {
       FakeWebSocket.instances.push(this);
     }
+    /**
+     * Despacha por `addEventListener`, que es como se suscribe
+     * `StoreProvider`. El socket es UNO en toda la app y vive en el store;
+     * `useChatTabs` se suscribe a el con `subscribeEvents`. Antes este
+     * hook abria un socket propio y por eso el fake llamaba a
+     * `onmessage`.
+     */
     emit(payload: unknown) {
       this.onmessage?.({ data: JSON.stringify(payload) });
+      const ev = { data: JSON.stringify(payload) };
+      for (const fn of this.listeners['message'] ?? []) fn(ev);
     }
+  }
+
+  /**
+   * El socket de `/v1/events`.
+   *
+   * NO se puede tomar el primero: la app abre mas de uno. `StoreProvider`
+   * inicializa tambien el cliente de `/v1/commands`, asi que hay que
+   * buscar por URL y no por indice.
+   */
+  function eventsSocket(): FakeWebSocket {
+    const found = FakeWebSocket.instances.find((w) => w.url.includes("/v1/events"));
+    if (!found) {
+      throw new Error(
+        `no hay socket de /v1/events; hay: ${FakeWebSocket.instances.map((w) => w.url).join(", ")}`,
+      );
+    }
+    return found;
   }
 
   beforeEach(() => {
@@ -802,11 +828,34 @@ describe("useChatTabs — session_started sobre una pestana en borrador", () => 
     window.sessionStorage.clear();
   });
 
+  it("NO abre un socket propio: el de eventos es unico en toda la app", async () => {
+    // Antes este hook hacia `new WebSocket("/v1/events")` ademas del de
+    // `StoreProvider`: dos conexiones al mismo endpoint, y la de aca sin
+    // `onclose` ni reconexion. Si se caia, el chat dejaba de recibir
+    // eventos en silencio mientras el indicador decia "conectado".
+    //
+    // Se asserta la cantidad de sockets de `/v1/events`, no que no haya
+    // ningun socket: el de `/v1/commands` es legitimo y lo abre
+    // `StoreProvider`.
+    renderHook(() => useChatTabs(), {
+      wrapper: ({ children }) => <StoreProvider>{children}</StoreProvider>,
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const eventos = FakeWebSocket.instances.filter((w) => w.url.includes("/v1/events"));
+    expect(eventos).toHaveLength(1);
+  });
+
   it("ata la sesion a la pestana en borrador en vez de crear una segunda", async () => {
+    // Path de eventos REAL (no `/__test_no_ws__`): el socket es ahora del
+    // `StoreProvider`, asi que hace falta que el store abra el suyo para
+    // poder despacharle eventos. El `FakeWebSocket` lo intercepta, asi que
+    // no sale nada a la red.
     const { result } = renderHook(() => useChatTabs(), {
-      wrapper: ({ children }) => (
-        <StoreProvider eventsPath="/__test_no_ws__">{children}</StoreProvider>
-      ),
+      wrapper: ({ children }) => <StoreProvider>{children}</StoreProvider>,
     });
     await act(async () => {
       await Promise.resolve();
@@ -818,7 +867,7 @@ describe("useChatTabs — session_started sobre una pestana en borrador", () => 
     expect(result.current.tabs[0]!.sessionId).toBeNull();
 
     // Llega el evento de la sesión que el front está creando.
-    const ws = FakeWebSocket.instances[0]!;
+    const ws = eventsSocket();
     await act(async () => {
       ws.emit({
         type: "session_started",
@@ -870,10 +919,12 @@ describe("useChatTabs — session_started sobre una pestana en borrador", () => 
       );
     }) as typeof fetch;
 
+    // Path de eventos REAL (no `/__test_no_ws__`): el socket es ahora del
+    // `StoreProvider`, asi que hace falta que el store abra el suyo para
+    // poder despacharle eventos. El `FakeWebSocket` lo intercepta, asi que
+    // no sale nada a la red.
     const { result } = renderHook(() => useChatTabs(), {
-      wrapper: ({ children }) => (
-        <StoreProvider eventsPath="/__test_no_ws__">{children}</StoreProvider>
-      ),
+      wrapper: ({ children }) => <StoreProvider>{children}</StoreProvider>,
     });
     await act(async () => {
       await Promise.resolve();
@@ -885,7 +936,7 @@ describe("useChatTabs — session_started sobre una pestana en borrador", () => 
     expect(result.current.tabs[0]!.sessionId).toBe("sess-ya-existe");
     expect(result.current.tabs.some((t) => t.sessionId === null)).toBe(false);
 
-    const ws = FakeWebSocket.instances[0]!;
+    const ws = eventsSocket();
     await act(async () => {
       ws.emit({
         type: "session_started",
