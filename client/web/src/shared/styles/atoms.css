@@ -347,10 +347,13 @@
  * servicio. Apilados obligaban a recorrer la pantalla entera para pasar de
  * uno al otro.
  *
- * El grid es del contenedor de la tab, no `.providers-list`: este último es
- * `auto-fill minmax(24rem, 1fr)`, y con dos columnas fijas quedaría
- * desbalanceado según el ancho. Acá cada columna ocupa la mitad exacta. */
+ * `grid-column: 1 / -1` es obligatorio: este div es un ITEM del
+ * `.providers-list`, que es `auto-fill minmax(24rem, 1fr)`. Sin esto queda
+ * encerrado en una sola celda de ~24rem y sobra espacio a la derecha: las
+ * dos columnas se veían angostas y descentradas.
+ */
 .models-tab__cols {
+  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--gap-card-grid);
@@ -366,12 +369,6 @@
   }
 }
 
-/* El header de sección dentro de una columna no necesita `grid-column:
- * 1 / -1` (eso era para el grid de la tab, donde el head debe ocupar las
- * columnas). Acá es el primer hijo de su propia columna. */
-.models-tab__col > .providers-list__section-head {
-  grid-column: auto;
-}
 
 /* Campos del formulario de la card del servicio local. Un bloque por
  * campo (label + control + ayuda) para que el operador pueda escanear la
