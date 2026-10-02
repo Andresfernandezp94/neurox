@@ -3,6 +3,32 @@
 
 use std::path::PathBuf;
 
+/// Expande `${workspace}` y `${workspace}/...` contra el root efectivo.
+///
+/// Devolver `Cow` evita copiar el string cuando no hay placeholder, que es
+/// el caso normal.
+fn expand_workspace_placeholder<'a>(
+    path: &'a str,
+    workspace: &std::path::Path,
+) -> std::borrow::Cow<'a, str> {
+    use std::borrow::Cow;
+    const TOKEN: &str = "${workspace}";
+    if !path.contains(TOKEN) {
+        return Cow::Borrowed(path);
+    }
+    let root = workspace.to_string_lossy();
+    if path == TOKEN {
+        return Cow::Owned(root.into_owned());
+    }
+    if let Some(rest) = path.strip_prefix("${workspace}/") {
+        return Cow::Owned(format!("{root}/{rest}"));
+    }
+    // `${workspace}` en el medio de un path ("a/${workspace}/b") no se
+    // expande: se deja literal para que se note, en vez de producir un
+    // directorio raro sin avisar.
+    Cow::Borrowed(path)
+}
+
 pub fn resolve_under_workspace(
     workspace: &std::path::Path,
     path: &str,
@@ -12,11 +38,24 @@ pub fn resolve_under_workspace(
     // 1. Tilde expansion (EP-0019-02)
     let expanded = expand_tilde(path)?;
 
+    // 1b. `${workspace}` expansion (EP-0026-UX).
+    //
+    // Antes solo se expandia `~`. Un path con `${workspace}/notes` caia en
+    // el `join` del paso 2 como literal, y como el resultado igual arrancaba
+    // con la raiz del workspace pasaba el atajo del paso 4: la tool
+    // escribia en `<root>/${workspace}/notes`, un directorio literal
+    // llamado `${workspace}` dentro del entorno.
+    //
+    // Con varios workspaces, `${workspace}` tiene que significar el root de
+    // ESE workspace, que es el `workspace` que ya recibio esta funcion (el
+    // root efectivo del scope, no el global).
+    let expanded = expand_workspace_placeholder(&expanded, workspace);
+
     // 2. Build candidate
-    let candidate = if std::path::Path::new(&expanded).is_absolute() {
-        PathBuf::from(&expanded)
+    let candidate = if std::path::Path::new(expanded.as_ref()).is_absolute() {
+        PathBuf::from(expanded.as_ref())
     } else {
-        workspace.join(&expanded)
+        workspace.join(expanded.as_ref())
     };
 
     // 3. Normalize: resolve .. components without hitting the filesystem
@@ -303,3 +342,104 @@ pub fn expand_tilde(path: &str) -> Result<String, String> {
     Err(format!("invalid tilde path: {}", path))
 }
 
+
+#[cfg(test)]
+mod placeholder_tests {
+    use super::*;
+
+    const WS: &str = "/srv/sixbell";
+
+    /// `${workspace}` en el ARGUMENTO del path se expande contra el root
+    /// del workspace. Antes no se expandia y el paso 4 lo dejaba pasar como
+    /// literal, con lo que `write_file` terminaba creando un directorio
+    /// llamado `${workspace}` adentro del entorno.
+    #[test]
+    fn placeholder_exacto_devuelve_el_root() {
+        let r = resolve_under_workspace(
+            std::path::Path::new(WS),
+            "${workspace}",
+            &[],
+            false,
+        )
+        .unwrap();
+        assert_eq!(r, std::path::Path::new("/srv/sixbell"));
+    }
+
+    #[test]
+    fn placeholder_con_subpath_joined_al_root() {
+        let r = resolve_under_workspace(
+            std::path::Path::new(WS),
+            "${workspace}/notas/hoy.md",
+            &[],
+            false,
+        )
+        .unwrap();
+        assert_eq!(r, std::path::Path::new("/srv/sixbell/notas/hoy.md"));
+        assert!(
+            !r.to_string_lossy().contains("${workspace}"),
+            "no puede quedar el placeholder en el path final"
+        );
+    }
+
+    /// El root que se usa es el del workspace, no uno global: con varios
+    /// entornos, `${workspace}` significa el de esa llamada.
+    #[test]
+    fn el_root_es_el_del_workspace_de_la_llamada() {
+        let a = resolve_under_workspace(
+            std::path::Path::new("/srv/sixbell"),
+            "${workspace}/dato.txt",
+            &[],
+            false,
+        )
+        .unwrap();
+        let b = resolve_under_workspace(
+            std::path::Path::new("/srv/projects"),
+            "${workspace}/dato.txt",
+            &[],
+            false,
+        )
+        .unwrap();
+        assert_eq!(a, std::path::Path::new("/srv/sixbell/dato.txt"));
+        assert_eq!(b, std::path::Path::new("/srv/projects/dato.txt"));
+    }
+
+    /// `${workspace}` en el medio de un path no se expande: se deja
+    /// literal para que se note, en vez de producir un directorio raro sin
+    /// avisar.
+    #[test]
+    fn placeholder_en_el_medio_no_se_expande() {
+        let r = resolve_under_workspace(
+            std::path::Path::new(WS),
+            "notas/${workspace}/x.md",
+            &[],
+            false,
+        )
+        .unwrap();
+        assert!(r.to_string_lossy().contains("${workspace}"));
+    }
+
+    /// Sin placeholder, el resultado no cambia: los tests previos de
+    /// `resolve_under_workspace` siguen valiendo.
+    #[test]
+    fn sin_placeholder_no_cambia_nada() {
+        let r = resolve_under_workspace(std::path::Path::new(WS), "notas/x.md", &[], false).unwrap();
+        assert_eq!(r, std::path::Path::new("/srv/sixbell/notas/x.md"));
+
+        let r = resolve_under_workspace(std::path::Path::new(WS), "/opt/x.md", &[], false);
+        assert!(r.is_err(), "fuera del workspace y sin paths, se rechaza");
+    }
+
+    /// `${workspace}` no abre una puerta: el root del workspace es legible
+    /// por el atajo del paso 4, pero cualquier cosa fuera sigue needing el
+    /// sandbox.
+    #[test]
+    fn el_placeholder_no_salta_el_sandbox() {
+        let fuera = resolve_under_workspace(
+            std::path::Path::new(WS),
+            "${workspace}/../otro/dato.txt",
+            &[],
+            false,
+        );
+        assert!(fuera.is_err(), "subir con .. tiene que seguir rechazandose");
+    }
+}
