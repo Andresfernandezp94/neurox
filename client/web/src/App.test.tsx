@@ -178,6 +178,20 @@ describe("App", () => {
     window.localStorage.removeItem("active-tab");
   });
 
+  it("monta el panel de MCP desde la nav", async () => {
+    // MCP paso a ser destino de la nav. El test del boton no alcanza: lo que
+    // importa es que el panel monte.
+    window.localStorage.setItem("active-tab", "mcp");
+    window.history.replaceState({}, "", "/app");
+    render(<App />);
+
+    const panel = await screen.findByTestId("mcp-panel");
+    expect(within(panel).getByTestId("config-mcp-tab")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-nav-mcp").className).toContain("active");
+
+    window.localStorage.removeItem("active-tab");
+  });
+
   it("offers a way back to the landing from the login", () => {
     mockState.authRequired = true;
     window.history.replaceState({}, "", "/login");

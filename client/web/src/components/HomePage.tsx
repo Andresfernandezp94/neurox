@@ -1,7 +1,7 @@
 // HomePage — landing pública de neurox.
 //
 // PRESENTA EL PRODUCTO. No es la app interna: esa vive detrás del login
-// (StatusPanel, ChatPanel, ConfigViewer, WorkspaceViewer).
+// (StatusPanel, ChatPanel, ConfigViewer).
 //
 // Regla dura: este componente NO lee el store, no hace fetch y no toca
 // /health ni ningún endpoint. Una landing que muestra "0 agentes · 12ms

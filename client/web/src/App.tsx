@@ -30,13 +30,13 @@ import { ConfigViewer } from "./components/ConfigViewer";
 import { LoginScreen } from "./components/LoginScreen";
 import { PanelFrame } from "./shared/components/PanelFrame";
 import { NotificationStack } from "./shared/components/molecules/NotificationStack";
-import { WorkspaceViewer } from "./components/WorkspaceViewer";
 import { AgentsPanel } from "./components/AgentsPanel";
+import { MCP } from "./components/MCP";
 import { BootLoader } from "./shared/components/BootLoader";
 import { HomePage } from "./components/HomePage";
 import { GridBackdrop } from "./shared/components/GridBackdrop";
 
-const VALID_NAV_IDS: NavId[] = ["status", "chat", "intelligence", "config", "workspace"];
+const VALID_NAV_IDS: NavId[] = ["status", "chat", "intelligence", "mcp", "config"];
 
 function isValidNavId(s: string): boolean {
   return (VALID_NAV_IDS as string[]).includes(s);
@@ -209,14 +209,14 @@ function Admin({ onExitLanding, onLogout }: AdminProps) {
             <AgentsPanel />
           </PanelFrame>
         )}
+        {activeTab === "mcp" && (
+          <PanelFrame testId="mcp-panel">
+            <MCP />
+          </PanelFrame>
+        )}
         {activeTab === "config" && (
           <PanelFrame testId="config-panel">
             <ConfigViewer />
-          </PanelFrame>
-        )}
-        {activeTab === "workspace" && (
-          <PanelFrame testId="workspace-panel">
-            <WorkspaceViewer />
           </PanelFrame>
         )}
       </main>

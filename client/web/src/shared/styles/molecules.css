@@ -122,14 +122,6 @@
   gap: 0.625rem;
 }
 
-/* ============================================================
- * PathChipsEditor (consumed by <PathChipsEditor>)
- * ============================================================
- * One chip per path entry. Inline input below the chip list to
- * add new ones; chip × button removes an entry. Resolved path
- * (after ${workspace} expansion) is rendered inline when
- * workspaceRoot is provided.
- * ============================================================ */
 .path-chips { display: flex; flex-direction: column; gap: 0.5rem; }
 .path-chips__list {
   list-style: none;

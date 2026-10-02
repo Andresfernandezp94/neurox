@@ -20,7 +20,6 @@
 @import './status-bar.css';
 @import './error-boundary.css';
 @import './chat-tabs.css';
-@import './sandbox-panel.css';
 @import './login.css';
 
 /* Chat — split into 10 focused files for easier navigation.

@@ -38,8 +38,8 @@ describe("Sidebar", () => {
       "status",
       "chat",
       "intelligence",
+      "mcp",
       "config",
-      "workspace",
     ];
     for (const id of ids) {
       expect(screen.getByTestId(`sidebar-nav-${id}`)).toBeDefined();
@@ -60,27 +60,28 @@ describe("Sidebar", () => {
     // Config es configuracion puntual, Workspace es trabajo en curso.
     // `status` es el NavId histórico de Overview.
     // Intelligence va debajo de Chat: es donde se habla con los agentes, asi
-    // que acompaña a Chat en el uso diario, y antes de Workspace.
+    // que acompaña a Chat en el uso diario. MCP va debajo de Intelligence.
+    // Workspace salio de la nav, asi que ya no aparece.
     expect(order).toEqual([
       "sidebar-nav-status",
       "sidebar-nav-chat",
       "sidebar-nav-intelligence",
-      "sidebar-nav-workspace",
+      "sidebar-nav-mcp",
       "sidebar-nav-config",
     ]);
   });
 
-  it("gives workspace an icon distinct from overview", () => {
-    // Regresión: los dos items usaban IconGrid e IconWorkspaces, que
-    // era IconGrid con rx="1" — la misma grilla de 4 cuadrados, con un
-    // redondeo que no se distingue a 1rem. Se comparan los `d`/paths
+  it("no reuses an icon between two nav items", () => {
+    // Regresión: Overview y Workspace usaban IconGrid e IconWorkspaces, y
+    // este último era IconGrid con rx="1": la misma grilla de 4 cuadrados
+    // con un redondeo que no se distingue a 1rem. Se comparan los paths
     // renderizados, no las clases.
     const { container } = renderWithProviders(
       <Sidebar view="status" onTabChange={onTabChange} />,
     );
-    const overview = container.querySelector('[data-testid="sidebar-nav-status"]');
-    const workspace = container.querySelector('[data-testid="sidebar-nav-workspace"]');
-    expect(overview?.innerHTML).not.toEqual(workspace?.innerHTML);
+    const svgs = Array.from(container.querySelectorAll<HTMLElement>('[data-testid^="sidebar-nav-"] svg'));
+    const firmas = svgs.map((s) => s.innerHTML);
+    expect(new Set(firmas).size).toBe(firmas.length);
   });
 
   it("calls onTabChange with the correct id when an item is clicked", () => {
@@ -108,8 +109,8 @@ describe("Sidebar", () => {
       "status",
       "chat",
       "intelligence",
+      "mcp",
       "config",
-      "workspace",
     ];
 
     for (const id of validIds) {

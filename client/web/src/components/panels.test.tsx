@@ -174,7 +174,6 @@ describe('ConfigViewer', () => {
 //   ToolsPanel   → ToolsPanelTab  (no usado; ToolsExplorerTab es el que se usa como tab "tools")
 //   ToolsExplorer → ToolsExplorerTab (tab "tools")
 //   ServicesPanel → ServicesTab   (tab "services")
-//   SandboxPanel → SandboxTab     (tab "sandbox")
 //   EnvPanel     → EnvTab         (tab "env")
 //
 // Sus tests unitarios fueron removidos; los *Tab.tsx siguen funcionales.
