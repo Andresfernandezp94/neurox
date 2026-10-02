@@ -46,6 +46,19 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
   flex-direction: column;
   padding: 0;
   overflow: hidden;
+
+  /* Medidas del pie, en un solo lugar.
+   *
+   * El menu flotante de mobile (ver `.sidebar-footer-actions` dentro del
+   * breakpoint de 1024px) tiene que apartarse justo lo que ocupa el avatar,
+   * porque se dibuja desde el borde derecho hacia la izquierda y sin ese
+   * margen el primer icono cae debajo del avatar, que es un circulo opaco y
+   * lo tapa. Como el margen se calcula sumando estas tres medidas, si
+   * vivieran duplicadas como numeros sueltos el menu se desincroniza en
+   * cuanto se toque cualquiera de las dos. */
+  --user-avatar-size: 2rem;
+  --user-card-pad-x: 0.35rem;
+  --sidebar-foot-pad-x: 0.35rem;
 }
 
 .sidebar-panel:not(.collapsed) {
@@ -234,7 +247,7 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
 }
 
 .sidebar-panel:not(.collapsed) .sidebar-panel__footer {
-  padding: 0.5rem 0.35rem;
+  padding: 0.5rem var(--sidebar-foot-pad-x);
 }
 
 /* ---- User card (avatar + nombre + rol) ---- */
@@ -582,7 +595,7 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
     bottom: 0;
     left: 0;
     width: 100vw;
-    height: 3.5rem;
+    height: 4rem;
     border-top: 1px solid var(--border);
     border-right: none;
   }
@@ -662,19 +675,182 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
    * dejaba apretados.
    *
    * Solo se oculta `.user-info`. El avatar sigue, con su halo de estado
-   * (`.conn-avatar`), y los tres iconos de sesion (campana, tema, logout)
-   * tambien: en mobile son lo unico accionable del pie. El tooltip con
-   * usuario y rol sigue en el `title` del trigger, asi que la info no se
-   * pierde, solo deja de ocupar pantalla.
+   * (`.conn-avatar`), y los iconos de sesion tambien, pero ahora se
+   * despliegan como menu (ver `.sidebar-footer-actions` mas abajo). El
+   * tooltip con usuario y rol sigue en el `title` del trigger, asi que la
+   * info no se pierde, solo deja de ocupar pantalla.
    *
-   * No hace falta tocar `.sidebar-footer-actions`: en mobile el panel nunca
-   * llega a la clase `collapsed` (`const collapsed = isMobile() ? false :
-   * !expanded`), con lo que la regla que las oculta no aplica. */
+   * No hace falta tocar `.sidebar-panel.collapsed`: en mobile el panel nunca
+   * llega a esa clase (`const collapsed = isMobile() ? false : !expanded`),
+   * con lo que la regla que esconde todo el footer no aplica. */
   .user-info {
     display: none;
   }
 
   .user-card {
     gap: 0;
+  }
+
+  /* ---- Menu de acciones del avatar (columna flotante) ----
+   *
+   * En mobile el avatar es el unico control del pie. Al tocarlo, las cuatro
+   * acciones aparecen apiladas HACIA ARRIBA, cada una como un boton
+   * suelto con su propio fondo y sombra: no hay contenedor comun, asi que
+   * la columna se lee como cuatro fichas flotando y no como una barra.
+   *
+   * Por que flotan y no ocupan lugar:
+   *  1. No desplazan los nav-btn. En el flujo normal la barra sumaria
+   *     ~4 filas de alto y los iconos se correrian.
+   *  2. La barra mide 3.5rem: no hay alto para una columna.
+   *
+   * `column-reverse`: en el DOM las acciones van campana · tema · pantalla
+   * completa · logout, y en pantalla se leen de abajo hacia arriba, con la
+   * campana pegada al avatar. La columna CRECE hacia arriba desde el avatar.
+   *
+   * `right` alinea el borde derecho de los botones con el del avatar (los
+   * dos paddings del pie). Con fallbacks a proposito: un `var()` sin definir
+   * no da error, invalida la declaracion y deja el margen en 0, que es
+   * justo el bug de "el menu encima del avatar".
+   *
+   * El `overflow` del panel: en la base es `hidden` y recorte TODO lo que
+   * salga de la barra, que es por donde se veia el menu cortado asomando
+   * arriba. En mobile se abre a `visible`. No se pierde nada: el unico
+   * hijo que puede desbordar en horizontal es el nav, y el nav tiene su
+   * propio `overflow: hidden` mas abajo en este mismo bloque. */
+  .sidebar-panel {
+    overflow: visible;
+  }
+
+  .sidebar-panel__footer {
+    position: relative;
+    border-top: none;
+    background: transparent;
+  }
+
+  .sidebar-footer-actions {
+    position: absolute;
+    bottom: 100%;
+    /* Solo el padding del pie: el borde derecho del avatar coincide con el
+     * borde del contenido del footer (el avatar es lo ultimo que queda en
+     * el flujo, porque el nombre y el rol estan ocultos), asi que aligning
+     * ahi lo deja encima del avatar.
+     *
+     * El ancho fijo mas el `align-items: center` hacen que las fichas se
+     * centren solas sobre la linea del avatar, sin sumar los paddings a
+     * mano: si el avatar crece, la columna lo sigue. */
+    right: var(--sidebar-foot-pad-x, 0.35rem);
+    width: var(--user-avatar-size, 2rem);
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: center;
+    gap: 0.375rem;
+    /* Despegue del avatar: sin esto la campana queda pegada al borde
+     * superior de la barra y parece parte de ella. */
+    margin-bottom: 0.5rem;
+    /* Sin contenedor: cada boton lleva su propia ficha. */
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    /* Sobre el contenido de la pagina. */
+    z-index: 30;
+  }
+
+  /* Cada accion es una ficha independiente. */
+  .sidebar-footer-actions .sidebar-footer-action {
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-control);
+    background: var(--surface-deep);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-card);
+    color: var(--text-secondary);
+  }
+
+  .sidebar-footer-actions .sidebar-footer-action svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  /* Cascada al abrir: cada ficha aparece con un delay propio, de abajo hacia
+   * arriba, para que se lean como un despliegue y no como un pops. Los
+   * retardos salen de `--i`, el indice de la ficha, para no repetirlos. */
+  .sidebar-panel__footer--actions-open .sidebar-footer-actions
+    .sidebar-footer-action {
+    --i: 0;
+  }
+
+  .sidebar-panel__footer--actions-open
+    .sidebar-footer-actions
+    .sidebar-footer-action:nth-child(1) {
+    --i: 0;
+  }
+
+  .sidebar-panel__footer--actions-open
+    .sidebar-footer-actions
+    .sidebar-footer-action:nth-child(2) {
+    --i: 1;
+  }
+
+  .sidebar-panel__footer--actions-open
+    .sidebar-footer-actions
+    .sidebar-footer-action:nth-child(3) {
+    --i: 2;
+  }
+
+  .sidebar-panel__footer--actions-open
+    .sidebar-footer-actions
+    .sidebar-footer-action:nth-child(4) {
+    --i: 3;
+  }
+
+  /* Cerrado: invisible y sin eventos. `visibility` ademas de `opacity` para
+   * sacar las fichas del tab order y del arbol de accesibilidad: si quedaran
+   * solo transparentes, el teclado podria aterrizar en botones invisibles.
+   * El retardo de `visibility` va al cerrar, para que el desvanecido se vea. */
+  .sidebar-panel__footer:not(.sidebar-panel__footer--actions-open)
+    .sidebar-footer-actions
+    .sidebar-footer-action {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(0.375rem) scale(0.85);
+    transition: opacity var(--duration-fast) var(--ease-standard),
+                transform var(--duration-fast) var(--ease-standard),
+                visibility 0s linear calc(var(--duration-fast) + 160ms);
+  }
+
+  .sidebar-panel__footer--actions-open
+    .sidebar-footer-actions
+    .sidebar-footer-action {
+    visibility: visible;
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    transition: opacity var(--duration-fast) var(--ease-standard),
+                transform var(--duration-fast) var(--ease-standard),
+                visibility 0s;
+    transition-delay: calc(var(--i, 0) * 40ms);
+  }
+
+  /* Cerrado: invisible y sin eventos. Se oculta con `visibility` y NO solo
+   * con `opacity`, para sacarlo del arbol de accesibilidad y del tab order:
+   * si quedara solo transparente, el teclado podria aterrizar en botones
+   * invisibles. La transicion de `visibility` va sin retardo al abrir y con
+   * retardo al cerrar, para que el desvanecido se vea. */
+
+  /* El avatar no se marca con un cuadro al presionarlo ni al pasar el
+   * mouse.
+   *
+   * La base tiene `.user-menu:hover .user-card { background: var(--bg-elevated)
+   * }`, y en mobile eso se lee como un quinto boton rectangular al lado de
+   * los otros cuatro: el avatar queda encerrado en un rectangulo redondeado
+   * mientras el resto flota suelto. Aqui el feedback es la columna que se
+   * despliega, asi que el fondo va transparente en los dos estados.
+   *
+   * Se deja el `transform: scale(1.05)` del avatar en hover: es el unico
+   * resto de feedback y no dibuja nada. */
+  .user-menu:hover .user-card,
+  .sidebar-panel__footer--actions-open .user-card {
+    background: transparent;
   }
 }
