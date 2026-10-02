@@ -197,17 +197,9 @@ impl LlmClient {
         let session_id = Uuid::new_v4();
 
         // Build the engine ChatMessage stream (the engine uses its own
-        // ChatMessage type — convert fields by cloning; both have
-        // `role` and `content` so a per-field clone is enough).
-        let engine_msgs: Vec<tools_engine::backend::chat::ChatMessage> = messages
-            .into_iter()
-            .map(|m| tools_engine::backend::chat::ChatMessage {
-                role: m.role,
-                content: m.content,
-                tool_calls: None,
-                tool_call_id: None,
-            })
-            .collect();
+        // ChatMessage type, so there is a per-field conversion).
+        let engine_msgs: Vec<tools_engine::backend::chat::ChatMessage> =
+            messages.into_iter().map(to_engine_message).collect();
 
         // Translate our ToolSpec → engine ToolSpec.
         let engine_tools: Vec<tools_engine::backend::ToolSpec> = tools
@@ -389,17 +381,45 @@ impl LlmClient {
         messages: Vec<ChatMessage>,
         max_tokens: u32,
     ) -> String {
-        let engine_msgs: Vec<tools_engine::backend::chat::ChatMessage> = messages
-            .into_iter()
-            .map(|m| tools_engine::backend::chat::ChatMessage {
-                role: m.role,
-                content: m.content,
-                tool_calls: None,
-                tool_call_id: None,
-            })
-            .collect();
+        let engine_msgs: Vec<tools_engine::backend::chat::ChatMessage> =
+            messages.into_iter().map(to_engine_message).collect();
         let max_tokens = if max_tokens == 0 { 256 } else { max_tokens };
         self.backend.chat_utility(engine_msgs, max_tokens).await
+    }
+}
+
+/// Convierte un mensaje de `WorkingMemory` al `ChatMessage` del engine.
+///
+/// `tool_calls` y `tool_call_id` TIENEN que viajar. Se perdian en la
+/// conversion (los dos iban hardcodeados a `None`), y eso rompe cualquier
+/// tool: el request salia con el mensaje `role: "tool"` sin el `assistant`
+/// que lo invoca, y todo provider que cumpla el contrato de
+/// chat-completions lo rechaza con `invalid_request_error` (400).
+///
+/// El sintoma era que la tool se ejecutaba bien y la respuesta se cortaba
+/// justo en la llamada siguiente del LLM, que es cuando hay que reenviar
+/// el par assistant+tool.
+///
+/// Los dos `ToolCallRequest` son estructuralmente identicos pero viven en
+/// crates distintos, asi que la conversion es campo por campo.
+fn to_engine_message(m: ChatMessage) -> tools_engine::backend::chat::ChatMessage {
+    tools_engine::backend::chat::ChatMessage {
+        role: m.role,
+        content: m.content,
+        tool_calls: m.tool_calls.map(|calls| {
+            calls
+                .into_iter()
+                .map(|tc| tools_engine::backend::ToolCallRequest {
+                    id: tc.id,
+                    kind: tc.kind,
+                    function: tools_engine::backend::ToolCallFunction {
+                        name: tc.function.name,
+                        arguments: tc.function.arguments,
+                    },
+                })
+                .collect()
+        }),
+        tool_call_id: m.tool_call_id,
     }
 }
 
@@ -470,5 +490,73 @@ pub fn parse_tools_param(params: &Value) -> Vec<ToolSpec> {
             .collect()
     } else {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool_call_msg() -> ChatMessage {
+        ChatMessage {
+            role: "assistant".to_string(),
+            content: Some("voy a mirar".to_string()),
+            tool_calls: Some(vec![ToolCallRequest {
+                id: "call_abc123".to_string(),
+                kind: "function".to_string(),
+                function: ToolCallFunction {
+                    name: "shell".to_string(),
+                    arguments: r#"{"command":"pwd"}"#.to_string(),
+                },
+            }]),
+            tool_call_id: None,
+        }
+    }
+
+    /// El par assistant(tool_calls) + tool(tool_call_id) tiene que llegar
+    /// intacto al engine. Si se pierde cualquiera de los dos, el request
+    /// sale con un `role: "tool"` huerfano y el provider responde 400
+    /// `invalid_request_error`: la tool corre y la respuesta se corta en
+    /// la llamada siguiente del LLM.
+    #[test]
+    fn conversion_preserves_tool_calls() {
+        let out = to_engine_message(tool_call_msg());
+        let calls = out
+            .tool_calls
+            .expect("tool_calls no debe perderse en la conversion");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_abc123");
+        assert_eq!(calls[0].kind, "function");
+        assert_eq!(calls[0].function.name, "shell");
+        assert_eq!(calls[0].function.arguments, r#"{"command":"pwd"}"#);
+    }
+
+    #[test]
+    fn conversion_preserves_tool_call_id() {
+        let out = to_engine_message(ChatMessage {
+            role: "tool".to_string(),
+            content: Some("/home/andres_fernandez".to_string()),
+            tool_calls: None,
+            tool_call_id: Some("call_abc123".to_string()),
+        });
+        assert_eq!(out.tool_call_id.as_deref(), Some("call_abc123"));
+        assert!(out.tool_calls.is_none());
+    }
+
+    /// Un mensaje normal no gana campos que antes no tenia: si se
+    /// inventara un `tool_calls` vacio, el provider veria una llamada sin
+    /// accompanying tool result.
+    #[test]
+    fn conversion_leaves_plain_messages_plain() {
+        let out = to_engine_message(ChatMessage {
+            role: "user".to_string(),
+            content: Some("hola".to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+        });
+        assert!(out.tool_calls.is_none());
+        assert!(out.tool_call_id.is_none());
+        assert_eq!(out.role, "user");
+        assert_eq!(out.content.as_deref(), Some("hola"));
     }
 }
