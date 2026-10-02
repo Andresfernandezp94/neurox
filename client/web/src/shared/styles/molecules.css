@@ -102,7 +102,14 @@
   font-size: 0.6875rem;
   font-weight: 500;
   color: var(--text-secondary);
-  background: var(--surface);
+  /* Relleno: `--bg-tertiary` y no `--surface`. En claro `--surface` es
+   * #ffffff y el badge vive sobre una card de cristal sobre `--bg`
+   * (#f0f0f4): relleno blanco con borde de 8% negro = caja fantasma, sin
+   * lectura. `--bg-tertiary` es el token que ya usa el atomo `.badge` para
+   * el mismo caso (chip relleno sutil) y tiene valor propio en cada tema,
+   * asi que se lee en los dos. `--surface` es el color de la lamina, no el
+   * de un chip. */
+  background: var(--bg-tertiary);
   border: 1px solid var(--border);
 }
 .collapsible__badge--accent {

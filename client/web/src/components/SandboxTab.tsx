@@ -238,16 +238,9 @@ export function SandboxTab() {
         {/* ─── Writable paths ─── */}
         <CollapsibleSection
           title="Writable paths"
-          badge={
-            <span
-              className={
-                draft.writable_paths.length > 0
-                  ? "collapsible__badge collapsible__badge--accent"
-                  : "collapsible__badge"
-              }
-            >
-              {draft.writable_paths.length}
-            </span>
+          badge={draft.writable_paths.length}
+          badgeClassName={
+            draft.writable_paths.length > 0 ? "collapsible__badge--accent" : undefined
           }
           hint="paths where write tools are allowed"
           data-testid="sandbox-writable-section"
@@ -266,16 +259,9 @@ export function SandboxTab() {
         {/* ─── Readable paths ─── */}
         <CollapsibleSection
           title="Readable paths"
-          badge={
-            <span
-              className={
-                draft.readable_paths.length > 0
-                  ? "collapsible__badge collapsible__badge--accent"
-                  : "collapsible__badge"
-              }
-            >
-              {draft.readable_paths.length}
-            </span>
+          badge={draft.readable_paths.length}
+          badgeClassName={
+            draft.readable_paths.length > 0 ? "collapsible__badge--accent" : undefined
           }
           hint="paths where read tools are allowed (writes rejected)"
           data-testid="sandbox-readable-section"
