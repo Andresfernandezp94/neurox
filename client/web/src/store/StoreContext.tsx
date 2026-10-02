@@ -333,7 +333,18 @@ export function StoreProvider({ children, eventsPath = '/v1/events' }: StoreProv
       apiGet<{ persistent: Agent[]; ephemeral_templates: Agent[]; running: Agent[]; in_process: Agent[] }>(
         '/v1/agents',
       ),
-      apiGet<{ sessions: SessionSummary[] }>('/v1/sessions'),
+      // `include_inactive=true`: el snapshot tiene que traer tambien las
+      // sesiones cerradas.
+      //
+      // El store ya las conocia: el handler de `session_ended` les pone
+      // `ended_at` y las deja en el Map. Lo unico que no las traia era el
+      // snapshot inicial, que pedia solo las activas. O sea que el store
+      // estaba en "activas + cerradas de esta sesion", y al recargar
+      // perdia todas las que ya estaban cerradas de antes.
+      //
+      // Sin esto el historial no las muestra nunca: `ChatHistory` no tiene
+      // estado propio, lee de `state.sessions`.
+      apiGet<{ sessions: SessionSummary[] }>('/v1/sessions?include_inactive=true'),
       apiGet<{ pending: Approval[] }>('/v1/approvals'),
       apiGet<Health>('/health'),
     ]);
