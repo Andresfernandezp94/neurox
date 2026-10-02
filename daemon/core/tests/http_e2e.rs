@@ -580,3 +580,207 @@ async fn ephemeral_researcher_end_to_end() {
     server.abort();
     let _ = std::fs::remove_file(&cfg.db_path);
 }
+
+/// El body del SSE tiene que TERMINAR, no solo dejar de emitir chunks.
+///
+/// El forwarder de `post_message_stream` sale de su loop con `Event::Done`
+/// y solo con eso (los otros dos exits son error de envio al cliente y bus
+/// cerrado). Si algun camino del dispatcher no emite `Done`, el `tx` del
+/// forwarder sobrevive, el mpsc nunca cierra, el body SSE no termina y el
+/// cliente queda con `status = "streaming"` para siempre: no puede mandar
+/// otro mensaje ni cancelar.
+///
+/// El camino que fallaba era el `Err` del dispatch (típicamente la llamada
+/// de continuacion al agente despues de una tool). Ese caso esta cubierto
+/// por contrato en `dispatch_error_path_emits_done`; aca se verifica la
+/// propiedad observable sobre el camino que se puede provocar por HTTP:
+/// el stream cierra y el error llega antes del cierre.
+#[tokio::test(flavor = "multi_thread")]
+async fn sse_stream_terminates_even_when_the_agent_cannot_run() {
+    // Agente "default" registrado para que `create_session` no 404e. El
+    // comando no se ejecuta nunca: el mensaje se manda con un agent_id
+    // distinto, que es justamente lo que no se puede despachar.
+    let spec = PersistentAgentSpec {
+        id: "default".to_string(),
+        kind: AgentKind::Subprocess {
+            command: "/bin/true".to_string(),
+            args: vec![],
+            env: Default::default(),
+        },
+        protocol: ProtocolKind::JsonRpc,
+        transport: TransportKind::Stdio,
+        restart_policy: RestartPolicy::OnFailure,
+        depends_on: vec![],
+        requires_approval: vec![],
+        approval_timeout_secs: 60,
+        llm: None,
+        system_prompt: None,
+    };
+    let cfg = CoreConfig {
+        bind_addr: "127.0.0.1:0".into(),
+        db_path: std::path::PathBuf::from("/tmp/x.db"),
+        log_level: "info".into(),
+        agents: AgentsConfig {
+            persistent: vec![spec],
+            ephemeral_templates: vec![],
+        },
+        tls: None,
+        spawner_concurrency: 4,
+        in_process: vec![],
+        services: vec![],
+        plugins_registry: None,
+        auth: neurox::config::AuthConfigSection::default(),
+        llm: neurox::config::LlmConfig::default(),
+        sandbox: SandboxConfig::default(),
+        session_agents: SessionAgentsConfig::default(),
+    };
+    let tools = Arc::new(tools_engine::tools::ToolRegistry::new());
+    let mut state = common::build_app_state_auto(tools, PathBuf::from("/tmp")).await;
+    state
+        .lifecycle
+        .registry
+        .load_from_config(&cfg)
+        .await
+        .unwrap();
+
+    // /v1/* exige identidad: sin token el POST /v1/sessions responde 401.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let user_store = Arc::new(UserStore::load(&tmp.path().join("users.json")).unwrap());
+    let secret = Arc::new(JwtSecret::generate());
+    state.auth = state.auth.with_auth(AuthState {
+        user_store,
+        secret: secret.clone(),
+        expiry_hours: 1,
+        reauth_tokens: Arc::new(ReauthTokens::new()),
+    });
+    let token = issue_token(&secret, Uuid::new_v4(), "tester", Role::Admin, 1).unwrap();
+
+    let app = neurox::router::router(state);
+
+    let port = free_port().await;
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+        .await
+        .unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let base = format!("http://127.0.0.1:{port}");
+
+    let created: serde_json::Value = reqwest::Client::new()
+        .post(format!("{base}/v1/sessions"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({"agent_id": "default"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let sid = created["session_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("create_session no devolvio session_id: {created}"))
+        .to_string();
+
+    let mut resp = reqwest::Client::new()
+        .post(format!("{base}/v1/sessions/{sid}/messages/stream"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "agent_id": "no-registrado",
+            "text": "hola",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "el stream debe abrir con 200");
+
+    // Lectura chunk a chunk, como el cliente real. Con tope de 10s: si el
+    // body no cierra, el timeout salta. Ese es el bloqueo exacto que
+    // reportaba el usuario, medido desde el servidor.
+    let mut body = String::new();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match resp.chunk().await {
+                Ok(Some(c)) => body.push_str(&String::from_utf8_lossy(&c)),
+                Ok(None) => break,
+                Err(e) => panic!("leer chunk del SSE: {e}"),
+            }
+        }
+    })
+    .await
+    .expect(
+        "el body del SSE tiene que cerrarse: si queda abierto, el cliente \
+         se queda en status=streaming para siempre y no puede seguir",
+    );
+
+    assert!(
+        body.contains("\"type\":\"error\""),
+        "el error del dispatcher tiene que llegar al cliente, no descartarse:\n{body}"
+    );
+
+    server.abort();
+}
+
+/// El path de error del dispatch tiene que emitir `Event::Done`.
+///
+/// Es el cierre del que depende el forwarder, y sin el el stream se
+/// queda abierto para siempre. Antes este path escribia `[DONE]` directo
+/// al canal y retornaba: el forwarder nunca veia el evento, no soltaba su
+/// `tx`, el mpsc no cerraba y el cliente quedaba congelado.
+///
+/// No se puede provocar por HTTP de forma determinista (hace falta que la
+/// llamada al agente devuelva `Err`, y con un agente real eso no se
+/// provocar sin una carrera), asi que se fija por contrato sobre el
+/// fuente, igual que los tests D2/D3 de `session_agents_e2e.rs`.
+#[test]
+fn dispatch_error_path_emits_done() {
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/router/http.rs"),
+    )
+    .expect("read http.rs");
+
+    // El cuerpo del brazo `Err(e)` del `match` sobre `dispatch_to_agent`.
+    //
+    // Se ancla al string del `tracing::warn!` de ese brazo y corta en su
+    // `return;`, no a "Err(e) => {": ese patron aparece en dezenas de
+    // lugares del archivo y el split se iba a otro brazo cualquiera,
+    // dejando el test verde con el bug puesto.
+    let err_arm = src
+        .split("\"dispatch stream failed\"")
+        .nth(1)
+        .and_then(|rest| rest.split_once("return;").map(|(body, _)| body))
+        .expect("el path Err del dispatch tiene que existir");
+
+    // Sin los comentarios: el fix explica en uno por que ya no se escribe
+    // `[DONE]` ahi, y el texto del comentario hacia fallar la asercion
+    // que justamente viene a comprobar.
+    let err_arm: String = err_arm
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        !err_arm.contains("[DONE]"),
+        "el path Err del dispatch no debe escribir [DONE] al canal: eso deja \
+         al forwarder vivo para siempre y el stream nunca cierra. Tiene que \
+         emitir Event::Done para que el forwarder cierre:\n{err_arm}"
+    );
+    assert!(
+        !err_arm.contains("break"),
+        "el path Err del dispatch no debe cortar el stream por su cuenta: el \
+         cierre es del forwarder, via Event::Done:\n{err_arm}"
+    );
+
+    // Y el forwarder tiene que tener red de seguridad por inactividad.
+    assert!(
+        src.contains("STREAM_IDLE_TIMEOUT"),
+        "el forwarder necesita un tope de inactividad: es lo unico que evita \
+         que un path futuro que se olvide de Event::Done cuelgue al cliente"
+    );
+}

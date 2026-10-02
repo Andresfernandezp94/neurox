@@ -228,6 +228,32 @@ describe("ChatPanel — sesion perezosa (se crea al primer mensaje)", () => {
     consoleError.mockRestore();
   });
 
+  it("surfaces the daemon's error event instead of dropping it", async () => {
+    // El daemon emite `Event::Error` cuando una tool falla o el agente se
+    // cae a mitad de turno. `onChunk` era un no-op total, asi que ese
+    // evento no llegaba a ninguna parte y el usuario solo veía el stream
+    // cortarse. Ahora se levanta el error (sin aplicar contenido: el WS
+    // sigue siendo la unica fuente de chunks).
+    mockCreateSession.mockResolvedValue({
+      session_id: "test-123",
+      agent_id: TEST_AGENT_ID,
+    });
+    mockStreamMessage.mockImplementation(async (...args: unknown[]) => {
+      const onChunk = args[5] as (c: unknown) => void;
+      onChunk({ type: "error", message: "tool 'bash' error: no such file" });
+    });
+
+    render(<ChatPanel />, { wrapper: withStore });
+
+    const textarea = await screen.findByTestId("chat-input");
+    fireEvent.change(textarea, { target: { value: "hola" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(screen.getByText(/tool 'bash' error/)).toBeTruthy();
+    });
+  });
+
   it("does NOT wipe what the user typed while the first tab was being set up", async () => {
     // Regresion: el efecto de "reset input on tab switch" corria tambien
     // cuando `activeId` pasaba de null al id de la primera pestana, que es

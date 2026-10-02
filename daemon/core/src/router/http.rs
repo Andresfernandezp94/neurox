@@ -1361,6 +1361,11 @@ pub struct RawChatReq {
     pub session_id: Option<Uuid>,
 }
 
+/// Tope de inactividad del forwarder SSE (ver `post_message_stream`).
+/// Solo se agota si el dispatcher deja de emitir eventos para el turno,
+/// lo que significa que el stream ya no va a cerrar solo.
+const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 pub async fn post_message_stream(
     State(state): State<Arc<AppState>>,
     user: UserContext,
@@ -1453,7 +1458,24 @@ pub async fn post_message_stream(
     let client_id_for_forward = client_id.clone();
     tokio::spawn(async move {
         loop {
-            match event_rx.recv().await {
+            // Tope de inactividad. Es la red de seguridad para cualquier
+            // path del dispatcher que se olvide de emitir `Event::Done`:
+            // sin esto el stream queda abierto para siempre y el cliente
+            // se queda en "streaming" sin salida (solo le queda el boton
+            // de cancelar).
+            //
+            // A proposito generoso: entre un evento y el siguiente puede
+            // haber un tramo largo de thinking del modelo o una tool que
+            // tarda, asi que un tope corto partiria respuestas sanas.
+            let received = tokio::time::timeout(STREAM_IDLE_TIMEOUT, event_rx.recv()).await;
+            let Ok(received) = received else {
+                tracing::warn!(
+                    session_id = %session_for_task,
+                    "stream forwarder: idle timeout, closing SSE"
+                );
+                break;
+            };
+            match received {
                 Ok(Event::Content { session_id, text, seq }) if session_id == session_for_task => {
                     if tx_for_forward
                         .send(serde_json::json!({
@@ -1713,7 +1735,24 @@ pub async fn post_message_stream(
                     session_id: Some(session_for_task),
                     message: e.to_string(),
                 });
-                let _ = tx_done.send(serde_json::json!("[DONE]"));
+                // `Event::Done` es lo UNICO que saca al forwarder de su
+                // loop (los otros dos exits son error de envio y bus
+                // cerrado). Antes este path escribia `[DONE]` directo al
+                // canal y retornaba sin emitirlo: el forwarder seguia
+                // vivo con su `tx`, el mpsc no cerraba nunca, el body SSE
+                // no terminaba y el cliente quedaba con
+                // `status = "streaming"` para siempre, sin poder mandar
+                // otro mensaje ni cancelar. Congelado.
+                //
+                // Se emite por el bus y no directo al canal para que sea
+                // el forwarder quien cierre, que es lo que garantiza que
+                // el orden Error -> done -> [DONE] sea el mismo que en el
+                // camino normal.
+                let _ = event_tx.send(Event::Done {
+                    session_id: session_for_task,
+                    text: String::new(),
+                });
+                drop(tx_done);
                 return;
             }
         };

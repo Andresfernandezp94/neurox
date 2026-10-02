@@ -166,8 +166,24 @@ export function ChatPanel(_: ChatPanelProps = {}) {
     agentId: inProcessDefaultAgent,
     providerId: activeTab?.sessionModel?.provider_id ?? null,
     model: activeTab?.sessionModel?.model ?? null,
-    // No-op: the WS path owns chunk application. See the comment above.
-    onChunk: useCallback(() => {}, []),
+    // Contenido: no-op. El WS es la unica fuente que aplica chunks (ver
+    // el comentario de arriba); aplicar aca duplicaria cada fragmento.
+    //
+    // Error: si se atiende. El daemon emite `Event::Error` cuando un tool
+    // falla o el agente se cae a mitad de turno, y con un no-op total ese
+    // evento no llegaba a ninguna parte: el usuario veia el stream
+    // cortarse sin ninguna explicación. Solo se levanta el error, no se
+    // aplica ningun contenido, asi que no se reintroduce la duplicacion.
+    onChunk: useCallback((raw: unknown) => {
+      if (
+        raw !== null &&
+        typeof raw === "object" &&
+        (raw as { type?: unknown }).type === "error"
+      ) {
+        const message = (raw as { message?: unknown }).message;
+        setError(typeof message === "string" && message ? message : "The agent reported an error.");
+      }
+    }, []),
   });
   const isStreaming = streamStatus === "streaming";
 
