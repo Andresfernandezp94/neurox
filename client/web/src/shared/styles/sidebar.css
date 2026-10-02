@@ -653,4 +653,28 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
     height: 1.25rem;
     margin: 0 auto;
   }
+
+  /* El bloque de usuario en mobile queda en modo avatar.
+   *
+   * El breakpoint no tocaba el `.user-card`, asi que conservaba el layout
+   * de desktop: avatar, nombre y rol en fila, en una bottom-bar de 3.5rem
+   * de alto. El texto se comia el ancho que necesitan los iconos y los
+   * dejaba apretados.
+   *
+   * Solo se oculta `.user-info`. El avatar sigue, con su halo de estado
+   * (`.conn-avatar`), y los tres iconos de sesion (campana, tema, logout)
+   * tambien: en mobile son lo unico accionable del pie. El tooltip con
+   * usuario y rol sigue en el `title` del trigger, asi que la info no se
+   * pierde, solo deja de ocupar pantalla.
+   *
+   * No hace falta tocar `.sidebar-footer-actions`: en mobile el panel nunca
+   * llega a la clase `collapsed` (`const collapsed = isMobile() ? false :
+   * !expanded`), con lo que la regla que las oculta no aplica. */
+  .user-info {
+    display: none;
+  }
+
+  .user-card {
+    gap: 0;
+  }
 }
