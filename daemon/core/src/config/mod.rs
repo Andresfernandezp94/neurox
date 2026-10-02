@@ -372,7 +372,15 @@ pub struct CoreConfig {
 /// `workspace` or `writable_paths`. `max_recursion_depth` caps
 /// `glob`/`grep` traversal.
 ///
-/// Default: enabled, no writable paths, depth 10.
+/// Default: enabled, home legible, no writable paths, depth 10.
+///
+/// `readable_paths` por defecto es `${home}`: el agente puede leer el home
+/// del usuario y nada mas. Antes el default era lista vacia, que en la
+/// practica limitaba las lecturas al workspace root, y como el sandbox se
+/// inicializa desde el config del operador eso hacia que la vista de
+/// Sandbox arrancara sin poder leer nada util. Para restringir hay que
+/// cambiar `readable_paths` por las rutas concretas; la vista escribe eso
+/// y ahora si llega a las tools (ver el fix de `set_sandbox`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct SandboxConfig {
@@ -395,11 +403,29 @@ impl Default for SandboxConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            // Escribir sigue cerrado en todas partes salvo que el operador
+            // abra `writable_paths`: leer no equivale a escribir.
             writable_paths: Vec::new(),
             max_recursion_depth: 10,
-            readable_paths: Vec::new(),
+            // `${home}` y no un path absoluto para que la config siga
+            // sirviendo en otra maquina / otro usuario.
+            readable_paths: vec!["${home}".to_string()],
         }
     }
+}
+
+/// Home a usar para resolver `${home}`.
+///
+/// Sale de `NEUROX_HOME` si esta definido, si no de `HOME`. Si ninguna de
+/// las dos existe devuelve un path vacio, y `${home}` se resuelve a vacio:
+/// el filtro de paths vacios de `resolve_paths` lo descarta, asi que un
+/// sandbox sin home conocido queda tan restrictivo como antes en vez de
+/// abrir un permiso que no se pidio.
+fn home_dir() -> std::path::PathBuf {
+    std::env::var_os("NEUROX_HOME")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default()
 }
 
 impl SandboxConfig {
@@ -414,7 +440,7 @@ impl SandboxConfig {
         &self,
         workspace_root: &std::path::Path,
     ) -> Vec<std::path::PathBuf> {
-        self.resolve_paths(&self.writable_paths, workspace_root)
+        self.resolve_paths(&self.writable_paths, workspace_root, &home_dir())
     }
 
     /// Combined read scope: `readable_paths` + `writable_paths` (writes
@@ -428,32 +454,49 @@ impl SandboxConfig {
             .readable_paths
             .iter()
             .chain(self.writable_paths.iter())
-            .map(|p| self.resolve_one(p, workspace_root))
+            .map(|p| self.resolve_one(p, workspace_root, &home_dir()))
             .collect();
         all.sort();
         all.dedup();
         all
     }
 
-    fn resolve_one(&self, p: &str, workspace_root: &std::path::Path) -> std::path::PathBuf {
+    fn resolve_one(
+        &self,
+        p: &str,
+        workspace_root: &std::path::Path,
+        home: &std::path::Path,
+    ) -> std::path::PathBuf {
         if p == "${workspace}" {
             workspace_root.to_path_buf()
         } else if let Some(rest) = p.strip_prefix("${workspace}/") {
             workspace_root.join(rest)
+        } else if p == "${home}" {
+            home.to_path_buf()
+        } else if let Some(rest) = p.strip_prefix("${home}/") {
+            home.join(rest)
         } else {
             std::path::PathBuf::from(p)
         }
     }
 
-    fn resolve_paths(&self, paths: &[String], workspace_root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    fn resolve_paths(
+        &self,
+        paths: &[String],
+        workspace_root: &std::path::Path,
+        home: &std::path::Path,
+    ) -> Vec<std::path::PathBuf> {
         // EP-2026-09-01 security fix: drop empty paths before returning.
         // If `${workspace}` resolves to an empty workspace_root the
         // result is an empty PathBuf which would match every input
         // (`path.starts_with("") == true`) — effectively a global
         // "everything is allowed" bypass.
+        //
+        // El mismo filtro cubre `${home}` sin home conocido: se descarta
+        // en vez de abrir un path vacio que matchea todo.
         paths
             .iter()
-            .map(|p| self.resolve_one(p, workspace_root))
+            .map(|p| self.resolve_one(p, workspace_root, home))
             .filter(|p| !p.as_os_str().is_empty())
             .collect()
     }
@@ -1459,14 +1502,110 @@ llm:
     // ─── SandboxConfig (EP-0019-03) ────────────────────────────────────────
 
     #[test]
-    fn sandbox_config_default_is_strict() {
+    fn sandbox_config_default_reads_home_and_writes_nothing() {
         let cfg = SandboxConfig::default();
         assert!(cfg.enabled, "sandbox should default to enabled");
+        // Leer si: el default es el home del usuario, para que el agente
+        // pueda trabalhar sin que haya que abrir permisos a mano.
+        assert_eq!(
+            cfg.readable_paths,
+            vec!["${home}".to_string()],
+            "el default tiene que ser el home, no una lista vacia"
+        );
+        // Escribir no: leer el home no implica poder escribir en el.
         assert!(
             cfg.writable_paths.is_empty(),
             "no writable paths by default"
         );
         assert_eq!(cfg.max_recursion_depth, 10);
+    }
+
+    /// `${home}` y `${home}/sub` resuelven contra el home. Se prueba con un
+    /// home explicito, sin tocar variables de entorno, para que el test no
+    /// dependa del HOME de quien lo corre.
+    #[test]
+    fn resolve_one_expands_home() {
+        let cfg = SandboxConfig::default();
+        let ws = std::path::Path::new("/ws");
+        let home = std::path::Path::new("/home/andy");
+        assert_eq!(
+            cfg.resolve_one("${home}", ws, home),
+            std::path::PathBuf::from("/home/andy")
+        );
+        assert_eq!(
+            cfg.resolve_one("${home}/proyectos", ws, home),
+            std::path::PathBuf::from("/home/andy/proyectos")
+        );
+    }
+
+    /// `${workspace}` sigue funcionando: el placeholder nuevo no lo pisa.
+    #[test]
+    fn resolve_one_still_expands_workspace() {
+        let cfg = SandboxConfig::default();
+        let ws = std::path::Path::new("/ws");
+        let home = std::path::Path::new("/home/andy");
+        assert_eq!(cfg.resolve_one("${workspace}", ws, home), ws);
+        assert_eq!(
+            cfg.resolve_one("${workspace}/sub", ws, home),
+            std::path::PathBuf::from("/ws/sub")
+        );
+    }
+
+    /// Un path corriente se deja como esta: los placeholders no obligan a
+    /// escribir todo en relativo al home o al workspace.
+    #[test]
+    fn resolve_one_leaves_absolute_paths_alone() {
+        let cfg = SandboxConfig::default();
+        let ws = std::path::Path::new("/ws");
+        let home = std::path::Path::new("/home/andy");
+        assert_eq!(
+            cfg.resolve_one("/opt/datos", ws, home),
+            std::path::PathBuf::from("/opt/datos")
+        );
+    }
+
+    /// Sin home conocido, `${home}` resuelve a vacio y el filtro de
+    /// `resolve_paths` lo descarta. Si se dejara un PathBuf vacio en la
+    /// lista, `path.starts_with("")` seria true para todo y el sandbox
+    /// abririaPermisos en cualquier parte del sistema de archivos.
+    #[test]
+    fn home_placeholder_without_home_is_dropped() {
+        let cfg = SandboxConfig::default();
+        let ws = std::path::Path::new("/ws");
+        let vacio = std::path::Path::new("");
+        assert!(cfg.resolve_one("${home}", ws, vacio).as_os_str().is_empty());
+        assert_eq!(
+            cfg.resolve_paths(&["${home}".to_string()], ws, vacio),
+            Vec::<std::path::PathBuf>::new(),
+            "un home desconocido tiene que dejar la lista vacia, no una entrada vacia"
+        );
+    }
+
+    /// `readable_paths_resolved` con el default devuelve el home de verdad,
+    /// que es lo que las tools van a usar como alcance de lectura.
+    #[test]
+    fn readable_paths_default_resolves_to_the_home() {
+        let cfg = SandboxConfig::default();
+        let resueltos = cfg.readable_paths_resolved(std::path::Path::new("/ws"));
+        let esperado = home_dir();
+        if esperado.as_os_str().is_empty() {
+            // Sin HOME no hay nada que verificar, y el test de arriba ya
+            // cubre que en ese caso la lista queda vacia.
+            assert!(resueltos.is_empty());
+        } else {
+            assert_eq!(resueltos, vec![esperado]);
+        }
+    }
+
+    /// Escribir sigue igual de cerrado que antes, aunque leer se haya
+    /// abierto al home.
+    #[test]
+    fn writable_paths_stay_empty_by_default() {
+        let cfg = SandboxConfig::default();
+        assert!(
+            cfg.writable_paths_resolved(std::path::Path::new("/ws")).is_empty(),
+            "el default no puede abrir escritura en el home"
+        );
     }
 
     #[test]
