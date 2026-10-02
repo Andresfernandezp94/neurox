@@ -7,6 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { VoiceCallOverlay } from "./VoiceCallOverlay";
 import { useChatTabs } from "../hooks/useChatTabs";
 import { useDefaultAgentId } from "../hooks/useDefaultAgentId";
+import { useNotifications } from "../store/NotificationsContext";
 import {
   cancelSession,
   getSessionMessages,
@@ -67,7 +68,14 @@ export function ChatPanel(_: ChatPanelProps = {}) {
   // in one place. The refs the hook needs (`streamingAssistantIdRef`
   // and `streamingTabIdRef`) are declared near the other refs further
   // down — kept adjacent to where the hook itself is initialized.
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * Los errores van al stack de notificaciones, no a estado local del
+   * panel. Antes eran un unico string: el segundo error pisaba al primero
+   * y no habia forma de apilarlos, asi que un turno que fallaba dos veces
+   * (una tool, despues la llamada siguiente al LLM) solo mostraba la
+   * ultima, y sin forma de cerrarla.
+   */
+  const notify = useNotifications();
   const [showHistory, setShowHistory] = useState(false);
   // EP-0002: voice call overlay visibility. Toggle desde el botón 📞
   // en la barra de tools del chat. Independiente del MicButton inline —
@@ -181,9 +189,11 @@ export function ChatPanel(_: ChatPanelProps = {}) {
         (raw as { type?: unknown }).type === "error"
       ) {
         const message = (raw as { message?: unknown }).message;
-        setError(typeof message === "string" && message ? message : "The agent reported an error.");
+        notify.error(
+          typeof message === "string" && message ? message : "The agent reported an error.",
+        );
       }
-    }, []),
+    }, [notify]),
   });
   const isStreaming = streamStatus === "streaming";
 
@@ -306,8 +316,8 @@ export function ChatPanel(_: ChatPanelProps = {}) {
     // se cerro). `prev === activeId`: React StrictMode remunta el efecto.
     if (prev === null || prev === activeId) return;
     setInput("");
-    setError(null);
-  }, [activeId]);
+    notify.clear();
+  }, [activeId, notify]);
 
   // ── Search-in-chat (per tab) ─────────────────────────────────────────
   // Query, active match index and the total live on the tab itself so
@@ -413,9 +423,9 @@ export function ChatPanel(_: ChatPanelProps = {}) {
       updateTab(tab.id, { messages: loaded });
       await refreshSessionModel(id, tab.id);
     } catch (e) {
-      setError(`Failed to load session: ${(e as Error).message}`);
+      notify.error(`Failed to load session: ${(e as Error).message}`);
     }
-  }, [createTabFromSession, refreshSessionModel, updateTab]);
+  }, [createTabFromSession, refreshSessionModel, updateTab, notify]);
 
   // Cross-device chat history hydration. When the active tab has a
   // sessionId but no messages loaded yet (typical when the tab
@@ -463,13 +473,13 @@ export function ChatPanel(_: ChatPanelProps = {}) {
         });
         await refreshSessionModel(sid, tabId);
       } catch (e) {
-        setError(`Failed to load session: ${(e as Error).message}`);
+        notify.error(`Failed to load session: ${(e as Error).message}`);
         // Allow retry on next tab switch.
         loadedSessions.current.delete(sid);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab?.id, activeTab?.sessionId]);
+  }, [activeTab?.id, activeTab?.sessionId, notify]);
 
   // EP-0028: pull the backend's auto-summary for the given session
   // and mirror it onto the tab header (unless the user already
@@ -536,7 +546,7 @@ useLayoutEffect(() => {
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text || isStreaming || !activeTab) return;
-    setError(null);
+    notify.clear();
 
     const tabId = activeTab.id;
 
@@ -552,13 +562,13 @@ useLayoutEffect(() => {
       try {
         sessionId = await ensureSessionForTab(activeTab);
       } catch (e) {
-        setError(
+        notify.error(
           `Could not start the session: ${(e as Error).message}. Your message was not sent.`,
         );
         return;
       }
       if (!sessionId) {
-        setError("Could not start the session. Your message was not sent.");
+        notify.error("Could not start the session. Your message was not sent.");
         return;
       }
     }
@@ -619,7 +629,7 @@ useLayoutEffect(() => {
         }
       }
     } catch (e) {
-      setError((e as Error).message);
+      notify.error((e as Error).message);
       // EP-2026-08-31: stream failure recovery. Drop the dead
       // sessionId so the auto-create effect below spins up a fresh
       // one for the same tab. The user can re-send without
@@ -634,7 +644,7 @@ useLayoutEffect(() => {
       }
       inputRef.current?.focus();
     }
-  }, [input, isStreaming, activeTab, sendStream, updateTab, refreshTabSummary, setStreamingMetrics]);
+  }, [input, isStreaming, activeTab, sendStream, updateTab, refreshTabSummary, setStreamingMetrics, notify]);
 
   const handleCancel = useCallback(async () => {
     if (!activeTab?.sessionId) return;
@@ -644,9 +654,9 @@ useLayoutEffect(() => {
     try {
       await cancelSession(activeTab.sessionId);
     } catch (e) {
-      setError((e as Error).message);
+      notify.error((e as Error).message);
     }
-  }, [activeTab?.sessionId, cancelStream]);
+  }, [activeTab?.sessionId, cancelStream, notify]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Enter envia, Shift+Enter inserta un salto de linea (el
@@ -686,7 +696,7 @@ useLayoutEffect(() => {
         onCreateTab={createTab}
         onRenameTab={(id, title) => {
           renameTab(id, title).catch((e) =>
-            setError(`Rename failed: ${(e as Error).message}`),
+            notify.error(`Rename failed: ${(e as Error).message}`),
           );
         }}
         searchQuery={searchQuery}
@@ -698,7 +708,6 @@ useLayoutEffect(() => {
       />
 
       <ChatMain
-        error={error}
         messages={messages}
         isStreaming={isStreaming}
         streamingMessageId={streamingMessageId}

@@ -51,6 +51,8 @@ vi.mock("../api/default", () => ({
 import { ChatPanel } from "./ChatPanel";
 import { createSession, streamMessage } from "../api/sessions";
 import { StoreProvider } from "../store/StoreContext";
+import { NotificationsProvider } from "../store/NotificationsContext";
+import { NotificationStack } from "../shared/components/molecules/NotificationStack";
 
 const mockCreateSession = createSession as ReturnType<typeof vi.fn>;
 const mockStreamMessage = streamMessage as ReturnType<typeof vi.fn>;
@@ -118,7 +120,16 @@ function withStore({ children }: { children: ReactNode }) {
   }) as typeof fetch;
 
   return (
-    <StoreProvider eventsPath="/__test_no_ws__{Math.random()}">{children}</StoreProvider>
+    // NotificationsProvider + NotificationStack: ChatPanel ya no pinta los
+    // errores en su propio DOM, los publica al stack del shell. El stack va
+    // montado aca para que las aserciones de error sigan siendo de punta a
+    // punta (error del stream -> stack), no contra un mock.
+    <NotificationsProvider>
+      <StoreProvider eventsPath={`/__test_no_ws__${Math.random()}`}>
+        <NotificationStack />
+        {children}
+      </StoreProvider>
+    </NotificationsProvider>
   );
 }
 

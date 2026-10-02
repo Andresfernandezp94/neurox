@@ -5825,3 +5825,224 @@
   position: relative;
   z-index: 2;
 }
+
+/* === Notifications ===
+ *
+ * Errores, procesos y alertas. Un SOLO color para los cuatro kinds: la
+ * severidad la comunican el icono y la etiqueta de la izquierda, no el
+ * tinte. Con un color por kind, varias apiladas se leian como tres cosas
+ * sin relacion en vez de como un sistema de avisos.
+ *
+ * `position: fixed` sobre la vista, NO `absolute` dentro de `.app-main`:
+ * tiene que quedar fijo al scrollear del panel, no dentro del flow.
+ *
+ * El `left` replica los tres estados de la sidebar con los mismos offsets
+ * que usa `.app-main` (`--sidebar-w-collapsed`, `--sidebar-w`, 0) y la
+ * misma transicion, asi que el stack acompaña a la sidebar cuando se
+ * contrae o se expande en vez de saltar. El `right: 0` lo deja terminar
+ * en el borde del area de contenido, que es lo que se pide: avisos
+ * que ocupan todo el ancho de la vista de la app, no una columnita
+ * angosta flotando en el medio.
+ *
+ * `pointer-events: none` en el contenedor para que la franja vacia no
+ * bloquee los clicks del panel de abajo; cada aviso vuelve a tomar los
+ * suyos. Sin esto, un stack de 40px de alto hacia zona muerta arriba de
+ * todo. */
+.notification-stack {
+  position: fixed;
+  top: 0;
+  left: var(--sidebar-w-collapsed);
+  right: 0;
+  z-index: 200;
+  /* Mazo, no columna: los avisos se SUPERPONEN en vez de apilarse con
+   * hueco. Es lo que ahorra el espacio: el bloque ocupa el alto de UN
+   * aviso mas el borde de los de atras, no la suma de todos.
+   *
+   * Por eso el contenedor no es flex y no tiene altura propia: los hijos
+   * van `absolute` y se acomodan solos. Como el contenedor es `fixed` con
+   * `pointer-events: none`, que no ocupe lugar no molesta a nadie.
+   *
+   * El `padding-top` es mas grande que el resto a proposito: el bloque
+   * arranca separado del borde superior de la app. Pegado al borde se leia
+   * como parte de la barra de arriba y no como un aviso flotando. */
+  padding: 1.5rem 0.75rem 0.75rem;
+  pointer-events: none;
+  /* Misma duracion y curva que la transicion de `.app-main`, para que la
+   * franja se mueva CON la sidebar y no se desincronice. */
+  transition: left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+body[data-sidebar-pinned="true"] .notification-stack {
+  left: var(--sidebar-w);
+}
+
+body[data-sidebar-hidden="true"] .notification-stack {
+  left: 0;
+}
+
+.notification {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.625rem 0.5rem 0.625rem 0.75rem;
+  /* Superficie solida: el mensaje puede ser largo (un error de tool trae
+   * la tool, la ruta y el sandbox) y un tinte translucido con texto de
+   * color se lee mal y ademas cambia segun el fondo que tenga detras. */
+  background: var(--notification-surface);
+  /* Borde del MISMO color que el fondo: el bloque es una sola masa de
+   * color y el borde no agrega nada. El contorno lo hace la sombra. */
+  border: 1px solid var(--notification-surface);
+  border-radius: 0.375rem;
+  color: var(--notification-text);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.22), 0 0.5rem 1rem rgba(0, 0, 0, 0.3);
+  /* Profundidad en el mazo: 0 es el aviso de al frente. La setter cada
+   * nth-last-child de mas abajo. */
+  --depth: 0;
+  /* Cada aviso es independiente y ocupa la banda completa: uno debajo del
+   * otro, sin ancho de columna. Los mensajes son largos (un error de tool
+   * trae la tool, la ruta y el sandbox) y angostarlos los hacia ilegibles
+   * o los parte en mas renglones. */
+  width: 100%;
+  pointer-events: auto;
+  /* Todos en el mismo lugar: el de al frente los tapa y de cada uno de
+   * atras asoma solo una franja, que es la que dice "hay mas". */
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* Cuanto se corre cada uno hacia abajo. 0.5rem era muy pegado: los de
+   * atras se leian como un borde y no se entendia que eran avisos
+   * separados. 1.5rem deja ver la franja de cada uno, asi que el mazo se
+   * lee como "hay N" sin volver a apilar el alto completo de cada aviso. */
+  opacity: calc(1 - var(--depth) * 0.18);
+  transform: translateY(calc(var(--depth) * 1.5rem));
+  z-index: calc(10 - var(--depth));
+  transition: opacity 180ms ease-out, transform 180ms ease-out;
+  animation: notification-in 160ms ease-out;
+}
+
+/* Profundidad del mazo. `column-reverse` pone el ultimo hijo del DOM al
+ * frente, asi que `nth-last-child(1)` es el mas reciente.
+ *
+ * El piso de 3 es a proposito: mas alla los avisos viejos quedan en
+ * ~0.16 de opacidad, se leen como "hay mas ahi" sin tapar el de al frente
+ * ni tapar el panel. Siguen siendo alcanzables con la X porque el tope
+ * `MAX_VISIBLE` los tira igual. */
+/* Los de atras no muestran su contenido: solo asoma la franja de color.
+ *
+ * Con el texto visible, la franjita que asoma debajo del aviso de al
+ * frente caia a media linea y se leia como texto cortado, o sea basura.
+ * `visibility: hidden` y no `display: none` a proposito: oculta sin
+ * cambiar el alto de la caja, asi el de al frente mantiene su posicion y
+ * el mazo no se rearrangea al abrir y cerrar. */
+.notification-stack > .notification:not(:nth-last-child(1)) .notification__icon,
+.notification-stack > .notification:not(:nth-last-child(1)) .notification__content {
+  visibility: hidden;
+}
+
+.notification-stack > .notification:nth-last-child(1) { --depth: 0; }
+.notification-stack > .notification:nth-last-child(2) { --depth: 1; }
+.notification-stack > .notification:nth-last-child(3) { --depth: 2; }
+.notification-stack > .notification:nth-last-child(n + 4) { --depth: 3; }
+
+/* Solo la opacidad: animar `transform` aca pisaria el `transform` del mazo
+ * durante la entrada y los avisos saltarian al aparecer. */
+@keyframes notification-in {
+  from { opacity: 0; }
+  to   { opacity: calc(1 - var(--depth) * 0.28); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notification { animation: none; }
+}
+
+.notification__icon {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: 0.0625rem;
+}
+.notification__icon svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+/* El mensaje es lo que crece; el icono y la X se quedan en su linea. */
+.notification__content {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Un path largo o un payload no puede empujar la X fuera de la caja. */
+  overflow-wrap: anywhere;
+}
+
+.notification__dismiss {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.375rem;
+  height: 1.375rem;
+  margin-top: -0.0625rem;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0.25rem;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  transition: background-color 120ms steps(2, end), opacity 120ms steps(2, end);
+}
+.notification__dismiss:hover {
+  background: var(--notification-surface-hover);
+  opacity: 1;
+}
+.notification__dismiss:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+.notification__dismiss svg {
+  width: 0.8125rem;
+  height: 0.8125rem;
+}
+
+/* En mobile la sidebar es bottom-bar y `.app-main` va a `margin-left: 0`,
+ * asi que el stack tambien tiene que arrancar en 0. Mismo breakpoint que
+ * el shell, no uno propio: si se desincronizan, el aviso queda cortado
+ * por un lado. */
+@media (max-width: 1024px) {
+  .notification-stack {
+    left: 0;
+    padding: 1rem 0.5rem 0.5rem;
+  }
+}
+
+/* Error y alert con su propia superficie solida y saturada; la base
+ * (process, info) es el pizarra de la consola de AWS.
+ *
+ * El color va en el bloque entero (fondo, borde y texto) y el texto y los
+ * iconos van en el contraste opuesto, que es blanco. Los iconos heredan
+ * `currentColor`, asi que siguen al texto sin regla aparte. No es un tinte
+ * apagado con texto de color: los mensajes son largos y tecnicos y colorear
+ * todo el texto los vuelve ilegibles. */
+.notification--error {
+  background: var(--notification-surface-error);
+  border-color: var(--notification-surface-error);
+  color: var(--notification-text-error);
+}
+.notification--error .notification__dismiss:hover {
+  background: var(--notification-surface-error-hover);
+}
+
+.notification--alert {
+  background: var(--notification-surface-alert);
+  border-color: var(--notification-surface-alert);
+  color: var(--notification-text-alert);
+}
+.notification--alert .notification__dismiss:hover {
+  background: var(--notification-surface-alert-hover);
+}

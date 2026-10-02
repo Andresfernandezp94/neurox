@@ -122,6 +122,18 @@ export const IconInfo = () => (
   <svg viewBox="0 0 24 24" {...s}><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>
 );
 
+// IconAlert: 'x' in circle. Severidad de error en las notificaciones.
+// Distinto de IconClose (que es el boton de cerrar) para que un aviso de
+// error no se confunda con la X que lo descarta.
+export const IconAlert = () => (
+  <svg viewBox="0 0 24 24" {...s}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></svg>
+);
+
+// IconWarning: triangulo con exclamacion. Severidad de alerta.
+export const IconWarning = () => (
+  <svg viewBox="0 0 24 24" {...s}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+);
+
 export const IconTerminal = () => (
   <svg viewBox="0 0 24 24" {...s}><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></svg>
 );

@@ -19,6 +19,7 @@ import {
   useStore,
   useStoreDispatch,
 } from "./store/StoreContext";
+import { NotificationsProvider } from "./store/NotificationsContext";
 import { useBootGate } from "./hooks/useBootGate";
 import { useRoute } from "./shared/hooks/useRoute";
 import { ROUTES } from "./shared/routes";
@@ -28,6 +29,7 @@ import { ChatPanel } from "./components/ChatPanel";
 import { ConfigViewer } from "./components/ConfigViewer";
 import { LoginScreen } from "./components/LoginScreen";
 import { PanelFrame } from "./shared/components/PanelFrame";
+import { NotificationStack } from "./shared/components/molecules/NotificationStack";
 import { WorkspaceViewer } from "./components/WorkspaceViewer";
 import { BootLoader } from "./shared/components/BootLoader";
 import { HomePage } from "./components/HomePage";
@@ -184,6 +186,11 @@ function Admin({ onExitLanding, onLogout }: AdminProps) {
         onLogout={onLogout}
       />
       <main className="app-main">
+        {/* Stack de avisos (errores, procesos, alertas). Va dentro de
+            `.app-main` y no sobre el viewport para que se centre en el
+            area de contenido y se reacomode solo cuando la sidebar se
+            contrae o se expande. */}
+        <NotificationStack />
         {activeTab === "status" && (
           <PanelFrame testId="status-panel">
             <div className="page-pad">
@@ -214,7 +221,8 @@ function Admin({ onExitLanding, onLogout }: AdminProps) {
 export default function App() {
   return (
     <StoreProvider>
-      <AuthProvider>
+      <NotificationsProvider>
+        <AuthProvider>
         {/* Fondo general de la app: UNA sola grilla, fija al viewport,
             compartida por landing, login y panel.
             SIN blur: difuminar un patrón de líneas lo destruye — blur(r)
@@ -232,7 +240,8 @@ export default function App() {
         />
         <div className="glass-wash" aria-hidden="true" />
         <Router />
-      </AuthProvider>
+        </AuthProvider>
+      </NotificationsProvider>
     </StoreProvider>
   );
 }

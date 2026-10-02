@@ -1,15 +1,17 @@
 // ChatMain — sección central del ChatPanel.
-// Contiene: error banner + transcript (mensajes) + history aside.
+// Contiene: transcript (mensajes) + history aside.
+//
+// Los errores ya no viven acá: van al stack de notificaciones del shell
+// (`NotificationStack`), que es superpuesto y los muestra sobre cualquier
+// vista. Esta pieza no sabe de errores.
 
 import type { RefObject } from "react";
 import { PanelToggle } from "../shared/components/PanelToggle";
-import { ErrorBanner } from "../shared/components/molecules/ErrorBanner";
 import { ChatHistory } from "./ChatHistory";
 import { MessageRow } from "./ChatPanel.MessageRow";
 import type { Message } from "../types";
 
 export interface ChatMainProps {
-  error: string | null;
   messages: Message[];
   isStreaming: boolean;
   /**
@@ -28,7 +30,6 @@ export interface ChatMainProps {
 }
 
 export function ChatMain({
-  error,
   messages,
   isStreaming,
   streamingMessageId,
@@ -40,8 +41,6 @@ export function ChatMain({
 }: ChatMainProps) {
   return (
     <div className="chat">
-      {error && <ErrorBanner>Error: {error}</ErrorBanner>}
-
       <div
         className="chat__transcript"
         data-testid="chat-transcript"

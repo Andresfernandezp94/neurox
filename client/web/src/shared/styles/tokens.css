@@ -29,6 +29,33 @@ svg {
   --surface-translucent: rgba(20, 20, 20, 0.85);
   --bg-tertiary: rgba(15, 15, 15, 0.7);
   --surface-deep: #131313;
+  /* Notificaciones (errores, procesos, alertas).
+   *
+   * La BASE es una sola superficie pizarra solida, al estilo de la
+   * consola de AWS: `#232f3e` es el color de su navbar. No es un gris de
+   * los nuestros, es deliberadamente azulado, y ese tinte es lo que hace
+   * que el bloque se lea como "aviso de sistema" y no como otra tarjeta de
+   * la app. `process` e `info` usan esa base.
+   *
+   * `error` y `alert` tienen su propia superficie porque la severidad tiene
+   * que verse sin leer: un error que sale del mismo azul que un "cargando"
+   * no se distingue.
+   *
+   * El bloque va SOLIDO y SATURADO: fondo, borde y texto en el color, con
+   * el texto y los iconos en el contraste opuesto (blanco). No es un tinte
+   * apagado con texto de color: los mensajes son largos y tecnicos (un
+   * error de tool trae la tool, la ruta y el sandbox) y colorear todo el
+   * texto los vuelve ilegibles. Bloque saturado + blanco = se lee, y de
+   * lejos se ve que es un error y no una nota. */
+  --notification-surface: #232f3e;
+  --notification-surface-hover: #2b3a4d;
+  --notification-text: #f2f3f3;
+  --notification-surface-error: #c9252d;
+  --notification-surface-error-hover: #d8393f;
+  --notification-text-error: #ffffff;
+  --notification-surface-alert: #b26a00;
+  --notification-surface-alert-hover: #c47c14;
+  --notification-text-alert: #ffffff;
   --accent: #efb05e;
   --accent-soft: rgba(239, 176, 94, 0.12);
   --accent-border: rgba(239, 176, 94, 0.22);
@@ -174,6 +201,22 @@ svg {
   --bg-elevated: #f5f5f7;
   --surface-translucent: rgba(255, 255, 255, 0.78);
   --bg-tertiary: rgba(245, 245, 248, 0.7);
+  /* Ver el token oscuro: un solo color para los tres kinds. En claro la
+   * consola de AWS usa el pizarra solo sobre el navy; sobre blanco el
+   * equivalente legible es el gris de superficie secundaria (#f2f3f3)
+   * con el borde del pizarra marcando el bloque. */
+  --notification-surface: #f2f3f3;
+  --notification-surface-hover: #e9ebeb;
+  --notification-text: #16191f;
+  /* Mismos colores saturados que en oscuro: el bloque va solido y el texto
+   * y los iconos en el contraste opuesto (blanco), no un tinte claro con
+   * texto rojo. Ver el comentario del tema oscuro. */
+  --notification-surface-error: #c9252d;
+  --notification-surface-error-hover: #d8393f;
+  --notification-text-error: #ffffff;
+  --notification-surface-alert: #b26a00;
+  --notification-surface-alert-hover: #c47c14;
+  --notification-text-alert: #ffffff;
   --accent: #c7903f;
   --accent-soft: rgba(199, 144, 63, 0.10);
   --accent-border: rgba(199, 144, 63, 0.25);
@@ -305,6 +348,11 @@ option {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  /* Ancla del stack de notificaciones. Al ser `absolute` dentro de
+   * `.app-main` y no del viewport, se centra en el area de contenido y se
+   * reacomoda solo cuando la sidebar se contrae o se expande, sin calcular
+   * offsets contra `--sidebar-w`. */
+  position: relative;
   max-width: calc(100vw - var(--sidebar-w-collapsed));
   display: flex;
   flex-direction: column;
