@@ -65,12 +65,24 @@ export interface MessageMetrics {
 export interface Message {
   id: number;
   session_id: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
+  /**
+   * `thinking` / `tool_call` / `tool` llegan desde la rehidratacion de
+   * una sesion (EP-2026-10-03): el daemon persiste cada evento del
+   * stream como su propia fila. `loadSession` las agrupa dentro del
+   * mensaje assistant siguiente para reconstruir el `timeline`, asi
+   * que el resto de la app solo ve `user | assistant`.
+   */
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'thinking' | 'tool_call';
   content: string;
   /** Assistant-only: streaming thinking block (the `<think>…</think>` portion). */
   thinking?: string;
   /** Assistant-only: tool calls/results accumulated during the response. */
   toolLog?: ToolActivity[];
+  /**
+   * Solo al rehidratar: nombre del tool cuando `role` es `tool_call` o
+   * `tool`. Para los roles user/assistant llega undefined.
+   */
+  tool_name?: string | null;
   /** Assistant-only: pending/resolved approval requests. */
   approvals?: ApprovalActivity[];
   /**

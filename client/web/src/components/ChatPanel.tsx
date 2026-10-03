@@ -14,12 +14,14 @@ import {
 } from "../api/sessions";
 import { getDefaultAgentStatus, type DefaultAgentResponse } from "../api/default";
 import { countTranscriptMatches } from "./chat/searchTranscript";
+import { hydrateMessages } from "./chat/streaming/hydrateHistory";
 import type { Message, MessageMetrics } from "../types";
 import { useAppFullscreen } from "../shared/hooks/useAppFullscreen";
 import { useChatStream } from "../hooks/useChatStream";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMain } from "./ChatMain";
 import { ChatFooter } from "./ChatFooter";
+import { TodoPanel } from "./chat/TodoPanel";
 
 function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
@@ -389,13 +391,12 @@ export function ChatPanel(_: ChatPanelProps = {}) {
     const tab = await createTabFromSession(id, summary);
     try {
       const res = await getSessionMessages(id);
-      const loaded: Message[] = (res.messages ?? []).map((m, i) => ({
-        id: i + 1,
-        session_id: id,
-        role: m.role as Message["role"],
-        content: m.content,
-        ts: m.ts,
-      }));
+      // EP-2026-10-03: el daemon devuelve filas planas (user,
+      // assistant, y una por cada thinking/tool_call/tool). hydrateHistory
+      // las agrupa en mensajes con `timeline`, que es lo que consume el
+      // resto de la app. Antes solo se mapeaban user/assistant y el
+      // progreso del agente se perdia al recargar.
+      const loaded = hydrateMessages(res.messages ?? [], id) as Message[];
       updateTab(tab.id, { messages: loaded });
       await refreshSessionModel(id, tab.id);
     } catch (e) {
@@ -423,14 +424,7 @@ export function ChatPanel(_: ChatPanelProps = {}) {
     (async () => {
       try {
         const res = await getSessionMessages(sid);
-        const loaded: Message[] = (res.messages ?? []).map((m, i) => ({
-          id: i + 1,
-          session_id: sid,
-          role: m.role as Message["role"],
-          content: m.content,
-          ts: m.ts,
-          thinking: m.thinking ?? undefined,
-        }));
+        const loaded = hydrateMessages(res.messages ?? [], sid) as Message[];
         // BUGFIX (cross-device realtime): apply the snapshot with the
         // FUNCTIONAL form and guard against clobbering messages that
         // arrived over the `/v1/events` WS while this fetch was in
@@ -700,6 +694,11 @@ useLayoutEffect(() => {
         onSearchActiveChange={handleSearchActiveChange}
         searchQuery={searchQuery}
       />
+
+      {/* EP-2026-10-03: la todo list del agente va entre el transcript y
+          el footer de input. `isStreaming` baja su poll a 4s para que el
+          progreso se vea mientras el agente trabaja. */}
+      <TodoPanel isStreaming={isStreaming} />
 
       <ChatFooter
         sessionId={sessionId}

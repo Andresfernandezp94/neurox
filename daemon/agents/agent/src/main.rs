@@ -73,6 +73,16 @@ struct DefaultAgentState {
     /// before the LLM call. (`None` until the first such call.)
     current_provider_id: Option<String>,
     current_model: Option<String>,
+    /// EP-2026-10-03: tool_calls emitidos y todavía sin resultado.
+    ///
+    /// Antes la validación de `tool_result` comparaba contra el último
+    /// mensaje assistant, lo que rechazaba los resultados que llegaban
+    /// fuera de orden (el modelo paraleliza tool calls y una shell de
+    /// 30s termina después de un todo_add). El turno moría con
+    /// `-32603 tool_result call_id mismatch`. Ahora se acumula el set
+    /// de pendientes: se agrega al emitir el call y se saca al recibir
+    /// su resultado. `tool_name` es para el log de diagnóstico.
+    pending_tool_calls: std::collections::HashMap<String, String>,
 }
 
 /// EP-2026-08-15 (live-switch history injection): bulk-load messages
@@ -285,6 +295,7 @@ async fn main() -> anyhow::Result<()> {
         tools_allowlist,
         current_provider_id: None,
         current_model: None,
+        pending_tool_calls: std::collections::HashMap::new(),
     }));
 
     // JSON-RPC loop
@@ -445,6 +456,11 @@ async fn handle_method(
         "reset_session" => {
             let mut s = state.lock().await;
             s.memory.clear();
+            // Los tool_calls del turno anterior quedan sin resultado:
+            // si llegan después del reset sus ids no matchean y el
+            // turno se rechaza. Limpiarlos acá evita arrastrar ids
+            // de una sesión vieja.
+            s.pending_tool_calls.clear();
             // Re-read facts on session reset (they might have been updated externally)
             s.facts = identity::load_facts(&s.identity_dir, s.manifest.as_ref());
             eprintln!("[default] session reset, re-loaded {} facts", s.facts.len());
@@ -772,38 +788,31 @@ async fn handle_tool_result(
         .ok_or_else(|| "missing call_id".to_string())?
         .to_string();
 
-    // EP-0003 Tier 2: validate tool_call_id. The previous assistant
-    // message in working memory has the tool_call_id(s) we just
-    // emitted. The incoming tool_result's call_id must match one
-    // of them (typically the first one). If not, the daemon (or a
-    // buggy tool client) is sending a tool_result for a different
-    // call — surface as a hard error rather than silently corrupting
-    // the agent's working memory.
+    // EP-0003 Tier 2: validate tool_call_id contra los tool_calls que
+    // siguen SIN responder en working memory.
+    //
+    // Antes se comparaba solo contra el ÚLTIMO mensaje assistant. Con un
+    // modelo que emite varios tool_calls en paralelo y los despacha
+    // fuera de orden, el resultado del primero se comparaba contra los
+    // ids del segundo y el turno entero moria con
+    // `-32603 tool_result call_id mismatch`. Pasaba con cualquier tool
+    // que tardara mas que otra (shell con su timeout de 30s vs un
+    // todo_add instantaneo).
+    //
+    // Ahora se acumula el set de ids pendientes: se agregan con cada
+    // tool_call y se sacan cuando llega su resultado. Un tool_result
+    // cuyo id no esta en el set sigue siendo un error (ahi si hay
+    // corrupcion real), pero el desajuste por orden ya no tumba el turno.
     {
-        let s = state.lock().await;
-        let last_assistant_call_ids: Vec<String> = s
-            .memory
-            .messages
-            .iter()
-            .rev()
-            .find_map(|m| {
-                if m.role == "assistant" {
-                    m.tool_calls.as_ref().map(|calls| {
-                        calls.iter().map(|c| c.id.clone()).collect::<Vec<_>>()
-                    })
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default();
-        if !last_assistant_call_ids.is_empty()
-            && !last_assistant_call_ids.iter().any(|id| id == &call_id)
-        {
+        let mut s = state.lock().await;
+        if !s.pending_tool_calls.contains_key(&call_id) {
             return Err(format!(
-                "tool_result call_id mismatch: got '{call_id}', \
-                 expected one of {last_assistant_call_ids:?}"
+                "tool_result for unknown/unmatched call_id '{call_id}' \
+                 (pending: {:?})",
+                s.pending_tool_calls.keys().collect::<Vec<_>>()
             ));
         }
+        s.pending_tool_calls.remove(&call_id);
     }
 
     let result_text = params
@@ -956,6 +965,13 @@ async fn call_llm(
                 ),
                 tool_call_id: None,
             });
+            // Registrar cada id como pendiente ANTES de devolver el
+            // control al core, que puede devolver los resultados en
+            // cualquier orden.
+            for tc in tool_calls {
+                s.pending_tool_calls
+                    .insert(tc.id.clone(), tc.function.name.clone());
+            }
         }
 
         // Return tool_call to core (core dispatches and calls us back)

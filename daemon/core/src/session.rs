@@ -58,7 +58,21 @@ type SessionRow = (
     Option<String>,   // 11: client_id
     Option<String>,   // 12: user_id
 );
-type MessageRow = (i64, String, String, String, Option<String>, String);
+// (id, session_id, role, content, thinking, ts, tool_name, tool_call_id)
+//
+// `tool_name` / `tool_call_id` son NULL para user y assistant: solo los
+// mensajes con role="tool" los traen, y son lo que permite reconstruir el
+// timeline (tool_call + su tool_result) al recargar la pagina.
+type MessageRow = (
+    i64,
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageRecord {
@@ -71,7 +85,23 @@ pub struct MessageRecord {
     /// the column was added (idempotent ALTER applied on next daemon start).
     pub thinking: Option<String>,
     pub ts: String,
+    /// Nombre del tool, solo para `role == "tool"`. `None` en user/assistant.
+    pub tool_name: Option<String>,
+    /// Id del `tool_call` al que responde este resultado, si viene del
+    /// dispatcher. Permite reconstruir el par call→result al rehidratar.
+    pub tool_call_id: Option<String>,
 }
+
+/// Roles que emite el forwarder del stream, ademas de `user` y
+/// `assistant`.
+///
+/// EP-2026-10-03: antes solo se persistian los dosUltimos, asi que
+/// recargar la pagina durante un stream dejaba la sesion sin el
+/// progreso del agente. Cada evento del bus se guarda como su propia
+/// fila y el frontend los agrupa por `assistant` al rehidratar.
+pub const ROLE_THINKING: &str = "thinking";
+pub const ROLE_TOOL_CALL: &str = "tool_call";
+pub const ROLE_TOOL: &str = "tool";
 
 impl SessionStore {
     pub async fn open(path: &Path) -> anyhow::Result<Self> {
@@ -166,6 +196,12 @@ impl SessionStore {
         // MUST run after the messages CREATE TABLE so the table exists
         // for `pragma_table_info` to query its column list.
         Self::ensure_column(&pool, "messages", "thinking").await?;
+        // EP-2026-10-03: persistir el progreso del agente. Sin esto un
+        // F5 durante un stream dejaba la sesion con solo user+assistant:
+        // los tool_call / tool_result vivian en el bus de eventos y en el
+        // SSE, pero nunca llegaban a SQLite.
+        Self::ensure_column(&pool, "messages", "tool_name").await?;
+        Self::ensure_column(&pool, "messages", "tool_call_id").await?;
 
         Ok(Self {
             pool,
@@ -228,6 +264,13 @@ impl SessionStore {
                 // EP-0026-rev-fix: thinking persisted per assistant message.
                 ("messages", "thinking") => {
                     "ALTER TABLE messages ADD COLUMN thinking TEXT"
+                }
+                // EP-2026-10-03: progreso del agente persistido.
+                ("messages", "tool_name") => {
+                    "ALTER TABLE messages ADD COLUMN tool_name TEXT"
+                }
+                ("messages", "tool_call_id") => {
+                    "ALTER TABLE messages ADD COLUMN tool_call_id TEXT"
                 }
                 _ => anyhow::bail!("unexpected migration: {table}.{column}"),
             };
@@ -348,16 +391,68 @@ impl SessionStore {
         content: &str,
         thinking: Option<&str>,
     ) -> anyhow::Result<i64> {
+        self.log_message_full(session_id, role, content, thinking, None, None)
+            .await
+    }
+
+    /// Persiste un bloque de thinking (assistant) en su propia fila.
+    ///
+    /// Se guarda aparte del texto porque el SSE los manda en eventos
+    /// distintos y el timeline los muestra en bloques distintos.
+    pub async fn log_thinking(
+        &self,
+        session_id: Uuid,
+        thinking: &str,
+    ) -> anyhow::Result<i64> {
+        self.log_message_full(session_id, "thinking", thinking, None, None, None)
+            .await
+    }
+
+    /// Igual que `log_message` pero con los campos de tool.
+    ///
+    /// EP-2026-10-03: `tool_name` / `tool_call_id` solo se llenan para
+    /// `role == "tool"`. Se mantiene `log_message` como atajo porque los
+    /// call-sites de user/assistant no tienen nada que pasar.
+    pub async fn log_tool_message(
+        &self,
+        session_id: Uuid,
+        tool: &str,
+        content: &str,
+        tool_call_id: Option<&str>,
+    ) -> anyhow::Result<i64> {
+        self.log_message_full(
+            session_id,
+            "tool",
+            content,
+            None,
+            Some(tool),
+            tool_call_id,
+        )
+        .await
+    }
+
+    async fn log_message_full(
+        &self,
+        session_id: Uuid,
+        role: &str,
+        content: &str,
+        thinking: Option<&str>,
+        tool_name: Option<&str>,
+        tool_call_id: Option<&str>,
+    ) -> anyhow::Result<i64> {
                 let now = chrono::Utc::now().to_rfc3339();
         let id: i64 = sqlx::query_scalar(
-            "INSERT INTO messages (session_id, role, content, thinking, ts) \
-             VALUES (?, ?, ?, ?, ?) RETURNING id",
+            "INSERT INTO messages \
+               (session_id, role, content, thinking, ts, tool_name, tool_call_id) \
+             VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(session_id.to_string())
         .bind(role)
         .bind(content)
         .bind(thinking)
         .bind(now)
+        .bind(tool_name)
+        .bind(tool_call_id)
         .fetch_one(&self.pool)
         .await?;
         Ok(id)
@@ -707,7 +802,7 @@ impl SessionStore {
     /// Get all messages for a session, ordered chronologically.
     pub async fn get_messages(&self, session_id: Uuid) -> anyhow::Result<Vec<MessageRecord>> {
                 let rows: Vec<MessageRow> = sqlx::query_as(
-            "SELECT id, session_id, role, content, thinking, ts
+            "SELECT id, session_id, role, content, thinking, ts, tool_name, tool_call_id
              FROM messages WHERE session_id = ? ORDER BY id ASC",
         )
         .bind(session_id.to_string())
@@ -716,14 +811,18 @@ impl SessionStore {
 
         Ok(rows
             .into_iter()
-            .map(|(id, sid, role, content, thinking, ts)| MessageRecord {
-                id,
-                session_id: sid,
-                role,
-                content,
-                thinking,
-                ts,
-            })
+            .map(
+                |(id, sid, role, content, thinking, ts, tool_name, tool_call_id)| MessageRecord {
+                    id,
+                    session_id: sid,
+                    role,
+                    content,
+                    thinking,
+                    ts,
+                    tool_name,
+                    tool_call_id,
+                },
+            )
             .collect())
     }
 

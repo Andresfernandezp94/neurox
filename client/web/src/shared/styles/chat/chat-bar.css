@@ -220,3 +220,112 @@
   border: none;
   border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
 }
+
+/* ─── Todo panel (EP-2026-10-03) ─────────────────────────────────────
+ * Lista de progreso del agente (`todo_*`), entre el transcript y el
+ * footer de input. Se lee acá porque comparte la misma superficie que
+ * la barra de contexto: fondo transparente, mismo borde inferior, misma
+ * tipografía chica. El papel de "atomo" lo tiene `.todo-panel__toggle`
+ * (el botón) y `.todo-panel__item` (cada fila).
+ *
+ * `--todo-accent` y `--todo-ok` son aliases de tokens que ya existen en
+ * tokens.css: no se inventan colores acá.
+ */
+
+.todo-panel {
+  background: transparent;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 0.75rem;
+}
+
+.todo-panel__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 1rem;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.todo-panel__toggle:hover {
+  color: var(--text-primary);
+}
+
+.todo-panel__toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.todo-panel__chevron {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+}
+
+.todo-panel__label {
+  flex: 1;
+}
+
+.todo-panel__count {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+/* Filas. El done baja de contraste y strike-through: el mismo signal
+ * que usa el resto de la app para "ya está". */
+.todo-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 1rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+.todo-panel__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.todo-panel__label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  cursor: pointer;
+}
+
+.todo-panel__item[data-done="true"] .todo-panel__text {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.todo-panel__text {
+  flex: 1;
+}
+
+.todo-panel__priority {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  padding: 0.0625rem 0.25rem;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+
+.todo-panel__priority--high {
+  color: var(--status-danger);
+}
+
+.todo-panel__priority--low {
+  color: var(--text-muted);
+}

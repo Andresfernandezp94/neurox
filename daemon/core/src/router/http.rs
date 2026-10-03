@@ -1442,6 +1442,11 @@ pub async fn post_message_stream(
     let tx_for_forward = tx.clone();
     let request_id_for_forward = request_id.clone();
     let client_id_for_forward = client_id.clone();
+    // EP-2026-10-03: el forwarder persiste thinking/tool_call/tool_result
+    // en SQLite a medida que los ve. Antes solo se guardaban user y
+    // assistant, asi que un F5 a mitad de stream (o abrir la sesion en
+    // otra pestana) perdia todo el progreso del agente.
+    let session_store = state.lifecycle.session.clone();
     tokio::spawn(async move {
         loop {
             // Tope de inactividad. Es la red de seguridad para cualquier
@@ -1508,6 +1513,22 @@ pub async fn post_message_stream(
                     {
                         break;
                     }
+                    // EP-2026-10-03: persistir el thinking. Cada evento
+                    // `Thinking` es un fragmento; se guarda como fila
+                    // propia con role="thinking" y el frontend las
+                    // concatena. Un INSERT por fragmento es aceptable:
+                    // el objetivo es que un F5 no borre el progreso,
+                    // no minimise escrituras.
+                    if let Err(e) = session_store
+                        .log_thinking(session_for_task, &text)
+                        .await
+                    {
+                        tracing::warn!(
+                            session_id = %session_for_task,
+                            error = %e,
+                            "thinking persist failed (non-fatal)"
+                        );
+                    }
                     // See Content branch above — do NOT re-emit.
                 }
                 Ok(Event::ToolCall {
@@ -1532,6 +1553,22 @@ pub async fn post_message_stream(
                     {
                         break;
                     }
+                    // EP-2026-10-03: el tool_call va a SQLite como
+                    // role="tool_call". El contenido es el args JSON:
+                    // el timeline lo necesita para reconstruir qué se
+                    // pidió, aunque la tool falle.
+                    let args_text = args.to_string();
+                    if let Err(e) = session_store
+                        .log_tool_message(session_for_task, &tool, &args_text, None)
+                        .await
+                    {
+                        tracing::warn!(
+                            session_id = %session_for_task,
+                            tool = %tool,
+                            error = %e,
+                            "tool_call persist failed (non-fatal)"
+                        );
+                    }
                     // See Content branch above — do NOT re-emit.
                 }
                 Ok(Event::ToolResult {
@@ -1555,6 +1592,20 @@ pub async fn post_message_stream(
                         .is_err()
                     {
                         break;
+                    }
+                    // EP-2026-10-03: el tool_result se persiste con
+                    // role="tool". Un F5 en mitad de una tool larga
+                    // (shell con timeout de 30s) ya no la pierde.
+                    if let Err(e) = session_store
+                        .log_tool_message(session_for_task, &tool, &result, None)
+                        .await
+                    {
+                        tracing::warn!(
+                            session_id = %session_for_task,
+                            tool = %tool,
+                            error = %e,
+                            "tool_result persist failed (non-fatal)"
+                        );
                     }
                     // See Content branch above — do NOT re-emit.
                 }
