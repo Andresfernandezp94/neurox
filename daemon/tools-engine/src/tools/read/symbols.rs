@@ -391,7 +391,7 @@ structural search, run ast-grep yourself through the shell tool."
                 .collect();
             for pat in patterns {
                 hits.extend(
-                    run_pattern(&bin, lang.spec.lang, pat, &lang.files, &query).await,
+                    run_pattern(&bin, lang.spec.lang, pat, &lang.files, query).await,
                 );
             }
         }
@@ -672,11 +672,9 @@ fn text_fallback(
     };
     let mut lines = Vec::new();
     let _ = grep_walk_dir(dir, &re, limit, &mut lines);
-    let header = format!(
-        "NOTE: ast-grep is not installed, so this is a TEXT search, not a \
+    let header = "NOTE: ast-grep is not installed, so this is a TEXT search, not a \
 structural one. Results may include comments and call sites. Install \
-ast-grep for reliable results.\n"
-    );
+ast-grep for reliable results.\n";
     if let Some(k) = kind {
         return format!(
             "{header}# kind='{k}' cannot be honoured without ast-grep\n{}",
