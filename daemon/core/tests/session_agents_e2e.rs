@@ -1032,3 +1032,94 @@ async fn list_sessions_by_client_partitions_correctly() {
     let all = store.list_sessions(100).await.unwrap();
     assert_eq!(all.len(), 3, "list_sessions (no filter) returns everything");
 }
+
+/// EP-2026-10-03: `GET /v1/sessions/:id/messages` tiene que devolver
+/// `tool_name` y `tool_call_id`.
+///
+/// El handler armaba el JSON a mano y se comia los dos campos. En la base
+/// de datos estaban, asi que el bug era invisible desde la DB y solo
+/// aparecia al recargar: el cliente recibia `tool_name: undefined` y
+/// pintaba cada tool como "unknown", y sin `call_id` no podia emparejar la
+/// peticion con su resultado.
+///
+/// El caso del informe era doble porque las tools en paralelo se
+/// emparejan por id: con el campo ausente, dos `read_file` indistinguibles
+/// se cruzaban al rehidratar.
+#[tokio::test]
+async fn messages_devuelve_tool_name_y_tool_call_id() {
+    let rig = TestRig::default_rig().await;
+    let s = rig.create_session("default").await;
+    let sid = s["session_id"].as_str().unwrap().to_string();
+    let sid_u = uuid::Uuid::parse_str(&sid).unwrap();
+
+    // Dos tools IGUALES, como las que emite un lote en paralelo.
+    rig.state
+        .lifecycle
+        .session
+        .log_tool_call_message(sid_u, "read_file", r#"{"path":"a"}"#, Some("call-1"))
+        .await
+        .unwrap();
+    rig.state
+        .lifecycle
+        .session
+        .log_tool_message(sid_u, "read_file", "contenido a", Some("call-1"))
+        .await
+        .unwrap();
+    rig.state
+        .lifecycle
+        .session
+        .log_tool_call_message(sid_u, "read_file", r#"{"path":"b"}"#, Some("call-2"))
+        .await
+        .unwrap();
+    rig.state
+        .lifecycle
+        .session
+        .log_tool_message(sid_u, "read_file", "contenido b", Some("call-2"))
+        .await
+        .unwrap();
+
+    let body = rig.get_json(&format!("/v1/sessions/{sid}/messages")).await;
+    let msgs = body["messages"].as_array().unwrap().clone();
+
+    let calls: Vec<_> = msgs
+        .iter()
+        .filter(|m| m["role"] == "tool_call")
+        .collect();
+    let results: Vec<_> = msgs.iter().filter(|m| m["role"] == "tool").collect();
+    assert_eq!(calls.len(), 2, "las dos peticiones: {msgs:?}");
+    assert_eq!(results.len(), 2, "los dos resultados: {msgs:?}");
+
+    // El nombre de la tool tiene que salir; si no, el cliente la pinta como
+    // "unknown" al recargar.
+    for m in calls.iter().chain(results.iter()) {
+        assert_eq!(
+            m["tool_name"], "read_file",
+            "tool_name debe salir en la API, no perderse al armar el JSON: {m}"
+        );
+    }
+    // Y el id, que es lo que permite emparejar petition con resultado.
+    let ids: Vec<&str> = calls
+        .iter()
+        .map(|m| m["tool_call_id"].as_str().expect("tool_call_id"))
+        .collect();
+    assert_eq!(ids, vec!["call-1", "call-2"]);
+
+    // Un mensaje normal no lleva tool_name: debe salir `null`, no faltar
+    // (un campo ausente y un null se comportan distinto al parsear).
+    rig.post_json(
+        &format!("/v1/sessions/{sid}/messages"),
+        json!({ "agent_id": "default", "text": "hola" }),
+    )
+    .await;
+    let body2 = rig.get_json(&format!("/v1/sessions/{sid}/messages")).await;
+    let user_msg = body2["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["role"] == "user")
+        .expect("mensaje de usuario");
+    assert!(
+        user_msg.get("tool_name").is_some(),
+        "la clave debe existir siempre, aunque valga null: {user_msg}"
+    );
+}

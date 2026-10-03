@@ -119,6 +119,14 @@ pub async fn get_session_messages(
             // the API response so the frontend can hydrate the
             // ThinkingNode on reload without needing to re-parse
             // `content`.
+            //
+            // EP-2026-10-03: `tool_name` y `tool_call_id` tambien tienen
+            // que salir, o recargar la sesion pierde el nombre de cada
+            // tool (el cliente lo pintaba como "unknown") y el `call_id`
+            // que empareja la peticion con su resultado. Los dos campos
+            // ya se leian de la base de datos; aqui se perdian al armar el
+            // JSON a mano. Se anteponen al final para no romper a ningun
+            // cliente que los ignorase.
             json!({
                 "id": m.id,
                 "session_id": m.session_id,
@@ -126,6 +134,8 @@ pub async fn get_session_messages(
                 "content": m.content,
                 "thinking": m.thinking,
                 "ts": m.ts,
+                "tool_name": m.tool_name,
+                "tool_call_id": m.tool_call_id,
             })
         })
         .collect();
