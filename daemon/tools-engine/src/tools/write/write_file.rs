@@ -85,27 +85,43 @@ impl Tool for WriteFileTool {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| "missing 'new_str' for strReplace".to_string())?;
 
-                // W2 fix: the flock inside str_replace_once serializes
-                // concurrent writers, so a single attempt is enough when
-                // the operation can succeed. We still loop on transient
-                // I/O errors (e.g. ENOENT during a sibling delete) with
-                // a small backoff.
-                const MAX_ATTEMPTS: usize = 8;
-                let last_err: Option<String> = None;
-                for _attempt in 0..MAX_ATTEMPTS {
-                    match str_replace_once(&resolved, old_str, new_str).await {
-                        Ok(()) => return Ok(format!("replaced in {}", path)),
-                        Err(StrReplaceError::NotFound) => {
-                            return Err(format!("old_str not found in file '{}'", path));
-                        }
-                        Err(StrReplaceError::Io(e)) => return Err(e),
+                // Un solo intento, y es a proposito.
+                //
+                // El `flock` de `str_replace_once` se mantiene durante toda la
+                // operacion y serializa a los escritores sobre la misma ruta,
+                // asi que la contencion ya esta resuelta DENTRO del intento.
+                // Por eso `str_replace_serializes_under_contention` pasa con
+                // 10 writers simultaneos.
+                //
+                // Esto NO es un reintento. Antes habia aqui un
+                // `for _attempt in 0..MAX_ATTEMPTS` con un comentario que
+                // prometia reintentar los errores de E/S con backoff, pero
+                // todos los brazos del `match` hacian `return`: el bucle se
+                // ejecutaba una vez y nada mas, `MAX_ATTEMPTS` y `last_err`
+                // eran decorativos, y el `Err` de despues era inalcanzable.
+                // No habia forma de reintentar nada. Clippy lo cantaba como
+                // `never_loop`, que es `deny`, o sea que `cargo clippy` no
+                // compilaba este crate.
+                //
+                // Por que no hace falta reintentar: de los errores de E/S que
+                // quedan (EACCES, EISDIR, ENOSPC) ninguno se arregla solo en
+                // 5 ms. Y el unico transitorio que citaba el comentario —un
+                // fichero ausente por un write concurrente— tampoco llega
+                // aqui, porque `str_replace_once` abre con `.create(true)`:
+                // si el fichero no esta, lo crea vacio y el resultado es
+                // `NotFound`, no un error de E/S.
+                //
+                // Reintentar de verdad, junto con quitar ese
+                // `.create(true)` —que hoy hace que strReplace sobre una ruta
+                // inexistente cree un fichero vacio y diga "old_str not
+                // found" en vez de "file not found"—, es trabajo aparte.
+                match str_replace_once(&resolved, old_str, new_str).await {
+                    Ok(()) => Ok(format!("replaced in {}", path)),
+                    Err(StrReplaceError::NotFound) => {
+                        Err(format!("old_str not found in file '{}'", path))
                     }
+                    Err(StrReplaceError::Io(e)) => Err(e),
                 }
-                // Unreachable: str_replace_once returns Ok, NotFound, or Io.
-                Err(format!(
-                    "strReplace could not land after {MAX_ATTEMPTS} attempts: {}",
-                    last_err.unwrap_or_default()
-                ))
             }
             "insert" => {
                 let content = args
