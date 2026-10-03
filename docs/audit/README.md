@@ -14,9 +14,12 @@ This directory contains the audit work for the daemon's native tools.
 - `grep.md` — Audit of `grep` (sandbox bypass on the `path` argument).
 - `glob_listdir.md` — Audit of `glob` and `list_dir` (no gaps — already correct).
 - `web.md` — Audit of `web_fetch` and `web_search` (SSRF, binary content).
-- `save_fact.md` — Audit of `save_fact` (YAML corruption under concurrency).
 - `verify_all_tools.py` — End-to-end functional verification harness
-  (57 tests, 22 tools + parallel sanity). Run against a live daemon.
+  (14 tools + parallel sanity). Run against a live daemon.
+
+The audits for `save_fact`, `search_memory`, `generate_*`, `clipboard_*`
+and `screenshot` were removed along with those tools on 2026-10-03. The
+findings live on in `SUMMARY.md`.
 
 ## How to run the verification
 
@@ -37,7 +40,7 @@ python3 docs/audit/verify_all_tools.py
 
 ## Headline numbers
 
-- 22 tools audited
+- 22 tools audited (14 still exist; 8 were removed on 2026-10-03)
 - 18 with at least one gap
 - ~32 gaps total
 - 7 critical security vulnerabilities fixed

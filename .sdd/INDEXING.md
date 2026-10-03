@@ -116,8 +116,8 @@ Ver [methodologies/method-07-estados-y-steps.md](./methodologies/method-07-estad
 │
 ├── archived/                           ← Épicas CERRADAS (inmutable) + REGISTRO.md
 │   ├── REGISTRO.md
-│   ├── EP-0001-daemon-mcps/
-│   ├── EP-0002-voice-web-ui/
+│   ├── EP-0001-daemon-mcps/       (cerrada: el subsistema de MCPs se eliminó)
+│   ├── EP-0002-voice-web-ui/      (cerrada: voice se eliminó)
 │   ├── EP-0003-agentic-llm-robustness/
 │   ├── EP-0004-multi-agent-live-switch/  ← (legacy ID: EP-2026-08-15)
 │   ├── EP-0005-tools-engine-integration/ ← (legacy ID: EP-2026-08-19)

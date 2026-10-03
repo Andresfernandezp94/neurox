@@ -94,24 +94,9 @@ turno. Mantener corto, conciso, en español. Un archivo por concern
 | `policy.type` | enum: `allow_all` \| `allowlist` \| `denylist` | Filtro base. |
 | `policy.allowlist` | array<string> \| null | Tools permitidas (si type=allowlist). |
 | `policy.denylist` | array<string> \| null | Tools bloqueadas (si type=denylist). |
-| `config` | object | Config per-tool (ej. `generate_video.default_duration_secs: 6`). |
+| `config` | object | Config per-tool (ej. `web_fetch.mode: "full"`). |
 
-#### 2.5. `mcp_servers`
-
-Lista de servidores MCP. Cada uno es un objeto:
-
-| Campo | Tipo | Descripción |
-|---|---|---|
-| `name` | string | Identificador. |
-| `transport` | enum: `stdio` \| `http` \| `sse` | Tipo de transporte. |
-| `command` | string? | Para stdio: comando a ejecutar. |
-| `args` | array<string> | Args del comando. |
-| `url` | string? | Para http/sse: endpoint URL. |
-| `auth.type` | enum: `none` \| `bearer` \| `basic` \| `oauth` | Tipo de auth. |
-| `auth.token_env` | string? | Env var con el token. |
-| `env` | object | Env vars extra. |
-
-#### 2.6. `memory` (4 tiers)
+#### 2.5. `memory` (4 tiers)
 
 | Tier | Tipo | Default path | Formato |
 |---|---|---|---|
@@ -120,28 +105,28 @@ Lista de servidores MCP. Cada uno es un objeto:
 | `episodic` | `file` | `memory/episodes.jsonl` | JSONL: un episodio JSON por línea. |
 | `semantic` | `file` | `facts.yaml` | YAML con `facts: []` (id, type, content, active). |
 
-#### 2.7. `guardrails`
+#### 2.6. `guardrails`
 
 Validación input/output. Lista de reglas con `type` y config per-tipo.
 
 **Input** soportado: `max_length` (con `max_chars`), `regex_match`, `regex_reject`, `no_secrets`, `blocklist`, `custom`.
 **Output** soportado: `max_length`, `no_secrets`, `no_pii`, `json_schema` (con `schema`), `regex_match`, `blocklist`, `custom`.
 
-#### 2.8. `output`
+#### 2.7. `output`
 
 | Campo | Tipo | Descripción |
 |---|---|---|
 | `type` | enum: `text` \| `json_schema` | Tipo de output. |
 | `schema` | object? | JSON Schema (solo si type=json_schema). El output se valida contra esto. |
 
-#### 2.9. `streaming`
+#### 2.8. `streaming`
 
 | Campo | Tipo | Default | Descripción |
 |---|---|---|---|
 | `enabled` | bool | `true` | Si streamea las respuestas del LLM. |
 | `chunk_size` | int? | null | Tokens por chunk (null = provider default). |
 
-#### 2.10. `budget`
+#### 2.9. `budget`
 
 | Campo | Tipo | Descripción |
 |---|---|---|
@@ -149,7 +134,7 @@ Validación input/output. Lista de reglas con `type` y config per-tipo.
 | `max_runtime_secs` | int? | Segundos máximos. |
 | `cost_limit_usd` | number? | Costo máximo en USD. |
 
-#### 2.11. `stop_conditions`
+#### 2.10. `stop_conditions`
 
 | Campo | Tipo | Default | Descripción |
 |---|---|---|---|
@@ -157,7 +142,7 @@ Validación input/output. Lista de reglas con `type` y config per-tipo.
 | `max_tool_calls` | int? | null | Máximo de llamadas a tools. |
 | `max_duration_secs` | int? | null | Duración máxima total. |
 
-#### 2.12. `sub_agents`
+#### 2.11. `sub_agents`
 
 Sub-agents a los que el agent puede delegar. Cada uno:
 
@@ -170,7 +155,7 @@ Sub-agents a los que el agent puede delegar. Cada uno:
 | `model_override` | string? | Override del model del padre. |
 | `handoff_description` | string? | Cuándo delegar a este sub-agent. |
 
-#### 2.13. `permissions.sandbox`
+#### 2.12. `permissions.sandbox`
 
 | Campo | Tipo | Default | Descripción |
 |---|---|---|---|
@@ -181,7 +166,7 @@ Sub-agents a los que el agent puede delegar. Cada uno:
 | `memory_limit_mb` | int? | null | Límite de memoria. |
 | `cpu_limit_pct` | int? | null | Límite de CPU (1-100). |
 
-#### 2.14. `observability`
+#### 2.13. `observability`
 
 | Campo | Tipo | Default | Descripción |
 |---|---|---|---|
@@ -204,7 +189,7 @@ Sub-agents a los que el agent puede delegar. Cada uno:
    - `allow_all` para agentes sin restricciones (default para tests)
    - `allowlist` con las tools específicas que el agente puede usar
    - `denylist` con las tools que NO puede usar
-7. **Configurar `tools.config`** con defaults per-tool (ej. `generate_video.default_duration_secs: 6`).
+7. **Configurar `tools.config`** con defaults per-tool (ej. `web_fetch.mode: "full"`).
 8. **Configurar permissions.sandbox** según el nivel de acceso deseado.
 9. **Ajustar budget / stop_conditions** según criticidad.
 10. **Validar con el JSON Schema**:

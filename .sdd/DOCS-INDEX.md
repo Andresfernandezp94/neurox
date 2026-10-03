@@ -132,11 +132,7 @@ Documentación de cada módulo. **Único lugar donde vive la doc de módulo.**
 | [`docs/daemon/agents.md`](../docs/daemon/agents.md) | Sistema de agentes |
 | [`docs/daemon/development.md`](../docs/daemon/development.md) | Guía de desarrollo |
 | [`docs/daemon/production.md`](../docs/daemon/production.md) | Deploy a producción |
-| [`docs/daemon/plugin-system.md`](../docs/daemon/plugin-system.md) | Sistema de plugins |
-| [`docs/daemon/tool-plugin-bridge.md`](../docs/daemon/tool-plugin-bridge.md) | Bridge tool↔plugin |
 | [`docs/daemon/migration-from-apitoken.md`](../docs/daemon/migration-from-apitoken.md) | Migración desde api-token |
-| [`docs/daemon/integrations/memory.md`](../docs/daemon/integrations/memory.md) | Integración con memory MCP |
-| [`docs/daemon/integrations/voice.md`](../docs/daemon/integrations/voice.md) | Integración con voice MCP |
 
 ### 9.2 `docs/agents/`
 

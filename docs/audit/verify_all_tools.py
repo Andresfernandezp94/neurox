@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Full functional verification of all 22 daemon tools.
+Full functional verification of the 14 remaining daemon tools.
 Each test:
-  1. Sets up any required state (test dir, test facts file, etc.)
+  1. Sets up any required state (test dir, todo store, etc.)
   2. Invokes the tool via the HTTP API
   3. Verifies the response is sane (ok=true or expected error)
   4. Cleans up
@@ -28,7 +28,6 @@ TOKEN = subprocess.check_output(
 
 WORKDIR = "/home/andres_fernandez/projects/neurox"
 TESTDIR = "/tmp/opencode/bench/verify"
-FACTS_PATH = "/home/andres_fernandez/.local/share/neurox/identity/facts.yaml"
 NEUROX_TOKEN = os.environ.get("NEUROX_TOKEN", "")
 
 # ----------------------------------------------------------------------
@@ -88,14 +87,9 @@ def setup():
         f.write("fn main() { println!(\"hi\"); }\nfn helper() {}\n")
     with open(f"{TESTDIR}/sub1/code.py", "w") as f:
         f.write("def foo(): pass\nclass Bar: pass\n")
-    # Save current facts.yaml to restore later
-    if os.path.exists(FACTS_PATH):
-        shutil.copy2(FACTS_PATH, f"{TESTDIR}/facts.yaml.bak")
 
 
 def teardown():
-    if os.path.exists(f"{TESTDIR}/facts.yaml.bak"):
-        shutil.copy2(f"{TESTDIR}/facts.yaml.bak", FACTS_PATH)
     if os.path.exists(TESTDIR):
         shutil.rmtree(TESTDIR, ignore_errors=True)
 
@@ -248,112 +242,6 @@ def test_web_fetch():
     record("web_fetch: invalid url rejected", ok, r.get("error", "")[:80])
 
 
-def test_save_fact():
-    r = invoke("save_fact", {"content": "verify_fact_1"})
-    ok = r.get("ok") and "saved" in r.get("result", "")
-    record("save_fact: new fact", ok, r.get("result", r.get("error", ""))[:60])
-    # empty
-    r = invoke("save_fact", {"content": ""})
-    ok = r.get("ok") is False
-    record("save_fact: empty rejected", ok, r.get("error", "")[:60])
-    # Verify it's in the file
-    with open(FACTS_PATH) as f:
-        content = f.read()
-    has = "verify_fact_1" in content
-    record("save_fact: fact persisted to file", has, "")
-
-
-def test_search_memory():
-    r = invoke("search_memory", {"query": "verify_fact_1"})
-    ok = r.get("ok") and "verify_fact_1" in r.get("result", "")
-    record("search_memory: find recent fact", ok, r.get("result", r.get("error", ""))[:100])
-    # list all (no query)
-    r = invoke("search_memory", {})
-    ok = r.get("ok")  # either [] or list, not Err
-    record("search_memory: empty query lists all", ok, r.get("result", r.get("error", ""))[:60])
-    # non-string query
-    r = invoke("search_memory", {"query": 42})
-    ok = r.get("ok") is False and "must be a string" in r.get("error", "")
-    record("search_memory: non-string rejected", ok, r.get("error", "")[:60])
-
-
-def test_clipboard_read():
-    # write first, then read
-    invoke("clipboard_write", {"text": "verify_clipboard_value"})
-    r = invoke("clipboard_read", {})
-    ok = r.get("ok") and "verify_clipboard_value" in r.get("result", "")
-    record("clipboard_read: roundtrip", ok, r.get("result", r.get("error", ""))[:80])
-
-
-def test_clipboard_write():
-    r = invoke("clipboard_write", {"text": "test"})
-    ok = r.get("ok") and "copied" in r.get("result", "")
-    record("clipboard_write: 4 chars", ok, r.get("result", "")[:60])
-    # missing text
-    r = invoke("clipboard_write", {})
-    ok = r.get("ok") is False and "missing" in r.get("error", "")
-    record("clipboard_write: missing text rejected", ok, r.get("error", "")[:60])
-    # 2MB rejected
-    r = invoke("clipboard_write", {"text": "x" * (2 * 1024 * 1024)})
-    ok = r.get("ok") is False  # either tool cap or HTTP 413
-    record("clipboard_write: 2MB rejected", ok, r.get("error", "")[:60])
-
-
-def test_screenshot():
-    r = invoke("screenshot", {})
-    ok = r.get("ok") and os.path.exists("/tmp/neurox-screenshot.png")
-    record("screenshot: file created", ok, r.get("result", r.get("error", ""))[:80])
-    if os.path.exists("/tmp/neurox-screenshot.png"):
-        # verify it's a real PNG
-        with open("/tmp/neurox-screenshot.png", "rb") as f:
-            magic = f.read(8)
-        ok = magic.startswith(b"\x89PNG\r\n\x1a\n")
-        record("screenshot: valid PNG magic", ok, magic.hex()[:20])
-        os.remove("/tmp/neurox-screenshot.png")
-
-
-def test_generate_image():
-    # Real call would burn API quota. Just verify the tool exists and
-    # validates the prompt parameter.
-    r = invoke("generate_image", {"prompt": ""})
-    # missing_prompt is also acceptable (validate at least the file
-    # gets returned if it succeeded)
-    record("generate_image: spec reachable",
-           r.get("tool") == "generate_image",
-           r.get("error", r.get("result", ""))[:60])
-    # path-traversal fix: filename is sanitized
-    r = invoke("generate_image", {"prompt": "test", "filename": "../../tmp/pwned.jpg"})
-    # This will fail at the API call (probably) but should NOT create /tmp/pwned.jpg
-    time.sleep(2)
-    leaked = os.path.exists("/tmp/pwned.jpg")
-    record("generate_image: path-traversal sanitized",
-           not leaked, "leaked" if leaked else "no leak")
-
-
-def test_generate_music():
-    r = invoke("generate_music", {"prompt": "test"})
-    record("generate_music: spec reachable",
-           r.get("tool") == "generate_music",
-           r.get("error", r.get("result", ""))[:60])
-
-
-def test_generate_video():
-    # Skip the real call (would burn API quota and time). Just
-    # verify the spec is reachable via the schema endpoint and
-    # that the path-traversal fix is in place (covered by unit
-    # tests in the source).
-    import urllib.request as _ur
-    req = _ur.Request(f"{DAEMON}/v1/tools", headers={"Authorization": f"Bearer {TOKEN}"})
-    with _ur.urlopen(req) as resp:
-        body = json.loads(resp.read())
-    found = any(t["name"] == "generate_video" for t in body.get("tools", []))
-    record("generate_video: spec reachable", found, "" if found else "not in /v1/tools")
-    # Path-traversal: confirmed in live test above (no /tmp/pwned-vid.mp4).
-    leaked = os.path.exists("/tmp/pwned-vid.mp4")
-    record("generate_video: path-traversal sanitized (live test)",
-           not leaked, "leaked" if leaked else "no leak")
-
-
 def test_todo_add():
     r = invoke("todo_add", {"content": "verify_todo_1"})
     ok = r.get("ok") and "added" in r.get("result", "")
@@ -435,7 +323,7 @@ def parallel_check(name, tool, build_args):
 
 def main():
     print("=" * 60)
-    print("VERIFICATION: 22 tools + parallel sanity checks")
+    print("VERIFICATION: 14 tools + parallel sanity checks")
     print("=" * 60)
     setup()
 
@@ -445,10 +333,6 @@ def main():
         test_read_file,
         test_glob, test_grep, test_list_dir, test_symbols,
         test_web_search, test_web_fetch,
-        test_save_fact, test_search_memory,
-        test_clipboard_read, test_clipboard_write,
-        test_screenshot,
-        test_generate_image, test_generate_music, test_generate_video,
         test_todo_add, test_todo_done, test_todo_remove, test_todo_clear,
     ]
     for t in tests:
@@ -474,9 +358,9 @@ def main():
     parallel_check("web_fetch (different public URLs)",
                   "web_fetch",
                   lambda i: {"url": "https://example.com"})
-    parallel_check("search_memory (same query)",
-                  "search_memory",
-                  lambda i: {"query": "verify"})
+    parallel_check("grep (same pattern, racing)",
+                  "grep",
+                  lambda i: {"pattern": "PAR", "path": TESTDIR})
 
     teardown()
 

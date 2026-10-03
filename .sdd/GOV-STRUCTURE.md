@@ -199,12 +199,17 @@ neurox/  (meta-repo)
 ├── client/web/  (submodule)  ← código del cliente web
 │   └── .sdd/                 ← SOT local del cliente
 │
-└── mcps/
-    ├── memory/
-    ├── voice/
-    ├── clickup/
-    └── playwright/
+└── daemon/
+    ├── core/                  (servidor HTTP + sesión + auth)
+    ├── tools-engine/          (las 14 tools nativas)
+    ├── crates/agent-lib/      (identity, tools_filter)
+    └── agents/                (subprocess por sesión)
 ```
+
+> Nota: hasta 2026-10-03 hubo un `mcps/` con `memory/`, `voice/`,
+> `clickup/` y `playwright/`. Los MCPs ya no forman parte de neurox: el
+> daemon no tiene subsistema de plugins y las rutas `/v1/mcps` se
+> eliminaron.
 
 Cada sub-repo hereda los principios globales (`CONSTITUTION.md`,
 `GOVERNANCE.md`, GOV-STRUCTURE.md, `GLOSSARY.md`) y puede tener su

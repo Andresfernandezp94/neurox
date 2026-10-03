@@ -1,6 +1,6 @@
 # Auditoría consolidada de tools del daemon neurox
 
-**Fecha:** 2026-09-01
+**Fecha:** 2026-09-01 · **Actualizado:** 2026-10-03
 **Daemon version:** v0.4.0
 **Endpoint:** http://127.0.0.1:7878
 **Auditor:** opencode (model MiniMax-M3) bajo dirección de usuario
@@ -12,7 +12,7 @@
 
 | | |
 |---|---|
-| **Tools auditadas** | 18 de 21 (todas excepto `web_search` que no tenía gaps, y los 3 `media_*` que se auditaron como grupo) |
+| **Tools auditadas** | 18 de 21 en su momento. 8 de ellas ya no existen (ver "Tools retiradas") |
 | **Gaps totales encontrados** | ~30 |
 | **Gaps críticos (seguridad)** | 6 |
 | **Gaps altos (race/crash)** | 6 |
@@ -23,6 +23,10 @@
 | **Líneas de código modificadas** | ~1500 |
 | **Módulos nuevos** | `tools/atomic_store.rs`, `tools/url_safety.rs` |
 | **Commits** | 10 (incluyendo refactor y cleanup) |
+
+**Estado actual: 14 tools.** Esta auditoría cubrió las 22 que había en 2026-09-01.
+Desde entonces se retiraron las de media, memoria y escritorio, más el subsistema
+de plugins. Ver "Tools retiradas" al final para el detalle.
 
 **Veredicto global: el daemon tenía 6 vulnerabilidades críticas de seguridad que han sido arregladas:**
 
@@ -41,12 +45,16 @@
 | Commit | Descripción |
 |---|---|
 | `c107d2c` | Audit + security fixes en 7 tools: shell, write_file, read_file, todo_*, grep, glob/list_dir, web_fetch — 25 gaps |
-| `ad1f4fc` | save_fact race + extracción del helper `atomic_store` reusable |
-| `113ab16` | search_memory: missing file + non-string query bugs |
-| `252244d` | clipboard_read ahora requiere aprobación |
-| `13dfed3` | Path-traversal en generate_image + generate_video filename |
+| `ad1f4fc` | save_fact race + extracción del helper `atomic_store` reusable ⚰️ |
+| `113ab16` | search_memory: missing file + non-string query bugs ⚰️ |
+| `252244d` | clipboard_read ahora requiere aprobación ⚰️ |
+| `13dfed3` | Path-traversal en generate_image + generate_video filename ⚰️ |
 | `ec98d93` | Cleanup: dead `mut` warning |
-| `9768832` | SSRF guard en media downloads + extracción de `url_safety` |
+| `9768832` | SSRF guard en media downloads + extracción de `url_safety` ⚰️ |
+
+⚰️ = el commit toca una tool que ya no existe. El trabajo sobre
+`atomic_store` y `url_safety` sigue vigente: los usan `todo_*` y
+`web_fetch`, respectivamente.
 
 ---
 
@@ -60,7 +68,7 @@
 | `write_file` | ✅ | 5 gaps (W1-W5) — atomic_write + flock + retry-from-reader |
 | `read_file` | ✅ | 6 gaps — capacity overflow fix (CRASH), ENOENT retry, overflow safety |
 | `todo_*` | ✅ | 4 gaps (T-R1 a T-R4) — Mutex global + idempotent done |
-| `save_fact` | ✅ | 2 gaps (YAML corruption + lost updates) — refactored to use shared atomic_store |
+| ⚰️ `save_fact` | ✅ | 2 gaps (YAML corruption + lost updates) — **tool retirada** |
 
 ### Tier 2: Sandbox / SSRF (6 gaps arreglados)
 
@@ -72,18 +80,18 @@
 | `symbols` | ✅ | 0 gaps (usa `resolve_under_workspace`) |
 | `web_fetch` | ✅ | 4 gaps — binary content, SSRF, SSRF redirect, 404 handling |
 | `web_search` | ✅ | 0 gaps (delega a `ddgr` externo) |
-| `generate_image` | ✅ | 2 gaps (path-traversal + SSRF in download) |
-| `generate_music` | ✅ | 2 gaps (SSRF in download + size cap) |
-| `generate_video` | ✅ | 2 gaps (path-traversal + SSRF in download) |
+| ⚰️ `generate_image` | ✅ | 2 gaps (path-traversal + SSRF) — **tool retirada** |
+| ⚰️ `generate_music` | ✅ | 2 gaps (SSRF + size cap) — **tool retirada** |
+| ⚰️ `generate_video` | ✅ | 2 gaps (path-traversal + SSRF) — **tool retirada** |
 
-### Tier 3: Desktop / Misc (3 gaps arreglados)
+### Tier 3: Desktop / Memory — retiradas (3 gaps arreglados)
 
 | Tool | Estado | Notas |
 |---|---|---|
-| `clipboard_read` | ✅ | 1 gap (CRÍTICO) — sin approval, leak de secrets |
-| `clipboard_write` | ✅ | 0 gaps (ya tenía approval) |
-| `screenshot` | ✅ | 0 gaps (noApproval aceptable para screenshot) |
-| `search_memory` | ✅ | 2 gaps (missing file + non-string query) |
+| ⚰️ `clipboard_read` | ✅ | 1 gap (CRÍTICO) — **tool retirada** |
+| ⚰️ `clipboard_write` | ✅ | 0 gaps — **tool retirada** |
+| ⚰️ `screenshot` | ✅ | 0 gaps — **tool retirada** |
+| ⚰️ `search_memory` | ✅ | 2 gaps (missing file + non-string query) — **tool retirada** |
 
 ---
 
@@ -93,7 +101,7 @@
 
 Helper reusable para tools con backing store persistente:
 - `mutate_store(path, closure)` — acquire Mutex, read file, run closure, atomic write
-- Usado por `todo_*` y `save_fact`
+- Usado por `todo_*` (los otros que lo consumían se retiraron)
 - Patrón: pre-create target + write tmpfile + atomic rename
 
 ### `tools/url_safety.rs` (90 líneas)
@@ -102,7 +110,7 @@ Helper SSRF guard para tools que fetch URLs:
 - `is_safe_target(url)` — resolve DNS, rechaza loopback/private/link-local
 - `is_unsafe_ip(ip)` — categoriza IPv4/IPv6
 - `MAX_DOWNLOAD_BYTES` (100 MiB) — cap de tamaño de descarga
-- Usado por `web_fetch`, `generate_image`, `generate_music`, `generate_video`
+- Usado por `web_fetch` (los `generate_*` que lo compartían se retiraron)
 
 ---
 
@@ -206,14 +214,37 @@ daemon/tools-engine/src/tools/read/grep.rs                       (G1 + 1 test)
 daemon/tools-engine/src/tools/read/web_fetch.rs                  (W1-W3 + refactor to use url_safety)
 daemon/tools-engine/src/tools/task_management/todo_store.rs     (atomic_store refactor)
 daemon/tools-engine/src/tools/task_management/todo_*.rs        (use mutate_todos)
-daemon/tools-engine/src/tools/memory/save_fact.rs              (use mutate_store + 1 test)
-daemon/tools-engine/src/tools/memory/search_memory.rs          (SM1+SM2 + 2 tests)
-daemon/tools-engine/src/tools/desktop/clipboard_read.rs        (approval)
-daemon/tools-engine/src/tools/media/mod.rs                      (sanitize_filename)
-daemon/tools-engine/src/tools/media/generate_image.rs           (path-traversal + SSRF + size cap)
-daemon/tools-engine/src/tools/media/generate_music.rs           (SSRF + size cap)
-daemon/tools-engine/src/tools/media/generate_video.rs           (path-traversal + SSRF + size cap)
+⚰️ los siguientes ya NO EXISTEN (borrados el 2026-10-03):
+daemon/tools-engine/src/tools/memory/        (save_fact, search_memory)
+daemon/tools-engine/src/tools/desktop/       (clipboard_read, clipboard_write, screenshot)
+daemon/tools-engine/src/tools/media/         (generate_image, generate_music, generate_video)
 ```
+
+## Tools retiradas (2026-10-03)
+
+Se eliminaron 8 tools y el subsistema de plugins. El motivo fue de alcance
+de producto (quedarse con las básicas), no de seguridad — los gaps que
+esta auditoría encontró en ellas ya estaban arreglados.
+
+| Tool | Categoría | Último estado |
+|---|---|---|
+| `generate_image` | media | 2 gaps arreglados |
+| `generate_music` | media | 2 gaps arreglados |
+| `generate_video` | media | 2 gaps arreglados |
+| `save_fact` | memory | 2 gaps arreglados |
+| `search_memory` | memory | 2 gaps arreglados |
+| `clipboard_read` | desktop | 1 gap (crítico) arreglado |
+| `clipboard_write` | desktop | 0 gaps |
+| `screenshot` | desktop | 0 gaps |
+
+Las 14 que quedan: `read_file`, `write_file`, `list_dir`, `grep`, `glob`,
+`symbols`, `shell`, `web_fetch`, `web_search`, `todo_add`, `todo_done`,
+`todo_list`, `todo_remove`, `todo_clear`.
+
+También se fue el subsistema de plugins completo: `core/src/plugins/`, las
+5 rutas `/v1/mcps`, el subcomando CLI `neurox plugin`, y del cliente los
+módulos `api/mcps`, `api/voice`, `useVoiceCall`, `MCP.tsx`, `MicButton`,
+`VoiceCallOverlay` y `useMediaBlob`.
 
 ## Audits docs (en `/home/andres_fernandez/.agents/tmp/`)
 
@@ -226,7 +257,6 @@ audit_todo.md
 audit_grep.md
 audit_glob_listdir.md
 audit_web.md
-audit_save_fact.md
 tools_benchmark.md        (original del usuario)
 ```
 

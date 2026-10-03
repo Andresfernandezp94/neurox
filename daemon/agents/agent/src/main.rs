@@ -164,14 +164,13 @@ async fn main() -> anyhow::Result<()> {
     // enforced at runtime).
     if let Some(m) = &manifest_pre {
         eprintln!(
-            "[agent:{agent_id}] v2 manifest: harness={} skills_dir={} sampling_temp={:?} sampling_top_p={:?} sampling_max_tokens={:?} tools.policy={} mcp_servers={} memory.short_term={} memory.long_term.path={:?} memory.episodic.path={:?} memory.semantic.path={:?} guardrails.input={} guardrails.output={} output.type={} streaming.enabled={} budget.max_runtime_secs={:?} budget.cost_limit_usd={:?} stop.max_iterations={} stop.max_tool_calls={:?} sub_agents={} sandbox.network={} sandbox.process_spawn={} obs.log_level={} obs.trace={} obs.metrics={}",
+            "[agent:{agent_id}] v2 manifest: harness={} skills_dir={} sampling_temp={:?} sampling_top_p={:?} sampling_max_tokens={:?} tools.policy={} memory.short_term={} memory.long_term.path={:?} memory.episodic.path={:?} memory.semantic.path={:?} guardrails.input={} guardrails.output={} output.type={} streaming.enabled={} budget.max_runtime_secs={:?} budget.cost_limit_usd={:?} stop.max_iterations={} stop.max_tool_calls={:?} sub_agents={} sandbox.network={} sandbox.process_spawn={} obs.log_level={} obs.trace={} obs.metrics={}",
             m.files.harness.len(),
             m.files.skills_dir,
             m.llm.sampling.temperature,
             m.llm.sampling.top_p,
             m.llm.sampling.max_tokens,
             m.tools.policy.r#type,
-            m.mcp_servers.len(),
             m.memory.short_term.r#type,
             m.memory.long_term.path,
             m.memory.episodic.path,

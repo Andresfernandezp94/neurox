@@ -108,35 +108,9 @@ pub struct ToolsConfig {
     #[serde(default)]
     pub policy: ToolPolicy,
     /// Per-tool config. Free-form — each tool can have its own keys
-    /// (e.g. `generate_video.default_duration_secs`).
+    /// (e.g. `web_fetch.mode`).
     #[serde(default)]
     pub config: HashMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct McpServer {
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub transport: String,
-    #[serde(default)]
-    pub command: Option<String>,
-    #[serde(default)]
-    pub args: Vec<String>,
-    #[serde(default)]
-    pub url: Option<String>,
-    #[serde(default)]
-    pub auth: Option<McpAuth>,
-    #[serde(default)]
-    pub env: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct McpAuth {
-    #[serde(default)]
-    pub r#type: String,
-    #[serde(default)]
-    pub token_env: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -295,8 +269,6 @@ pub struct Manifest {
     pub llm: LlmConfig,
     #[serde(default)]
     pub tools: ToolsConfig,
-    #[serde(default)]
-    pub mcp_servers: Vec<McpServer>,
     #[serde(default)]
     pub memory: MemoryConfig,
     #[serde(default)]

@@ -41,7 +41,7 @@ checked out under.
 | `@/daemon/.sdd/INDEX.md` | `~/Proyectos/neurox/daemon/.sdd/INDEX.md` |
 | `@/daemon/core/src/lib.rs` | `~/Proyectos/neurox/daemon/core/src/lib.rs` |
 | `@/client/web/src/App.tsx` | `~/Proyectos/neurox/client/web/src/App.tsx` |
-| `@/mcps/memory/memoryd/src/main.rs` | `~/Proyectos/neurox/mcps/memory/memoryd/src/main.rs` |
+| `@/daemon/tools-engine/src/tools/mod.rs` | `~/Proyectos/neurox/daemon/tools-engine/src/tools/mod.rs` |
 
 ## Editor support
 
@@ -54,5 +54,5 @@ authoritative.
 
 Older commits referenced `@/repos/<name>/...`. That layout was
 abandoned — sub-repos now live at `@/<sub-repo>/` directly (e.g.
-`@/daemon/`, `@/mcps/voice/`). Anything still pointing at `repos/`
+`@/daemon/`). Anything still pointing at `repos/`
 is stale and should be updated.
