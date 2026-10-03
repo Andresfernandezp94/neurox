@@ -22,7 +22,9 @@
   flex: 1;
   min-height: 0;
   height: 100%;
-  background: var(--bg);
+  /* EP-2026-10-03: transparente — la superficie la pone `.chat-layout`.
+   * Ver el comentario de `.chat-layout`. */
+  background: transparent;
   /* EP-0026-UX: removemos border + radius para look full-bleed limpio.
      El contenedor del chat ocupa el ancho del viewport sin marco. */
   border: none;
@@ -31,11 +33,22 @@
 
 /* ─── Chat Layout ─── */
 
+/* EP-2026-10-03: la columna del chat es UNA sola superficie `--bg`.
+ *
+ * Antes cada bloque pintaba `--bg` por su cuenta: `.chat` en el
+ * transcript y `.chat__footer` en el pie. `--bg` es `rgba(0,0,0,0.92)`,
+ * o sea translúcido: dos capas de 92% negro apiladas dan ~99.4% y el
+ * footer se veía como un bloque más oscuro que el chat.
+ *
+ * La solución es que la superficie la aplique el contenedor y los hijos
+ * sean transparentes. Es la diferencia entre "el mismo color" y "no
+ * tener color": si dos hermanos pintan el mismo rgba, se suman. */
 .chat-layout {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  background: var(--bg);
 }
 
 .chat-layout > .chat {

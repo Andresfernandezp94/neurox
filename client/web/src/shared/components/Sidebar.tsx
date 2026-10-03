@@ -19,7 +19,7 @@
 // click — se eliminó el hover-to-expand.
 // ============================================================
 
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   IconConfig,
   IconChat,
@@ -72,6 +72,13 @@ export function Sidebar({ view, onTabChange, hidden = false, onLogout }: Sidebar
   // footer), asi que el estado arranca cerrado y solo se abre al tocar.
   const [actionsOpen, setActionsOpen] = useState(false);
   const { isExpanded, toggle: toggleFullscreen } = useAppFullscreen();
+  // EP-2026-10-03: el menu de acciones del avatar se superpone sobre el
+  // nav (en mobile `.sidebar-footer-actions` es `position: absolute;
+  // bottom: 100%`, o sea queda ARRIBA del footer, encima de los ultimos
+  // items). Sin cerrar por click fuera, los clicks de "sesiones" o
+  // "agentes" los intercepta el menu y pareciera que se selecciona el
+  // avatar, y en mobile no hay teclado a la vista.
+  const footerRef = useRef<HTMLDivElement | null>(null);
 
   // Escape cierra el menu. Sin esto el unico modo de cerrarlo es volver a
   // tocar el avatar, y en mobile no hay teclado a la vista.
@@ -82,6 +89,22 @@ export function Sidebar({ view, onTabChange, hidden = false, onLogout }: Sidebar
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [actionsOpen]);
+
+  // Click fuera cierra el menu. `pointerdown` y no `click` a proposito:
+  // con `click` el menu seguiria abierto durante el click que abrio el
+  // otro elemento, y ademas `pointerdown` corre antes de que el destino
+  // procese su propio click, asi que la navegacion no se pierde.
+  useEffect(() => {
+    if (!actionsOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const el = footerRef.current;
+      // `contains` incluye al propio footer: tocar el avatar mantiene
+      // abierto (el toggle del trigger lo gestiona).
+      if (el && !el.contains(e.target as Node)) setActionsOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, [actionsOpen]);
 
   // Al pasar a desktop el menu se cierra solo: las acciones vuelven a estar
@@ -194,6 +217,7 @@ export function Sidebar({ view, onTabChange, hidden = false, onLogout }: Sidebar
         <div className="sidebar-panel__spacer" />
 
         <div
+          ref={footerRef}
           className={`sidebar-panel__footer${
             actionsOpen ? " sidebar-panel__footer--actions-open" : ""
           }`}

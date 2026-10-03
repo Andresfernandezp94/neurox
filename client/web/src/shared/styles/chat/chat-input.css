@@ -17,19 +17,15 @@
   padding: 0.75rem 0.5rem;
   padding-top: 0;
   padding-bottom: 1rem;
-  /* El footer lleva su propia superficie, del color de la app (`--bg`,
-   * el mismo que usa `.chat`). Antes era `transparent`.
+  /* EP-2026-10-03: transparente, como las barras de context/scope que
+   * se quitaron. La superficie la aplica `.chat-layout` (su hermano en
+   * vez de su padre, asi que antes cada uno pintaba `--bg` y, siendo
+   * `rgba(0,0,0,0.92)`, las dos capas se sumaban y el footer se leia
+   * como un bloque más oscuro que el transcript).
    *
-   * Que sea el mismo color que el fondo NO es lo mismo que no tener
-   * fondo: lo que se evita es que el bloque dependa de lo que haya
-   * detras y de que cada capa que se agregue arriba lo vuelva a
-   * transparentar. La delimitacion visual la aporta la linea de acento
-   * de arriba, no un gris nuevo que compita con la paleta.
-   *
-   * El footer esta en flow (`position: static`), no hay contenido
-   * scrolleando por detras, asi que no hace falta translucidez: opaco se
-   * lee mejor y no cuesta un blur. */
-  background: var(--bg);
+   * La delimitación visual sigue viniendo de la línea de acento de
+   * arriba, no de un gris nuevo. */
+  background: transparent;
   border: none;
   /* EP-0026-UX: línea 2px arriba del footer para delimitar inicio. */
   border-top: 2px solid var(--accent);

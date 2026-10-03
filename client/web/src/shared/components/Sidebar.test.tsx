@@ -153,6 +153,32 @@ describe("Sidebar", () => {
       expect(avatar().getAttribute("aria-expanded")).toBe("false");
     });
 
+    it("click fuera cierra el menu (EP-2026-10-03)", () => {
+      // El menu se superpone sobre el nav en mobile, asi que sin esto
+      // los clicks de "sesiones"/"agentes" los interceptaba el menu y
+      // pareciera que se selecciona el avatar.
+      renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
+
+      fireEvent.click(avatar());
+      expect(footer().className).toContain("sidebar-panel__footer--actions-open");
+
+      // Click en un item del nav: cierra el menu Y el click llega al item.
+      fireEvent.pointerDown(screen.getByTestId("sidebar-nav-chat"));
+      expect(footer().className).not.toContain("sidebar-panel__footer--actions-open");
+    });
+
+    it("un click DENTRO del footer no cierra el menu", () => {
+      renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
+
+      fireEvent.click(avatar());
+      expect(footer().className).toContain("sidebar-panel__footer--actions-open");
+
+      // Tocar el propio footer (o el avatar) no debe cerrarlo: el toggle
+      // del trigger decide.
+      fireEvent.pointerDown(footer());
+      expect(footer().className).toContain("sidebar-panel__footer--actions-open");
+    });
+
     it("Escape cierra el menu", () => {
       renderWithProviders(<Sidebar view="chat" onTabChange={onTabChange} />);
 

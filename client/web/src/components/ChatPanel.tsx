@@ -12,7 +12,6 @@ import {
   getSessionMessages,
   listSessions,
 } from "../api/sessions";
-import { getDefaultAgentStatus, type DefaultAgentResponse } from "../api/default";
 import { countTranscriptMatches } from "./chat/searchTranscript";
 import { hydrateMessages } from "./chat/streaming/hydrateHistory";
 import type { Message, MessageMetrics } from "../types";
@@ -86,11 +85,14 @@ export function ChatPanel(_: ChatPanelProps = {}) {
   // visual, sin Fullscreen API).
   //
   // El estado NO es local: vive en `useAppFullscreen`, un store a nivel de
-  // modulo, porque hay un segundo control del mismo estado en la barra de
-  // mobile (que vive en el Sidebar, fuera de este arbol). Con estado local
-  // los dos iconos podrian contradecirse.
+  // modulo, porque el Sidebar tiene su propio control de pantalla
+  // completa (EP-2026-10-03: se saco el boton del footer del chat, pero
+  // el de mobile sigue). Con estado local los dos podrian contradecirse.
+  //
+  // Aca solo se lee `isFocusMode` para mantener la clase de fallback en
+  // browsers sin Fullscreen API.
   const chatLayoutRef = useRef<HTMLDivElement | null>(null);
-  const { isExpanded, isFocusMode, toggle: toggleExpanded } = useAppFullscreen();
+  const { isFocusMode } = useAppFullscreen();
 
   // Sync fallback class on chat-layout root
   useEffect(() => {
@@ -247,29 +249,6 @@ export function ChatPanel(_: ChatPanelProps = {}) {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showHistory]);
-
-  // DefaultAgent status polling (real context info). EP-0024: also surfaces
-  // workspace cwd, git_branch, and the sandbox scope the agent is
-  // currently receiving so the user can verify what's in effect.
-  const [defaultAgent, setDefaultAgent] = useState<DefaultAgentResponse | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const status = await getDefaultAgentStatus();
-        if (!cancelled) setDefaultAgent(status);
-      } catch {
-        /* default status is best-effort; the bar will just render what
-           it has. */
-      }
-    };
-    void poll();
-    const interval = setInterval(() => void poll(), 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [activeTab?.messages.length]);
 
   // Reset input when switching tabs.
   //
@@ -713,9 +692,6 @@ useLayoutEffect(() => {
         }}
         showHistory={showHistory}
         onToggleHistory={() => setShowHistory(!showHistory)}
-        isExpanded={isExpanded}
-        onToggleExpanded={toggleExpanded}
-        defaultAgent={defaultAgent}
         input={input}
         onInputChange={setInput}
         onKeyDown={handleKeyDown}

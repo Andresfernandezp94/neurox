@@ -1,19 +1,20 @@
 // ChatFooter — sección inferior del ChatPanel.
-// Contiene: tools bar (model, agent, history/sidebar/fullscreen) +
-// context bar (tokens, msgs, skills, facts) + workspace bar (cwd, branch,
-// sandbox) + input area (textarea + send/cancel).
+// Contiene: tools bar (model, agent, history) + input area
+// (textarea + send/cancel).
+//
+// EP-2026-10-03: se sacaron la context bar (tokens/msgs/skills/facts),
+// la workspace bar (cwd/branch/sandbox) y el boton de maximizar. El
+// footer queda con lo que se usa a diario; el resto de esa info sigue
+// disponible en StatusPanel > DefaultAgent.
 
 import { PanelToggle } from "../shared/components/PanelToggle";
 import { ModelSelector, type ModelSelection } from "./ModelSelector";
 import { AgentSelector } from "./AgentSelector";
 import {
   IconHistory,
-  IconMaximize,
-  IconMinimize,
   IconSend,
   IconClose,
 } from "../shared/components/Icons";
-import type { DefaultAgentResponse } from "../api/default";
 
 export interface ChatFooterProps {
   // tools bar
@@ -24,16 +25,6 @@ export interface ChatFooterProps {
   onChangeAgent: (id: string) => void;
   showHistory: boolean;
   onToggleHistory: () => void;
-  /**
-   * True cuando el chat está "expandido": fullscreen real del shell
-   * (Fullscreen API sobre `.app`) o fallback CSS (chat-layout--focus)
-   * en browsers sin la API.
-   */
-  isExpanded: boolean;
-  onToggleExpanded: () => void;
-
-  // context bar
-  defaultAgent: DefaultAgentResponse | null;
 
   // textarea
   input: string;
@@ -53,9 +44,6 @@ export function ChatFooter({
   onChangeAgent,
   showHistory,
   onToggleHistory,
-  isExpanded,
-  onToggleExpanded,
-  defaultAgent,
   input,
   onInputChange,
   onKeyDown,
@@ -90,80 +78,8 @@ export function ChatFooter({
             >
               <IconHistory />
             </button>
-            <button
-              type="button"
-              className={`chat__bar-actions__btn${isExpanded ? " chat__bar-actions__btn--active" : ""}`}
-              onClick={onToggleExpanded}
-              title={isExpanded ? "Exit fullscreen" : "Enter fullscreen"}
-              aria-label={isExpanded ? "Exit fullscreen" : "Enter fullscreen"}
-              aria-pressed={isExpanded}
-              data-testid="chat-fullscreen-toggle"
-            >
-              {isExpanded ? <IconMinimize /> : <IconMaximize />}
-            </button>
           </div>
         </div>
-
-        {/* Context bar */}
-        <PanelToggle id="chat-context-bar">
-          <div className="chat__bar chat__bar--context">
-            <span className="chat__context-label">CONTEXT:</span>
-            <span className="chat__context-tokens">
-              {defaultAgent?.context?.tokens_estimated ?? 0} tok
-            </span>
-            <span className="chat__metrics-sep">·</span>
-            <span className="chat__context-msgs">
-              {defaultAgent?.context?.messages ?? 0} msgs
-            </span>
-            {defaultAgent?.context?.needs_compaction && (
-              <span className="chat__context-warn">⚠ needs compaction</span>
-            )}
-            {defaultAgent?.context?.has_summary && (
-              <span className="chat__context-compacted">✓ compacted</span>
-            )}
-            <span className="chat__metrics-sep">·</span>
-            <span className="chat__context-meta">
-              {defaultAgent?.skills ?? 0} skills · {defaultAgent?.facts ?? 0} facts
-            </span>
-          </div>
-        </PanelToggle>
-
-        {/* Workspace bar */}
-        <PanelToggle id="chat-workspace-bar">
-          <div
-            className="chat__bar chat__bar--workspace"
-            data-testid="chat-workspace-bar"
-          >
-            <span className="chat__context-label">SCOPE:</span>
-            <span
-              className="chat__context-cwd"
-              data-testid="chat-cwd"
-              title={defaultAgent?.cwd ?? undefined}
-            >
-              {defaultAgent?.cwd ?? "cwd?"}
-            </span>
-            {defaultAgent?.git_branch && (
-              <>
-                <span className="chat__metrics-sep">·</span>
-                <span
-                  className="chat__context-branch"
-                  data-testid="chat-git-branch"
-                  title={`git: ${defaultAgent.git_branch}`}
-                >
-                  ⎇ {defaultAgent.git_branch}
-                </span>
-              </>
-            )}
-            <span className="chat__metrics-sep">·</span>
-            <span
-              className="chat__context-sandbox"
-              data-testid="chat-sandbox-summary"
-              data-sandbox-enabled={defaultAgent?.sandbox?.enabled ? "true" : "false"}
-            >
-              sandbox: {defaultAgent?.sandbox ? "enabled" : "n/a"}
-            </span>
-          </div>
-        </PanelToggle>
 
         {/* Input */}
         <PanelToggle id="chat-input">
