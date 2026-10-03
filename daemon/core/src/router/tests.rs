@@ -66,7 +66,6 @@ async fn build_test_state() -> (AppState, TempDir) {
         Arc::new(SessionAgentPool::default()),
         session,
         Arc::new(crate::skills::SkillsRegistry::new()),
-        Arc::new(crate::plugins::PluginToolRegistry::new(tools)),
     ));
 
     let auth = AuthLayer::new();
@@ -91,7 +90,7 @@ async fn build_test_state() -> (AppState, TempDir) {
 
 #[tokio::test]
 async fn root_path_returns_404_since_daemon_is_api_only() {
-    // standalone `neurox-mcp-gui` plugin on its own port.
+    // standalone admin GUI on its own port.
     let (state, _tmp) = build_test_state().await;
     let app = router(state);
 

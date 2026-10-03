@@ -52,8 +52,7 @@
 # └──────────────────────────────────────────────────────────────────────────┘
 #
 # ┌─ 5. INTEGRACIONES ───────────────────────────────────────────────────────┐
-# | Plugins y tool engine.                                                   │
-# │   NEUROX_MEMORY_URL / NEUROX_MEMORY_WORKSPACE   plugin de memoria        │
+# | Tool engine.                                                              │
 # │   NEUROX_IDENTITY_DIR                            identidad de los agentes│
 # │   NEUROX_TODO_DIR                               store de tareas (todos)  │
 # │   NEUROX_TOOLS_ALLOWLIST                        tools habilitadas         │

@@ -7,8 +7,8 @@
 //!
 //! What lives here:
 //!
-//! - `tools` — the 17 native tools (read / write / shell / media /
-//!   memory / desktop) plus the `Tool` trait and `ToolRegistry`.
+//! - `tools` — the 14 native tools (read / write / shell / todo /
+//!   web) plus the `Tool` trait and `ToolRegistry`.
 //! - `backend` — provider LLM backends (minimax, openai_compat,
 //!   anthropic). Used by the engine's `/v1/providers/:id/test`
 //!   endpoint and the model downloader. NOT used for chat (the

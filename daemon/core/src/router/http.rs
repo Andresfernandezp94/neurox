@@ -1,4 +1,4 @@
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Path, State};
 use axum::http::header;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -17,7 +17,6 @@ use uuid::Uuid;
 use crate::auth::UserContext;
 use crate::config::{EphemeralAgentSpec, PersistentAgentSpec, SessionAgentSpec};
 use crate::events::Event;
-use crate::plugins::PluginStatus;
 use crate::router::AppState;
 
 /// Lazy process start timestamp. Set on the first call to `health()`.
@@ -32,26 +31,8 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
     // EP-0007: also true when the new JWT-based auth is enabled.
     let auth_required = state.auth.auth.is_some();
 
-    // Snapshot the connected plugins once — they're shared across all
-    // sessions (tool proxy is daemon-wide).
-    let mcp_plugins: Vec<serde_json::Value> = state
-        .lifecycle
-        .plugin_registry
-        .list()
-        .into_iter()
-        .filter(|p| matches!(p.status, PluginStatus::Connected))
-        .map(|p| {
-            json!({
-                "name": p.name,
-                "status": p.status,
-                "tools": p.tools,
-                "skills": p.skills,
-            })
-        })
-        .collect();
-
     // Per-session detail: gather pid/process + model from SQLite +
-    // message count + plugin/MCP visibility.
+    // message count.
     let running = state.lifecycle.session_agents.list().await;
     let mut details: Vec<serde_json::Value> = Vec::with_capacity(running.len());
     for a in running {
@@ -80,7 +61,6 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
                 "messages": message_count,
                 "tokens_used": tokens_used,
             },
-            "mcp": mcp_plugins,
         }));
     }
 
@@ -115,7 +95,7 @@ pub async fn livez() -> StatusCode {
 }
 
 /// EP-0013 T-002: GET /readyz — readiness probe. 200 if all deps are
-/// healthy (SQLite, engine, plugin registry), 503 with JSON if any is
+/// healthy (SQLite, engine), 503 with JSON if any is
 /// degraded. Used by load balancers to decide if to send traffic.
 pub async fn readyz(State(state): State<Arc<AppState>>) -> Response {
     let mut degraded: Vec<&str> = Vec::new();
@@ -2187,8 +2167,7 @@ pub async fn list_approvals(State(state): State<Arc<AppState>>) -> Json<serde_js
 /// re-enable them) but report `enabled: false`.
 /// PR-11: invoke a registered tool by name. The body is a JSON object whose
 /// shape matches the tool's `parameters` schema. Triggers the existing
-/// `Tool::execute(path)` implementation — for plugin-registered tools this
-/// forwards to the plugin's HTTP surface via `PluginProxyTool`.
+/// `Tool::execute(path)` implementation.
 ///
 /// Approval gating: the chat-side flow (`handle_session_tool_call`) blocks
 /// on `requires_approval=true` tools and prompts the user. For this HTTP
@@ -3455,171 +3434,6 @@ fn parse_provider_kind(s: &str) -> Option<crate::config::LlmProviderKind> {
         "anthropic" => Some(crate::config::LlmProviderKind::Anthropic),
         _ => None,
     }
-}
-
-// ─── EP-0009: Dynamic plugin registration endpoints ─────────────────────────
-
-/// POST /v1/mcps — register a plugin dynamically.
-pub async fn register_plugin(
-    State(state): State<Arc<AppState>>,
-    Extension(ctx): Extension<crate::auth::UserContext>,
-    Json(body): Json<crate::plugins::PluginRegisterRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    // EP-0011 S-009: plugin registration is Admin-only. Operators can
-    // list plugins but not register new ones (would allow arbitrary
-    // tool injection).
-    if ctx.role != crate::auth::Role::Admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "admin role required for plugin registration".to_string(),
-        ));
-    }
-
-    if body.name.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "mcp name is required".into()));
-    }
-    if body.base_url.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "base_url is required".into()));
-    }
-    let plugin_state = state.lifecycle.plugin_registry.register(body);
-    state.emit(Event::McpRegistered {
-        name: plugin_state.name.clone(),
-        tools: plugin_state.tools.clone(),
-        skills: plugin_state.skills.clone(),
-    });
-    Ok(Json(json!({
-        "registered": plugin_state.name,
-        "tools": plugin_state.tools,
-        "skills": plugin_state.skills,
-        "status": plugin_state.status,
-    })))
-}
-
-/// POST /v1/mcps/:name/reconnect — attempt to reconnect to a plugin.
-pub async fn reconnect_plugin(
-    State(state): State<Arc<AppState>>,
-    Path(name): Path<String>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    state.lifecycle
-        .plugin_registry
-        .reconnect(&name)
-        .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
-    Ok(Json(json!({"reconnected": name})))
-}
-
-/// GET /v1/mcps — list all registered plugins with their state.
-pub async fn list_plugins(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    let plugins = state.engine.tools.list_specs();
-    Json(json!({"plugins": plugins}))
-}
-
-/// GET /v1/mcps/catalog — list every plugin available in the
-/// configured registry (`plugins_registry` in `config.yaml`), with each
-/// entry marked as `installed` if it is currently registered via
-/// `POST /v1/mcps`. Cached in memory for five minutes; on error the
-/// endpoint falls back to the empty catalog with the underlying error.
-pub async fn list_plugins_catalog(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    let url = state.config.plugins_registry.clone();
-    let installed: std::collections::HashSet<String> = state
-        .lifecycle
-        .plugin_registry
-        .list()
-        .into_iter()
-        .map(|p| p.name)
-        .collect();
-
-    let (entries, error) = match url.as_deref() {
-        Some(u) => match crate::plugins::Registry::fetch(u).await {
-            Ok(reg) => {
-                let mut list = serde_json::Map::new();
-                for (id, entry) in reg.plugins {
-                    let latest = entry
-                        .versions
-                        .keys()
-                        .max()
-                        .cloned()
-                        .unwrap_or_else(|| "0.0.0".to_string());
-                    let info = entry.versions.get(&latest);
-                    list.insert(
-                        id.clone(),
-                        json!({
-                            "id": id,
-                            "repo": entry.repo,
-                            "description": entry.description,
-                            "latest_version": latest,
-                            "installed": installed.contains(&id),
-                            "installed_in_daemon": installed.contains(&id),
-                            "artifact": info.map(|v| v.artifact.clone()),
-                            "sha256": info.map(|v| v.sha256.clone()),
-                        }),
-                    );
-                }
-                (list, None)
-            }
-            Err(e) => (
-                serde_json::Map::new(),
-                Some(format!("registry fetch failed: {e}")),
-            ),
-        },
-        None => (
-            serde_json::Map::new(),
-            Some("no plugins_registry configured".to_string()),
-        ),
-    };
-
-    Json(json!({
-        "installed": installed.into_iter().collect::<Vec<_>>(),
-        "registry_url": url,
-        "plugins": entries,
-        "error": error,
-    }))
-}
-
-/// DELETE /v1/mcps/:name — deregister an MCP.
-///
-/// Removes the MCP from the in-memory registry (tools become unavailable
-/// to new sessions; existing sessions that already invoked the tool
-/// keep working until they finish). Emits `McpUnregistered` via WS so
-/// the admin SPA can refresh its listing.
-///
-/// Useful for testing (remove a smoke-test MCP without restarting the
-/// daemon) and as a cleanup path.
-pub async fn unregister_mcp(
-    State(state): State<Arc<AppState>>,
-    Path(name): Path<String>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let removed = state.lifecycle.plugin_registry.remove(&name);
-    if !removed {
-        return Err((
-            StatusCode::NOT_FOUND,
-            format!("mcp '{name}' not registered"),
-        ));
-    }
-    state.emit(Event::McpUnregistered { name: name.clone() });
-    Ok(Json(json!({ "unregistered": name })))
-}
-
-/// POST /v1/mcps/clean — drop every registered MCP.
-///
-/// Drains the in-memory registry and emits `McpUnregistered` for each.
-/// Useful as a single-call "factory reset" for testing. The four real
-/// MCPs (memory/llmd/clickup/voice) re-register themselves within 60s.
-pub async fn clean_mcps(
-    State(state): State<Arc<AppState>>,
-) -> Json<serde_json::Value> {
-    let names: Vec<String> = state
-        .lifecycle
-        .plugin_registry
-        .list()
-        .into_iter()
-        .map(|p| p.name)
-        .collect();
-    for name in &names {
-        state.lifecycle.plugin_registry.remove(name);
-        state.emit(Event::McpUnregistered { name: name.clone() });
-    }
-    Json(json!({ "removed": names.len(), "names": names }))
 }
 
 // ─── EP-0017-04: Env management endpoints ───────────────────────────────────

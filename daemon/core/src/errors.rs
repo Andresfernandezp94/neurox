@@ -35,7 +35,7 @@ use std::time::Duration;
 /// Domain-level error for the agentic loop and tool calls.
 ///
 /// LLM-client implementations (MiniMax, OpenAI-compat) and tool
-/// implementations (ProxyTool, future plugins) translate raw failures
+/// implementations translate raw failures
 /// (HTTP status, network errors, etc.) into one of these variants so
 /// callers can route on them (retry, surface-to-user, fail-fast)
 /// without parsing strings.

@@ -11,14 +11,14 @@
 //! - Works uniformly on macOS dev hosts and Linux prod hosts.
 //!
 //! Scope:
-//! - **In-process** consumers (default, tools, plugins in-process) see
+//! - **In-process** consumers (default, tools) see
 //!   the new value immediately on the next `std::env::var(...)` call.
 //! - **Subprocesses spawned after the change** inherit the new env
 //!   automatically (fork copies the process env).
 //! - **Subprocesses spawned before the change** keep their frozen env
 //!   until restarted — restarting the orchestrator-managed services is
 //!   a separate concern (the operator can `POST /start` to recycle them).
-//! - **systemd plugins** (`memory`, `voice`, …) read `EnvironmentFile`
+//! - **External components** read `EnvironmentFile`
 //!   only at `daemon-reload + restart`. They are NOT notified by this
 //!   watcher (out of scope for the MVP).
 

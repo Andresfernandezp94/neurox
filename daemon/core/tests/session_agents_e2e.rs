@@ -23,7 +23,6 @@ use neurox::auth::{issue_token, AuthState, JwtSecret, ReauthTokens, Role, UserSt
 use neurox::config::{
     AgentsConfig, CoreConfig, LlmConfig, SandboxConfig, SessionAgentSpec, SessionAgentsConfig,
 };
-use neurox::plugins::PluginToolRegistry;
 use neurox::registry::Registry;
 use neurox::router::{router, AppState};
 use neurox::router::state::LifecycleLayer;
@@ -127,7 +126,6 @@ impl TestRig {
             spawner_concurrency: 8,
             in_process: vec![],
             services: vec![],
-            plugins_registry: None,
             llm: LlmConfig::default(),
             sandbox: SandboxConfig::default(),
             session_agents: SessionAgentsConfig { agents: specs },
@@ -146,7 +144,6 @@ impl TestRig {
                 .await
                 .expect("session store"),
         );
-        let plugin_registry = Arc::new(PluginToolRegistry::new(Arc::new(ToolRegistry::new())));
         let _sandbox = Arc::new(RwLock::new(SandboxConfig::default()));
         let session_agents = Arc::new(SessionAgentPool::new(cfg.session_agents.agents.clone()));
 
@@ -175,7 +172,6 @@ impl TestRig {
             session_agents,
             session,
             Arc::new(SkillsRegistry::new()),
-            plugin_registry,
         ));
 
         // The HTTP API enforces JWT auth (UserContext extractor 401s

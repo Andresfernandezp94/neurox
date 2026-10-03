@@ -11,7 +11,6 @@ use neurox::approval::{ApprovalDecision, ApprovalManager};
 use neurox::config::{
     AgentKind, AgentsConfig, CoreConfig, PersistentAgentSpec, RestartPolicy, SandboxConfig,
 };
-use neurox::plugins::PluginToolRegistry;
 use neurox::protocols::{ProtocolKind, TransportKind};
 use neurox::registry::Registry;
 use neurox::config::SessionAgentsConfig;
@@ -80,7 +79,6 @@ async fn cancel_endpoint_marks_session_inactive() {
         spawner_concurrency: 4,
         in_process: vec![],
         services: vec![],
-        plugins_registry: None,
         llm: neurox::config::LlmConfig::default(),
         sandbox: SandboxConfig::default(),
         session_agents: SessionAgentsConfig::default(),
@@ -100,9 +98,6 @@ async fn cancel_endpoint_marks_session_inactive() {
         SessionAgentsConfig::default().agents,
     ));
     let skills = Arc::new(SkillsRegistry::new());
-    let plugin_registry = Arc::new(PluginToolRegistry::new(Arc::new(
-        tools_engine::tools::ToolRegistry::new(),
-    )));
     let tools = Arc::new(tools_engine::tools::ToolRegistry::new());
     let mut state = common::build_app_state(db_path.clone(), tools.clone(), PathBuf::from("/tmp"))
         .await;
@@ -120,7 +115,6 @@ async fn cancel_endpoint_marks_session_inactive() {
         session_agents,
         session,
         skills,
-        plugin_registry,
     ));
 
     // The HTTP API enforces JWT auth (UserContext extractor 401s without
@@ -309,7 +303,6 @@ async fn approval_endpoint_create_and_respond() {
         spawner_concurrency: 4,
         in_process: vec![],
         services: vec![],
-        plugins_registry: None,
         llm: neurox::config::LlmConfig::default(),
         sandbox: SandboxConfig::default(),
         session_agents: SessionAgentsConfig::default(),

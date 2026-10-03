@@ -106,18 +106,6 @@ pub enum Event {
         tool: String,
         decision: String,
     },
-    /// Emitted when an MCP (a.k.a. plugin) finishes dynamic registration
-    /// via `POST /v1/mcps`. The frontend SPA uses this to keep the
-    /// `/v1/mcps` listing live.
-    McpRegistered {
-        name: String,
-        tools: Vec<String>,
-        skills: Vec<String>,
-    },
-    /// Emitted when an MCP is deregistered via `DELETE /v1/mcps/:name`.
-    McpUnregistered {
-        name: String,
-    },
     /// EP-0003 Tier 3: emitted when the in-process agent's compaction
     /// call (the LLM-backed `chat_utility` that summarizes the older
     /// half of the working memory when it gets large) returns an
@@ -151,8 +139,6 @@ impl Event {
             | Event::ApprovalResolved { session_id, .. } => Some(*session_id),
             Event::Error { session_id, .. } => *session_id,
             Event::ApprovalRequest { request } => Some(request.session_id),
-            // Lifecycle events for MCPs/plugins — don't carry a session id.
-            Event::McpRegistered { .. } | Event::McpUnregistered { .. } => None,
         }
     }
 }

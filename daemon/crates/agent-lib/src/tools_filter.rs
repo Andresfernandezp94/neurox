@@ -7,7 +7,7 @@
 //!
 //!   1. The name lists referenced tools that don't exist in the engine
 //!      (P1 bug: `ocr_screen`, `knowledge`) and missed tools that did
-//!      (`generate_video`).
+
 //!   2. The trigger keywords were Spanish-only — English prompts never
 //!      fired any category, even for filesystems.
 //!
@@ -49,31 +49,6 @@ const WEB_TRIGGERS: &[&str] = &[
     "busca", "enlace", "página", "descargar",
 ];
 
-const MEMORY_TRIGGERS: &[&str] = &[
-    // English
-    "remember", "memory", "fact", "store", "save", "recall",
-    "knowledge", "did you know",
-    // Spanish
-    "recuerda", "memoria", "guarda", "anota", "sabes", "recuerdas",
-];
-
-const PERCEPTION_TRIGGERS: &[&str] = &[
-    // English
-    "screen", "look", "see", "clipboard", "copy", "paste", "screenshot",
-    "ocr",
-    // Spanish
-    "pantalla", "mira", "ve ", "qué hay", "portapapeles", "copiar",
-    "pegar", "captura",
-];
-
-const MEDIA_TRIGGERS: &[&str] = &[
-    // English
-    "image", "picture", "photo", "generate", "create", "music", "song",
-    "draw", "video",
-    // Spanish
-    "imagen", "foto", "genera", "crea una", "música", "dibuja", "video",
-];
-
 /// Filter tools based on mode and user text triggers.
 ///
 /// EP-2026-08-19 (Fix 4): `allowlist` still applies as a hard wall —
@@ -113,9 +88,9 @@ pub fn filter_tools(
         }
         Mode::Plan => {
             // Read-only tools only. We determine "read-only" by
-            // checking that the tool has NO destructive category
-            // (filesystem writes, shell, media generation). The
-            // engine is the source of truth for categories.
+            // checking that the tool is not one of the destructive
+            // ones (filesystem writes, shell). The engine is the
+            // source of truth for categories.
             let destructive: HashSet<&str> =
                 ["write_file", "shell"].iter().copied().collect();
             scoped
@@ -148,21 +123,12 @@ pub fn filter_tools(
             if WEB_TRIGGERS.iter().any(|kw| lower.contains(kw)) {
                 matched_categories.insert("web");
             }
-            if MEMORY_TRIGGERS.iter().any(|kw| lower.contains(kw)) {
-                matched_categories.insert("memory");
-            }
-            if PERCEPTION_TRIGGERS.iter().any(|kw| lower.contains(kw)) {
-                matched_categories.insert("desktop");
-            }
-            if MEDIA_TRIGGERS.iter().any(|kw| lower.contains(kw)) {
-                matched_categories.insert("media");
-            }
 
             // Step 2c: surface tools whose categories match.
             // If no categories matched, fall back to a sensible default
-            // (web + memory — the safe conversational baseline).
+            // (web — the safe conversational baseline).
             let filtered: Vec<ToolSpec> = if matched_categories.is_empty() {
-                let fallback: HashSet<&str> = ["web", "memory"].iter().copied().collect();
+                let fallback: HashSet<&str> = ["web"].iter().copied().collect();
                 chat_compatible
                     .iter()
                     .filter(|t| {
@@ -217,7 +183,6 @@ mod tests {
         let tools = vec![
             make_spec("shell", &["shell"]),
             make_spec("read_file", &["filesystem"]),
-            make_spec("save_fact", &["memory"]),
         ];
         let filtered = filter_tools(
             &tools,

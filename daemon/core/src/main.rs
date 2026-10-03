@@ -36,10 +36,6 @@ enum Commands {
         #[command(subcommand)]
         action: AgentsCmd,
     },
-    Plugin {
-        #[command(subcommand)]
-        action: PluginCmd,
-    },
     /// Manage LLM providers (EP-0010).
     Providers {
         #[command(subcommand)]
@@ -57,26 +53,6 @@ enum AgentsCmd {
     List,
     Start { id: String },
     Stop { id: String },
-}
-
-#[derive(Subcommand)]
-enum PluginCmd {
-    /// Install a plugin from the registry.
-    Install {
-        name: String,
-        #[arg(long, default_value = "latest")]
-        version: String,
-    },
-    /// List installed plugins.
-    List,
-    /// Run a plugin in the foreground. Blocks until the plugin exits.
-    Run { name: String, args: Vec<String> },
-    /// Update a plugin to the latest version.
-    Update { name: String },
-    /// Remove an installed plugin.
-    Remove { name: String },
-    /// Generate a systemd user service for the plugin.
-    Service { name: String },
 }
 
 #[derive(Subcommand)]
@@ -156,9 +132,6 @@ async fn main() -> anyhow::Result<()> {
         Commands::Agents { action } => {
             handle_agents_action(core_config, action).await?;
         }
-        Commands::Plugin { action } => {
-            handle_plugin_action(core_config, action).await?;
-        }
         Commands::Providers { action } => {
             handle_providers_action(core_config, action).await?;
         }
@@ -219,7 +192,6 @@ async fn serve(
         shared_sandbox.clone(),
     )
     .await?;
-    let tools = engine.tools.clone();
 
     let llm_providers_for_orchestrator = engine.list_providers().await.unwrap_or_default();
     // EP-0004 wave 1: use the engine's load_llm_config helper instead of
@@ -295,16 +267,6 @@ async fn serve(
         "session agent pool initialized"
     );
 
-    // Dynamic plugin tool registry (EP-0009). Probes for running plugins
-    // at startup and spawns a background health-check loop.
-    let plugin_registry = Arc::new(neurox::plugins::PluginToolRegistry::new(tools.clone()));
-    plugin_registry.startup_discover().await;
-    {
-        let pr = plugin_registry.clone();
-        tokio::spawn(neurox::plugins::PluginToolRegistry::background_retry_loop(pr));
-    }
-    info!("plugin tool registry initialized");
-
     // Session store (SQLite) for persisting sessions + messages.
     let session = Arc::new(
         neurox::session::SessionStore::open(&core_config.db_path)
@@ -314,9 +276,8 @@ async fn serve(
     info!(db_path = %core_config.db_path.display(), "session store opened");
 
     // EP-2026-08-19: install_template_context used to push the
-    // sandbox + plugin caps into llmd via HTTP. The engine is
-    // in-process now; tools read `state.workspace.sandbox` and the plugin
-    // registry's live state on every call.
+    // sandbox caps into llmd via HTTP. The engine is
+    // in-process now; tools read `state.workspace.sandbox` on every call.
     let _sandbox = Arc::new(parking_lot::RwLock::new(core_config.sandbox.clone()));
 
     for spec in &core_config.agents.persistent {
@@ -344,7 +305,6 @@ async fn serve(
         session_agents.clone(),
         session,
         Arc::new(SkillsRegistry::new()),
-        plugin_registry,
     ));
     // Mismo Arc que el engine: ver la nota de `shared_sandbox` arriba.
     let workspace = Arc::new(WorkspaceLayer::new(
@@ -542,70 +502,6 @@ async fn handle_agents_action(core_config: CoreConfig, action: AgentsCmd) -> any
             let supervisor = Supervisor::new();
             supervisor.stop_agent(&id).await?;
             println!("✓ stopped {id}");
-        }
-    }
-    Ok(())
-}
-
-async fn handle_plugin_action(core_config: CoreConfig, action: PluginCmd) -> anyhow::Result<()> {
-    use PluginCmd::{Install, List, Remove, Run, Service, Update};
-    let manager = neurox::plugins::PluginManager::default_local();
-
-    let registry_url = std::env::var("NEUROX_REGISTRY")
-        .ok()
-        .or_else(|| core_config.plugins_registry.clone())
-        .unwrap_or_else(|| {
-            "https://raw.githubusercontent.com/Andresfernandezp94/neurox-registry/main/registry.json".to_string()
-        });
-
-    match action {
-        Install { name, version } => {
-            println!("Fetching registry from {}", registry_url);
-            let registry = neurox::plugins::Registry::fetch(&registry_url).await?;
-            let info = manager.install(&registry, &name, &version).await?;
-            println!("✓ installed {}@{}", info.name, info.version);
-            println!("  path: {}", info.install_path);
-            println!("  run with: neurox run {}", info.name);
-        }
-        Update { name } => {
-            let registry = neurox::plugins::Registry::fetch(&registry_url).await?;
-            let info = manager.update(&registry, &name).await?;
-            println!("✓ updated {} -> {}", name, info.version);
-        }
-        List => {
-            let infos = manager.list()?;
-            if infos.is_empty() {
-                println!("No plugins installed.");
-                println!("Use: neurox install <name>");
-            } else {
-                println!("Installed plugins ({}):", infos.len());
-                println!("{:<14} {:<10} {:<12} PATH", "NAME", "VERSION", "STATUS");
-                for info in infos {
-                    let status = match info.status {
-                        neurox::plugins::PluginInstallStatus::Ok => "ok",
-                        neurox::plugins::PluginInstallStatus::Broken => "broken",
-                        neurox::plugins::PluginInstallStatus::Incompatible => "incompatible",
-                    };
-                    println!(
-                        "{:<14} {:<10} {:<12} {}",
-                        info.name, info.version, status, info.install_path
-                    );
-                }
-            }
-        }
-        Run { name, args } => {
-            let code = manager.run(&name, &args)?;
-            std::process::exit(code);
-        }
-        Remove { name } => {
-            manager.remove(&name)?;
-            println!("✓ removed {name}");
-        }
-        Service { name } => {
-            let path = manager.service_unit(&name)?;
-            println!("✓ wrote {}", path.display());
-            println!("  enable + start with:");
-            println!("    systemctl --user enable --now neurox-{name}.service");
         }
     }
     Ok(())

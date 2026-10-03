@@ -193,8 +193,6 @@ pub fn manageable() -> &'static [EnvVarSpec] {
         // ── Auth ──
         spec("NEUROX_ADMIN_PASSWORD", EnvCategory::Auth, "Password del usuario admin inicial. Solo se lee si no existe `users.json`.", true, None),
         // ── Integraciones ──
-        spec("NEUROX_MEMORY_URL", EnvCategory::Integrations, "URL del plugin de memoria.", false, None),
-        spec("NEUROX_MEMORY_WORKSPACE", EnvCategory::Integrations, "Workspace del plugin de memoria.", false, None),
         spec("NEUROX_IDENTITY_DIR", EnvCategory::Integrations, "Directorio de identidad de los agentes.", false, None),
         spec("NEUROX_TODO_DIR", EnvCategory::Integrations, "Directorio del store de tareas (todos).", false, None),
         spec("NEUROX_TOOLS_ALLOWLIST", EnvCategory::Integrations, "Tools habilitadas, separadas por coma. Vacío = todas.", false, None),

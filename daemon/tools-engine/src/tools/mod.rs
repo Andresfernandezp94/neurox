@@ -15,9 +15,6 @@
 use std::collections::HashSet;
 
 pub mod atomic_store;
-pub mod desktop;
-pub mod media;
-pub mod memory;
 pub mod read;
 pub mod shell;
 pub mod task_management;
@@ -39,7 +36,7 @@ use crate::sandbox::SandboxConfig;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCategory {
-    Filesystem, Web, Shell, Media, Memory, Desktop, Knowledge, TaskManagement,
+    Filesystem, Web, Shell, Knowledge, TaskManagement,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -330,17 +327,6 @@ pub fn register_defaults(
     use crate::tools::task_management::todo_remove::TodoRemoveTool;
     // shell/
     use crate::tools::shell::shell::ShellTool;
-    // memory/
-    use crate::tools::memory::save_fact::SaveFactTool;
-    use crate::tools::memory::search_memory::SearchMemoryTool;
-    // media/
-    use crate::tools::media::generate_image::GenerateImageTool;
-    use crate::tools::media::generate_music::GenerateMusicTool;
-    use crate::tools::media::generate_video::GenerateVideoTool;
-    // desktop/
-    use crate::tools::desktop::clipboard_read::ClipboardReadTool;
-    use crate::tools::desktop::clipboard_write::ClipboardWriteTool;
-    use crate::tools::desktop::screenshot::ScreenshotTool;
 
     // Tools that need workspace_root + sandbox context
     registry.register(Arc::new(ReadFileTool {
@@ -378,14 +364,6 @@ pub fn register_defaults(
     // Stateless tools (unit structs)
     registry.register(Arc::new(WebFetchTool));
     registry.register(Arc::new(WebSearchTool));
-    registry.register(Arc::new(SaveFactTool));
-    registry.register(Arc::new(SearchMemoryTool));
-    registry.register(Arc::new(GenerateImageTool));
-    registry.register(Arc::new(GenerateMusicTool));
-    registry.register(Arc::new(GenerateVideoTool));
-    registry.register(Arc::new(ClipboardReadTool));
-    registry.register(Arc::new(ClipboardWriteTool));
-    registry.register(Arc::new(ScreenshotTool));
     // taskManagement/ — todo_* tools (stateless, file-backed)
     registry.register(Arc::new(TodoAddTool));
     registry.register(Arc::new(TodoClearTool));

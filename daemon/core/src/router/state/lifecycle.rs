@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use crate::approval::SharedApprovalManager;
-use crate::plugins::SharedPluginToolRegistry;
 use crate::registry::SharedRegistry;
 use crate::session::SessionStore;
 use crate::session_agents::SessionAgentPool;
@@ -24,8 +23,6 @@ pub struct LifecycleLayer {
     pub session: Arc<SessionStore>,
     /// EP-frontend-config: skill enable/disable overrides.
     pub skills: SharedSkillsRegistry,
-    /// Dynamic plugin tool registry (memoryd, voiced, etc.).
-    pub plugin_registry: SharedPluginToolRegistry,
 }
 
 impl LifecycleLayer {
@@ -39,7 +36,6 @@ impl LifecycleLayer {
         session_agents: Arc<SessionAgentPool>,
         session: Arc<SessionStore>,
         skills: SharedSkillsRegistry,
-        plugin_registry: SharedPluginToolRegistry,
     ) -> Self {
         Self {
             registry,
@@ -50,7 +46,6 @@ impl LifecycleLayer {
             session_agents,
             session,
             skills,
-            plugin_registry,
         }
     }
 }

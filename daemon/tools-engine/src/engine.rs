@@ -59,9 +59,8 @@ pub struct Engine {
     pub db: SqlitePool,
     pub started_at: Instant,
     /// EP-0004 wave 5a: shared HTTP client. Every HTTP caller (backends,
-    /// model discovery, model downloader, media tools, plugin proxy,
-    /// etc.) borrows `Arc<reqwest::Client>` from here instead of
-    /// building its own.
+    /// model discovery, model downloader, web tools, etc.) borrows
+    /// `Arc<reqwest::Client>` from here instead of building its own.
     pub http_client: Arc<reqwest::Client>,
     /// Explicit default provider id (when set, overrides the
     /// alphabetical-first provider in `first_provider`). Writable via
@@ -292,7 +291,7 @@ impl Engine {
     }
 
     /// Run a tool by name. `agent_id` is forwarded so tools that need
-    /// per-agent output paths (e.g. `generate_image`) can use it.
+    /// per-agent output paths can use it.
     pub async fn execute_tool(
         &self,
         name: &str,

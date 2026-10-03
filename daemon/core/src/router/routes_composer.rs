@@ -137,17 +137,6 @@ pub fn router(state: AppState) -> axum::Router {
             "/v1/llm/providers/:id",
             put(http::update_llm_provider).delete(http::delete_llm_provider),
         )
-        .route(
-            "/v1/mcps",
-            get(http::list_plugins).post(http::register_plugin),
-        )
-        .route(
-            "/v1/mcps/:name",
-            delete(http::unregister_mcp),
-        )
-        .route("/v1/mcps/:name/reconnect", post(http::reconnect_plugin))
-        .route("/v1/mcps/catalog", get(http::list_plugins_catalog))
-        .route("/v1/mcps/clean", post(http::clean_mcps))
         .route("/v1/env", get(http::list_env_vars))
         .route("/v1/env/:key", put(http::put_env_var).delete(http::delete_env_var))
         .route("/v1/sandbox", get(crate::router::handlers::sandbox::get_sandbox).put(crate::router::handlers::sandbox::put_sandbox));

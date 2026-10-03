@@ -9,7 +9,6 @@ pub mod environments;
 pub mod events;
 pub mod llm_admin;
 pub mod local_models;
-pub mod plugins;
 pub mod protocols;
 pub mod registry;
 pub mod router;

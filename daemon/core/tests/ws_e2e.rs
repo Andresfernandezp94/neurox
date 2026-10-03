@@ -76,7 +76,6 @@ async fn ws_stream_emits_session_started_and_done() {
         spawner_concurrency: 4,
         in_process: vec![],
         services: vec![],
-        plugins_registry: None,
         llm: neurox::config::LlmConfig::default(),
         sandbox: SandboxConfig::default(),
         session_agents: SessionAgentsConfig::default(),

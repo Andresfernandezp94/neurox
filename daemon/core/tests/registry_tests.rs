@@ -124,7 +124,6 @@ async fn load_from_config_populates_registry() {
         spawner_concurrency: 4,
         in_process: vec![],
         services: vec![],
-        plugins_registry: None,
         llm: neurox::config::LlmConfig::default(),
         sandbox: SandboxConfig::default(),
         session_agents: SessionAgentsConfig::default(),

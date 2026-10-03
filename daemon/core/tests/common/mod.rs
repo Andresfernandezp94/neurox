@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use neurox::approval::ApprovalManager;
 use neurox::config::CoreConfig;
-use neurox::plugins::PluginToolRegistry;
 use neurox::router::state::{
     AppState, AuthLayer, EventsLayer, LifecycleLayer, WorkspaceLayer,
 };
@@ -65,7 +64,6 @@ pub async fn build_app_state(
         Arc::new(SessionAgentPool::default()),
         session,
         Arc::new(SkillsRegistry::new()),
-        Arc::new(PluginToolRegistry::new(tools)),
     ));
     let auth = AuthLayer::new();
     let workspace = Arc::new(WorkspaceLayer::new(

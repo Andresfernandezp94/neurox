@@ -152,9 +152,6 @@ async fn event_owned_by(
         Event::ApprovalRequest { request } => Some(request.session_id),
         Event::ApprovalResolved { session_id, .. } => Some(*session_id),
         Event::Error { session_id, .. } => *session_id,
-        Event::McpRegistered { .. } | Event::McpUnregistered { .. } => {
-            return true;
-        }
     };
     // SessionEnded for an explicit DELETE is emitted AFTER the session
     // row is removed from SQLite, so the ownership lookup below would

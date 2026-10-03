@@ -337,9 +337,6 @@ pub struct CoreConfig {
     /// External services to probe and expose in `GET /v1/services`.
     #[serde(default)]
     pub services: Vec<ServiceConfig>,
-    /// URL of the plugin registry. Overrides the default public registry.
-    #[serde(default)]
-    pub plugins_registry: Option<String>,
     /// LLM provider registry + default provider (EP-0009-04). Missing section
     /// → `LlmConfig::default()` (legacy MiniMax from env vars).
     #[serde(default)]
@@ -747,7 +744,6 @@ impl Default for CoreConfig {
             spawner_concurrency: default_spawner_concurrency(),
             in_process: Vec::new(),
             services: Vec::new(),
-            plugins_registry: None,
             llm: LlmConfig::default(),
             sandbox: SandboxConfig::default(),
             session_agents: SessionAgentsConfig::default(),
