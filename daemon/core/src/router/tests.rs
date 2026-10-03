@@ -345,3 +345,54 @@ mod parallel_batch {
         assert_eq!(out[0].as_ref().expect("resultado").as_deref(), Ok("solo"));
     }
 }
+
+/// EP-2026-10-03: forma de los params del turno de soft cap.
+///
+/// El bug era un envoltorio `"params"` de mas: el transporte ya envuelve, y
+/// al envolver aqui tambien el mensaje llegaba al agente con el texto vacio.
+/// El sintoma era un 400 `invalid_request_error` del proveedor y un turno
+/// muerto con "soft-cap dispatch failed", tres iteraciones mas tarde y sin
+/// relacion aparente con el soft cap.
+mod iteration_limit {
+    use super::super::iteration_limit_params;
+
+    /// El transporte (`json_rpc_stdio`) envuelve lo que le pases en
+    /// `AgentRequest::params` dentro de una clave `"params"`. Si esta fn
+    /// vuelve a envolver, el agente lee `params.params.params.text` y el
+    /// texto le llega VACIO.
+    ///
+    /// Este es el assert que falha con el envoltorio de mas, asi que es el
+    /// que tiene que quedarse.
+    #[test]
+    fn no_lleva_envoltorio_params_de_mas() {
+        let p = iteration_limit_params(2);
+        assert!(
+            p.get("params").is_none(),
+            "el transporte ya envuelve en \"params\"; con otro envoltorio el \
+             texto llega vacio al agente: {p}"
+        );
+        assert!(
+            p.get("text").is_some(),
+            "el texto va en la raiz de los params: {p}"
+        );
+    }
+
+    /// El texto tiene que llevar el numero de iteracion: es lo que le dice
+    /// al modelo por que le estan cortando.
+    #[test]
+    fn el_texto_lleva_la_iteracion() {
+        let p = iteration_limit_params(7);
+        let text = p["text"].as_str().unwrap();
+        assert!(text.contains("iterated 7 times"), "{text}");
+        assert!(text.contains("STOP making tool calls"), "{text}");
+    }
+
+    /// Sin tools, el modelo no tiene forma estructural de seguir pidiendo
+    /// tool_calls: es lo que para el bucle de verdad, no solo el mensaje.
+    #[test]
+    fn va_sin_tools_para_que_no_pueda_seguir_pidiendo_herramientas() {
+        let p = iteration_limit_params(2);
+        let tools = p["tools"].as_array().expect("la clave tools debe existir");
+        assert!(tools.is_empty(), "tools debe ir vacio: {p}");
+    }
+}

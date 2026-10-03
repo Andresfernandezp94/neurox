@@ -70,6 +70,35 @@ pub const DEFAULT_AGENT_ID: &str = "default";
 
 /// Fase 2 del despacho por lotes: ejecutar las tools EN PARALELO.
 ///
+/// EP-2026-10-03: params del turno de soft cap.
+///
+/// Vive en una fn aparte, y SIN envoltorio `"params"`, por dos razones que
+/// son el mismo error:
+///
+/// - El transporte (`protocols::json_rpc_stdio`) ya envuelve lo que le
+///   pases en `AgentRequest::params` dentro de una clave `"params"`. Si aqui
+///   se vuelve a envolver, el mensaje llega al agente como
+///   `params.params.params.text` y `handle_process` lee un texto VACIO.
+///   Pasaba de verdad: el "STOP making tool calls" no llegaba nunca al
+///   modelo, que recibia un turno de usuario en blanco con `tools: []`. El
+///   proveedor devolvia 400 `invalid_request_error` y el turno moria con
+///   "soft-cap dispatch failed".
+/// - Al ser una fn pura, la forma se puede testear sin montar un agente.
+///
+/// `tools: []` es deliberado: deja al modelo sin forma estructural de
+/// seguir emitiendo tool_calls.
+fn iteration_limit_params(iteration: u32) -> serde_json::Value {
+    let text = format!(
+        "[system] You've iterated {iteration} times on this request. \
+         STOP making tool calls. Summarize what you've found so far \
+         and ask the user for next steps, OR take a definitive action. \
+         Your next response MUST be a final assistant message with no \
+         tool_calls — otherwise this loop will hard-stop with \
+         IterationLimit."
+    );
+    serde_json::json!({ "text": text, "tools": [] })
+}
+
 /// EP-2026-10-03. Es una fn libre y no un metodo a proposito: el paralelismo
 /// es la unica parte del despacho que se puede testear sin montar un agente
 /// subprocess, asi que vive aislada para que el test la pueda cronometrar.
@@ -471,25 +500,7 @@ impl AppState {
         session_id: Uuid,
         iteration: u32,
     ) -> anyhow::Result<Option<serde_json::Value>> {
-        // Soft cap: inject synthetic message asking the agent to
-        // wrap up. The events from this final dispatch flow
-        // through the same forwarder, so the user sees the agent's
-        // summary streamed in real time.
-        let synthetic_text = format!(
-            "[system] You've iterated {iteration} times on this request. \
-             STOP making tool calls. Summarize what you've found so far \
-             and ask the user for next steps, OR take a definitive action. \
-             Your next response MUST be a final assistant message with no \
-             tool_calls — otherwise this loop will hard-stop with \
-             IterationLimit."
-        );
-        // We deliberately send `tools: []` so the LLM is
-        // structurally prevented from emitting tool_calls. Even
-        // if the model is stubborn, the parse will surface
-        // tool_calls as an empty array, not a runaway loop.
-        let synthetic_params = serde_json::json!({
-            "params": { "text": synthetic_text, "tools": [] },
-        });
+        let synthetic_params = iteration_limit_params(iteration);
 
         let result = self
             .dispatch_to_session_agent(
