@@ -11,11 +11,14 @@ authors = ["Andres Fernandez <andresfernandezp94@gmail.com>"]
 
 [workspace.dependencies]
 anyhow = "1.0"
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.7", features = ["macros", "ws"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 mime_guess = "2.0"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.40", features = ["full"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["compression-br", "set-header", "trace"] }
 tracing = "0.1"

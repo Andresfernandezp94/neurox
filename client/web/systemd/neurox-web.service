@@ -5,11 +5,20 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/neurox-web --dir %h/.local/share/neurox/web/dist --port 8787
+# --api-origin hace que neurox-web reenvíe /v1/* al daemon. Así el
+# bundle se construye con VITE_API_BASE vacío (same-origin) y anda
+# desde cualquier máquina de la LAN sin rebuild, sin CORS y sin que
+# el JWT cruce un salto extra.
+#
+# --host 0.0.0.0 para que se alcance desde la LAN: neurox-web sirve
+# solo la SPA y el proxy, no el daemon (este sigue en 127.0.0.1).
+ExecStart=%h/.local/bin/neurox-web --dir %h/.local/share/neurox/web/dist --host 0.0.0.0 --port 8787 --api-origin http://127.0.0.1:7878
 Restart=always
 RestartSec=5
 Environment=RUST_LOG=info,tower_http=info
-EnvironmentFile=%h/.config/neurox/env
+# OJO: `env` puede no existir todavia (se crea al primer arranque del
+# daemon). El `-` previo evita que el servicio falle en ese caso.
+EnvironmentFile=-%h/.config/neurox/env
 KillSignal=SIGTERM
 TimeoutStopSec=10
 

@@ -1096,10 +1096,16 @@ pub async fn post_message(
     let _ = state.lifecycle.session.update_summary(session_id, &preview).await;
 
     // Resolve the provider+model the user (or default) selected for this
-    // message. Falls back to the daemon's configured default provider
-    // (ChatBubble / old clients don't send them).
-    let (provider_id, model) =
-        resolve_default_model(&state, body.provider_id.as_deref(), body.model.as_deref()).await;
+    // message. Falls back to the stored user pref, then to the daemon's
+    // configured default provider (ChatBubble / old clients don't send
+    // them). `user_id` lets it read the per-user pref from SQLite.
+    let (provider_id, model) = resolve_default_model(
+        &state,
+        &user.user_id.to_string(),
+        body.provider_id.as_deref(),
+        body.model.as_deref(),
+    )
+    .await;
 
     // Persist the selected model on every message so the session always
     // reflects the last model the user actually used. UI restoration on
@@ -1664,10 +1670,16 @@ pub async fn post_message_stream(
         })
         .collect();
     // Resolve the provider+model the user (or default) selected for this
-    // message. Falls back to the daemon's configured default provider
-    // (ChatBubble / old clients don't send them).
-    let (provider_id, model) =
-        resolve_default_model(&state, body.provider_id.as_deref(), body.model.as_deref()).await;
+    // message. Falls back to the stored user pref, then to the daemon's
+    // configured default provider (ChatBubble / old clients don't send
+    // them). `user_id` lets it read the per-user pref from SQLite.
+    let (provider_id, model) = resolve_default_model(
+        &state,
+        &user.user_id.to_string(),
+        body.provider_id.as_deref(),
+        body.model.as_deref(),
+    )
+    .await;
 
     // Persist the selected model on every message so the session always
     // reflects the last model the user actually used. UI restoration on
@@ -3817,22 +3829,87 @@ async fn resolve_provider_runtime(
 /// so ChatBubble (which doesn't have a model picker) still works.
 async fn resolve_default_model(
     state: &AppState,
+    user_id: &str,
     provider_id: Option<&str>,
     model: Option<&str>,
 ) -> (String, String) {
     let providers = state.engine.list_providers().await.unwrap_or_default();
-    let default_pid = if state.config.llm.default_provider.is_empty() {
-        "minimax".to_string()
+
+    // Un provider sin `configured` no sirve: el agente subprocess
+    // arranca sin api_key y `build_backend` entra en panic
+    // ("api_key_env not set"), lo que tumba el chat con un Broken pipe
+    // en vez de un error legible. Por eso el default NO sale de
+    // `llm.default_provider` a secas: ese campo puede apuntar a un
+    // provider sin key (común tras editar config.yaml a mano).
+    //
+    // Orden de preferencia, en línea con `resolve_llm_pref` que ya usa
+    // la UI: lo explicito del body → la pref guardada del usuario →
+    // `llm.default_provider` → el primer provider configurado.
+    // Mismo criterio que `resolve_user_llm_pref`: `configured` sale de
+    // `api_key_env` (leer la env real), no de un campo del config.
+    let configured_ids: Vec<String> = providers
+        .iter()
+        .filter(|p| catalog_is_configured_field(p.api_key_env.as_deref()))
+        .map(|p| p.id.clone())
+        .collect();
+    let is_configured = |id: &str| configured_ids.iter().any(|c| c == id);
+
+    let explicit_ok = provider_id.filter(|id| is_configured(id));
+    if let Some(id) = explicit_ok {
+        let cfg = providers.iter().find(|p| p.id == id);
+        let m = model
+            .map(str::to_string)
+            .or_else(|| cfg.map(|c| c.effective_model()))
+            .unwrap_or_default();
+        return (id.to_string(), m);
+    }
+
+    // Pref guardada del usuario (el selector del header). Es la que
+    // manda cuando el body no manda provider: antes se ignoraba y
+    // toda sesion nueva caia en `llm.default_provider`.
+    if let Ok(Some(pref)) =
+        tools_engine::providers::user_llm_pref::load(&state.engine.db, user_id).await
+    {
+        let pid = pref
+            .provider_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty() && is_configured(id));
+        if let Some(pid) = pid {
+            let cfg = providers.iter().find(|p| p.id == pid);
+            let m = model
+                .map(str::to_string)
+                .or_else(|| {
+                    pref.model
+                        .as_deref()
+                        .map(str::to_string)
+                        .filter(|s| !s.is_empty())
+                })
+                .or_else(|| cfg.map(|c| c.effective_model()))
+                .unwrap_or_default();
+            return (pid.to_string(), m);
+        }
+    }
+
+    let yaml_default = state.config.llm.default_provider.as_str();
+    let pid = if is_configured(yaml_default) {
+        yaml_default.to_string()
     } else {
-        state.config.llm.default_provider.clone()
+        configured_ids
+            .first()
+            .cloned()
+            .unwrap_or_else(|| {
+                if yaml_default.is_empty() {
+                    "minimax".to_string()
+                } else {
+                    yaml_default.to_string()
+                }
+            })
     };
-    let pid = provider_id
-        .map(str::to_string)
-        .unwrap_or_else(|| default_pid.clone());
-    let cfg = providers.into_iter().find(|p| p.id == pid);
+    let cfg = providers.iter().find(|p| p.id == pid);
     let m = model
         .map(str::to_string)
-        .or_else(|| cfg.as_ref().map(|c| c.effective_model()))
+        .or_else(|| cfg.map(|c| c.effective_model()))
         .unwrap_or_else(|| "MiniMax-M3".to_string());
     (pid, m)
 }
