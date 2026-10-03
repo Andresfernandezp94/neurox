@@ -1,5 +1,5 @@
 // Shared helpers for tools that mutate a persistent on-disk store
-// (todo_*, save_fact, …).
+// (todo_*).
 //
 // The pattern is identical across all of them:
 //   1. Acquire an in-process Mutex (serializes concurrent writers

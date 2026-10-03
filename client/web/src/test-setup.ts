@@ -71,7 +71,7 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
 });
 
 // 4) jsdom 25 doesn't implement URL.createObjectURL / revokeObjectURL.
-//    useMediaBlob (media previews) calls createObjectURL on a fetch'd blob
+//    (los media previews se fueron con generate_*)
 //    to feed <img>/<video>/<audio>. Sin esto, el hook cae a status=error
 //    y los tests de SmartResult no pueden verificar el render de media.
 //    Devolvemos un data: URL único por blob — suficiente para los tests,

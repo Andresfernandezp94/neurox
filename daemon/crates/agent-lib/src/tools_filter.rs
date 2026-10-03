@@ -194,7 +194,7 @@ mod tests {
         let names: Vec<&str> = filtered.iter().map(|t| t.function.name.as_str()).collect();
         assert!(names.contains(&"shell"));
         assert!(names.contains(&"read_file"));
-        assert!(!names.contains(&"save_fact"));
+        assert!(!names.contains(&"todo_add"));
     }
 
     #[test]

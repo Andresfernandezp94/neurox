@@ -183,12 +183,11 @@
   font-style: italic;
 }
 
-/* ─── grep / search_memory list ────────────────────────────── */
+/* ─── grep list ───────────────────────────────────────────── */
 
 .tool-renderer__matches,
 .tool-renderer__paths,
-.tool-renderer__search-results,
-.tool-renderer__memories {
+.tool-renderer__search-results {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -199,8 +198,7 @@
 
 .tool-renderer__match,
 .tool-renderer__path,
-.tool-renderer__search-result,
-.tool-renderer__memory {
+.tool-renderer__search-result {
   font-family: var(--font-mono);
   font-size: 0.75rem;
   line-height: 1.4;
@@ -266,21 +264,6 @@
   font-size: 0.78rem;
   color: var(--text-secondary, #ccc);
   line-height: 1.4;
-}
-
-.tool-renderer__memory {
-  font-family: var(--font-sans);
-}
-
-.tool-renderer__memory-content {
-  color: var(--text-primary);
-  margin-bottom: 0.15rem;
-}
-
-.tool-renderer__memory-score {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--text-muted);
 }
 
 /* ─── file content ─────────────────────────────────────────── */

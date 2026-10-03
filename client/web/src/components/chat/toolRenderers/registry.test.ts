@@ -72,7 +72,7 @@ describe("registry — write_file / edit_file", () => {
   });
 });
 
-describe("registry — grep / glob / search_memory", () => {
+describe("registry — grep / glob", () => {
   it("grep marca output vacío como empty (no fail)", () => {
     const cfg = getToolConfig("grep");
     expect(cfg.parseStatus?.("")?.status).toBe("empty");

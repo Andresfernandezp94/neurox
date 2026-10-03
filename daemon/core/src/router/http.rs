@@ -3992,9 +3992,8 @@ pub async fn delete_env_var(
 }
 
 
-/// EP-2026-08-19: serve a file from the local filesystem so the chat
-/// UI can preview media produced by tools (`generate_image`,
-/// `generate_music`, `generate_video`). The path is URL-decoded and
+/// EP-2026-08-19: serve a file from the local filesystem. The path is
+/// URL-decoded and
 /// canonicalized — we reject paths that escape via `..` segments but
 /// don't restrict to a specific home dir (the daemon already runs as
 /// the operator and $HOME in systemd can be wrong).
