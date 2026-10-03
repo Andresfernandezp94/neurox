@@ -181,7 +181,7 @@ pub fn manageable() -> &'static [EnvVarSpec] {
         // ── Runtime ──
         spec("NEUROX_WORKSPACE", EnvCategory::Runtime, "Raíz del workspace.", false, None),
         spec("NEUROX_ENV_FILE", EnvCategory::Runtime, "Ruta alterna del archivo env (default ~/.config/neurox/env).", false, None),
-        spec("NEUROX_MAX_TOOL_ITERATIONS", EnvCategory::Runtime, "Tope de iteraciones por tool call.", false, Some("10")),
+        spec("NEUROX_MAX_TOOL_ITERATIONS", EnvCategory::Runtime, "Tope de iteraciones de tools por mensaje. `0` = sin tope, para que el agente se autogestione.", false, Some("50")),
         spec("NEUROX_SESSION_STREAM_TIMEOUT_SECS", EnvCategory::Runtime, "Timeout de streaming de una sesión, en segundos.", false, Some("180")),
         spec("NEUROX_LOG_FORMAT", EnvCategory::Runtime, "Formato del log. `json` para salida estructurada.", false, None),
         spec("RUST_LOG", EnvCategory::Runtime, "Nivel de log por crate.", false, None),

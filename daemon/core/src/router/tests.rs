@@ -365,7 +365,7 @@ mod iteration_limit {
     /// que tiene que quedarse.
     #[test]
     fn no_lleva_envoltorio_params_de_mas() {
-        let p = iteration_limit_params(2);
+        let p = iteration_limit_params(2, 50);
         assert!(
             p.get("params").is_none(),
             "el transporte ya envuelve en \"params\"; con otro envoltorio el \
@@ -377,21 +377,35 @@ mod iteration_limit {
         );
     }
 
-    /// El texto tiene que llevar el numero de iteracion: es lo que le dice
-    /// al modelo por que le estan cortando.
+    /// El texto tiene que decir CUANTAS lleva y CUANTAS hay. Sin las dos
+    /// cifras el modelo no puede saber si le queda margen o esta al limite,
+    /// que es justo lo que tiene que contarle al usuario al cerrar.
     #[test]
-    fn el_texto_lleva_la_iteracion() {
-        let p = iteration_limit_params(7);
+    fn el_texto_dice_la_iteracion_y_el_tope() {
+        let p = iteration_limit_params(7, 50);
         let text = p["text"].as_str().unwrap();
-        assert!(text.contains("iterated 7 times"), "{text}");
+        assert!(text.contains("7 of 50"), "{text}");
         assert!(text.contains("STOP making tool calls"), "{text}");
+        // Y que le diga al modelo que lo diga, para que el corte no parezca
+        // que el agente se rindio por decision propia.
+        assert!(text.contains("NEUROX_MAX_TOOL_ITERATIONS"), "{text}");
+    }
+
+    /// EP-2026-10-03: `NEUROX_MAX_TOOL_ITERATIONS=0` significa sin tope. Sin
+    /// el filtro `cap > 0`, el `>=` cortaria en la iteracion 0.
+    #[test]
+    fn con_tope_cero_no_hay_tope() {
+        let cap = crate::router::max_tool_iterations_from(Some(0));
+        assert!(cap.is_none(), "0 debe significar sin limite, no cortar ya");
+        assert!(crate::router::max_tool_iterations_from(Some(50)).is_some());
+        assert!(crate::router::max_tool_iterations_from(None).is_some());
     }
 
     /// Sin tools, el modelo no tiene forma estructural de seguir pidiendo
     /// tool_calls: es lo que para el bucle de verdad, no solo el mensaje.
     #[test]
     fn va_sin_tools_para_que_no_pueda_seguir_pidiendo_herramientas() {
-        let p = iteration_limit_params(2);
+        let p = iteration_limit_params(2, 50);
         let tools = p["tools"].as_array().expect("la clave tools debe existir");
         assert!(tools.is_empty(), "tools debe ir vacio: {p}");
     }

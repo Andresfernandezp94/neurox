@@ -20,19 +20,46 @@ pub mod ws;
 pub use routes_composer::router;
 pub use state::AppState;
 
-/// Maximum number of tool_call iterations per single user message.
-/// Prevents infinite loops where the LLM keeps calling tools without
-/// converging (e.g. read_file → list_dir → read_file → ...).
-/// Soft cap on tool-call iterations per user message. EP-2026-08-19
-/// (v2 manifest): the agent's `stop_conditions.max_iterations` is
-/// surfaced via `NEUROX_MAX_TOOL_ITERATIONS` env var (set by the agent
-/// subprocess at startup). Falls back to 10 for agents without the
-/// manifest field.
+/// Tope de iteraciones de tool_call por mensaje de usuario.
+///
+/// Existe para que un bucle sin salida (read_file → list_dir → read_file →
+/// ...) no queme tokens indefinidamente. NO es un limite de trabajo: el
+/// agente puede planificar y replanificar con libertad dentro de este
+/// margen.
+///
+/// EP-2026-10-03: el default pasa de 10 a 50. Con 10 el agente se cortaba
+/// en tareas de unos minutos y no decia nada, asi que parecia que se
+/// rendia por Decision propia. Con despacho en paralelo ademas el conteo
+/// subestima el trabajo real: una iteracion puede ser un lote de varias
+/// tools, asi que 10 iteraciones son muchas mas tools que antes.
+///
+/// Poner `NEUROX_MAX_TOOL_ITERATIONS=0` desactiva el tope (util para un
+/// agente con criterio propio), a cambio de quedarte sin red ante un bucle.
+///
+/// EP-2026-08-19 (v2 manifest): el agente expone su
+/// `stop_conditions.max_iterations` por la misma variable al arrancar. Ojo:
+/// si hay manifest, su valor MANDA sobre el default.
 pub fn max_tool_iterations() -> u32 {
     std::env::var("NEUROX_MAX_TOOL_ITERATIONS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(10)
+        .unwrap_or(50)
+}
+
+/// `None` = sin tope.
+///
+/// EP-2026-10-03: separado de `max_tool_iterations` para poder testear la
+/// regla del 0 sin tocar variables de entorno, que en un suite de tests son
+/// globales y se pisan entre si. El 0 es "sin limite" a proposito: es lo que
+/// pide quien quiere que el agente se autogestione, y con un `>=` sin filtro
+/// cortaria justo en la iteracion 0.
+pub(crate) fn max_tool_iterations_from(env: Option<u32>) -> Option<u32> {
+    let cap = env.unwrap_or(50);
+    if cap == 0 {
+        None
+    } else {
+        Some(cap)
+    }
 }
 
 /// Max wall-clock time to wait for a SINGLE session-agent stream round
@@ -87,14 +114,15 @@ pub const DEFAULT_AGENT_ID: &str = "default";
 ///
 /// `tools: []` es deliberado: deja al modelo sin forma estructural de
 /// seguir emitiendo tool_calls.
-fn iteration_limit_params(iteration: u32) -> serde_json::Value {
+fn iteration_limit_params(iteration: u32, cap: u32) -> serde_json::Value {
     let text = format!(
-        "[system] You've iterated {iteration} times on this request. \
-         STOP making tool calls. Summarize what you've found so far \
-         and ask the user for next steps, OR take a definitive action. \
-         Your next response MUST be a final assistant message with no \
-         tool_calls — otherwise this loop will hard-stop with \
-         IterationLimit."
+        "[system] This request has used its tool budget: {iteration} of {cap} \
+         iterations. STOP making tool calls now. Summarize honestly what you \
+         found and what is left, say which parts you did NOT get to, and ask \
+         the user for next steps. Your next response MUST be a final assistant \
+         message with no tool_calls — otherwise this loop hard-stops with \
+         IterationLimit. If you needed more steps, say so explicitly so the \
+         user can raise NEUROX_MAX_TOOL_ITERATIONS."
     );
     serde_json::json!({ "text": text, "tools": [] })
 }
@@ -499,8 +527,19 @@ impl AppState {
         agent: Arc<crate::session_agents::SessionAgent>,
         session_id: Uuid,
         iteration: u32,
+        cap: u32,
     ) -> anyhow::Result<Option<serde_json::Value>> {
-        let synthetic_params = iteration_limit_params(iteration);
+        // EP-2026-10-03: esto antes era invisible. El corte llegaba al
+        // usuario como si el agente hubiera decidido rendirse, sin ningun
+        // rastro de que hubo un tope. Ahora queda en el journal con el valor
+        // concreto, que es lo unico que permitediagnosticarlo.
+        tracing::warn!(
+            session_id = %session_id,
+            iteration,
+            cap,
+            "soft cap de iteraciones alcanzado; se pide al agente que resuma y cierre"
+        );
+        let synthetic_params = iteration_limit_params(iteration, cap);
 
         let result = self
             .dispatch_to_session_agent(
@@ -755,8 +794,13 @@ impl AppState {
         cancel: CancellationToken,
         iteration: u32,
     ) -> anyhow::Result<Option<serde_json::Value>> {
-        if iteration >= max_tool_iterations() {
-            return self.inject_iteration_limit(agent, session_id, iteration).await;
+        let cap = max_tool_iterations();
+        if let Some(cap) = max_tool_iterations_from(Some(cap)) {
+            if iteration >= cap {
+                return self
+                    .inject_iteration_limit(agent, session_id, iteration, cap)
+                    .await;
+            }
         }
         let prepared = match self
             .prepare_tool_call(agent.clone(), session_id, tool_call_value, iteration)
@@ -1018,8 +1062,13 @@ impl AppState {
         // tool: un lote de 6 tools en la iteracion N no puede saltarselo.
         // Se comprueba una vez, no por tool: la decision de parar es del
         // turno, no de cada llamada.
-        if iteration >= max_tool_iterations() {
-            return self.inject_iteration_limit(agent, session_id, iteration).await;
+        let cap = max_tool_iterations();
+        if let Some(cap) = max_tool_iterations_from(Some(cap)) {
+            if iteration >= cap {
+                return self
+                    .inject_iteration_limit(agent, session_id, iteration, cap)
+                    .await;
+            }
         }
         // Con una sola tool_call no se gana nada con el lote: se sigue el
         // camino simple y se evita el overhead del join.
