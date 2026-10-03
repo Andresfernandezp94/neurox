@@ -323,14 +323,46 @@ structural search, run ast-grep yourself through the shell tool."
             .unwrap_or(50)
             .clamp(1, 500) as usize;
 
-        let search_dir = {
-            let raw = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            let p = self.workspace_root.join(raw);
-            if !p.exists() {
-                return Err(format!("path not found: {raw}"));
-            }
-            p.canonicalize().map_err(|e| format!("path: {e}"))?
-        };
+        // `path` se valida contra el sandbox ANTES de tocar el arbol. Antes
+        // hacia `workspace_root.join(raw)` a pelo, que no bloquea nada:
+        // `Path::join` con una ruta absoluta descarta la base (o sea
+        // `path: "/etc"` se aceptaba entero) y un `../` subia hasta el
+        // padre del workspace. La tool no devuelve el cuerpo del fichero,
+        // pero si las rutas y la primera linea de cada definicion que
+        // encuentre ahi fuera. Mismo helper y mismo `writable: false` que
+        // usan read_file/glob/grep/list_dir.
+        let raw = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+        let readable = self.sandbox.read().await.readable_paths_resolved(&self.workspace_root);
+
+        // 1) Chequeo lexico: `..`, rutas absolutas y las de `readable_paths`.
+        let resolved = resolve_under_workspace(&self.workspace_root, raw, &readable, false)
+            .map_err(|e| format!("path: {e}"))?;
+
+        if !resolved.exists() {
+            return Err(format!("path not found: {raw}"));
+        }
+
+        // 2) Segundo chequeo sobre la ruta YA canonicalizada. El de arriba es
+        // lexico y no ve los symlinks: uno dentro del workspace que apunte
+        // fuera pasaria el primero y el recorrido lo seguiria. Comparar
+        // contra la raiz canonicalizada cierra ese caso.
+        let search_dir = resolved.canonicalize().map_err(|e| format!("path: {e}"))?;
+        let canon_ws = self
+            .workspace_root
+            .canonicalize()
+            .unwrap_or_else(|_| self.workspace_root.clone());
+        let dentro = search_dir.starts_with(&canon_ws)
+            || readable.iter().any(|p| {
+                p.canonicalize()
+                    .map(|c| search_dir.starts_with(c))
+                    .unwrap_or_else(|_| search_dir.starts_with(p))
+            });
+        if !dentro {
+            return Err(format!(
+                "path '{raw}' resolves outside workspace '{}' (not readable)",
+                self.workspace_root.display()
+            ));
+        }
 
         // Un solo recorrido para saber que lenguajes hay. Luego solo se
         // invocan los patrones de los que de verdad aparecen: si nadie
@@ -505,8 +537,12 @@ fn collect_source_files(dir: &Path, max_files: usize) -> BTreeMap<String, Vec<Pa
     out
 }
 
-/// Busca el binario. Cacheado por proceso: son 2 spawns por llamada como
-/// mucho, pero el test las ejecuta muchas veces.
+/// Busca el binario. Son 2 spawns como mucho (uno por nombre) POR LLAMADA,
+/// lo cual se documenta porque antes de esto decia "cacheado por proceso" y
+/// no habia ninguna cache. No se cachea: probeando son 2 procesos frente a
+/// las decenas de invocaciones de `run_pattern` que hace el resto, asi que
+/// la cache no compra nada que compense su complejidad. Si algun dia el
+/// perfil muestra que si, el sitio es aqui.
 async fn find_ast_grep() -> Option<String> {
     for bin in AST_GREP_BINARIES {
         let ok = Command::new(bin)
@@ -897,6 +933,122 @@ mod tests {
         std::fs::write(dir.path().join("notas.txt"), "hola").unwrap();
         let out = run(dir.path(), "cualquiera", None).await;
         assert!(out.contains("no source files"), "{out}");
+    }
+
+    /// `path` no puede salirse del workspace.
+    ///
+    /// Este test existe porque `docs/audit/SUMMARY.md` afirmaba que symbols
+    /// usaba `resolve_under_workspace` y nunca lo uso: hacia
+    /// `workspace_root.join(raw)` y ya. `join` con una ruta absoluta
+    /// DESCARTA la base, asi que `path: "/etc"` se aceptaba entero, y un
+    /// `../` subia hasta el directorio padre del workspace. La tool no
+    /// devuelve el cuerpo del fichero, pero si las rutas y la primera linea
+    /// de cada definicion que encuentre fuera del workspace.
+    ///
+    /// El resto de tools de filesystem (`read_file`, `write_file`, `glob`,
+    /// `grep`, `list_dir`) si pasan por el helper; faltaba aqui.
+    #[tokio::test]
+    async fn no_sale_del_workspace_por_path() {
+        let ws = tempfile::tempdir().unwrap();
+        let fuera = ws.path().parent().unwrap().join(format!(
+            "neurox-symbols-fuera-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&fuera).unwrap();
+        std::fs::write(
+            fuera.join("secreto.py"),
+            "def objetivo_secreto():\n    return 1\n",
+        )
+        .unwrap();
+
+        let err = tool_for(ws.path())
+            .execute(
+                &crate::ExecuteContext {
+                    agent_id: "t".into(),
+                    cancel: None,
+                    http_client: None,
+                },
+                serde_json::json!({ "query": "objetivo_secreto", "path": format!("../neurox-symbols-fuera-{}", std::process::id()) }),
+            )
+            .await
+            .expect_err("un path fuera del workspace debe rechazarse");
+
+        let _ = std::fs::remove_dir_all(&fuera);
+        assert!(err.contains("outside workspace"), "{err}");
+    }
+
+    /// Una ruta ABSOLUTA tambien se rechaza, que es el caso que `join` mas
+    /// facil de dejar pasar: `Path::join` con un absoluto ignora la base.
+    #[tokio::test]
+    async fn rechaza_path_absoluta_fuera_del_workspace() {
+        let ws = tempfile::tempdir().unwrap();
+        let err = tool_for(ws.path())
+            .execute(
+                &crate::ExecuteContext {
+                    agent_id: "t".into(),
+                    cancel: None,
+                    http_client: None,
+                },
+                serde_json::json!({ "query": "cualquiera", "path": "/etc" }),
+            )
+            .await
+            .expect_err("una ruta absoluta fuera del workspace debe rechazarse");
+        assert!(err.contains("outside workspace"), "{err}");
+    }
+
+    /// Y lo de dentro sigue funcionando: el helper no puede romper el caso
+    /// normal ni un subdirectorio legitimo.
+    #[tokio::test]
+    async fn sigue_dejando_buscar_dentro_del_workspace() {
+        let ws = tempfile::tempdir().unwrap();
+        let sub = ws.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("a.py"), "def comun():\n    return 1\n").unwrap();
+
+        let raiz = tool_for(ws.path())
+            .execute(
+                &crate::ExecuteContext {
+                    agent_id: "t".into(),
+                    cancel: None,
+                    http_client: None,
+                },
+                serde_json::json!({ "query": "comun", "path": "sub" }),
+            )
+            .await
+            .expect("un subdirectorio del workspace es valido");
+        assert!(raiz.contains("comun"), "{raiz}");
+    }
+
+    /// Un symlink DENTRO del workspace que apunte fuera tampoco vale.
+    ///
+    /// El chequeo lexico de `resolve_under_workspace` no ve symlinks: la ruta
+    /// es legxima y esta dentro, luego pasa, y el recorrido seguia el enlace
+    /// al directorio de al lado. Por eso esta el segundo chequeo, sobre la
+    /// ruta ya canonicalizada.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn no_sigue_un_symlink_que_apunta_fuera() {
+        let ws = tempfile::tempdir().unwrap();
+        let fuera = tempfile::tempdir().unwrap();
+        std::fs::write(
+            fuera.path().join("secreto.py"),
+            "def objetivo_secreto():\n    return 1\n",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(fuera.path(), ws.path().join("enlace")).unwrap();
+
+        let err = tool_for(ws.path())
+            .execute(
+                &crate::ExecuteContext {
+                    agent_id: "t".into(),
+                    cancel: None,
+                    http_client: None,
+                },
+                serde_json::json!({ "query": "objetivo_secreto", "path": "enlace" }),
+            )
+            .await
+            .expect_err("un symlink hacia fuera no debe seguirse");
+        assert!(err.contains("outside workspace"), "{err}");
     }
 
     /// El filtro `kind` tiene que excluir de verdad lo que no sea de ese tipo.

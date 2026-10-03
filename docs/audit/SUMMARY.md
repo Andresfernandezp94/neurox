@@ -77,7 +77,7 @@ de plugins. Ver "Tools retiradas" al final para el detalle.
 | `grep` | ✅ | 1 gap (G1) — `path` no se validaba, leía `/home/<u>/.ssh` |
 | `glob` | ✅ | 0 gaps (ya correcta) |
 | `list_dir` | ✅ | 0 gaps (ya correcta) |
-| `symbols` | ✅ | 0 gaps (usa `resolve_under_workspace`) |
+| `symbols` | ✅ | 1 gap (G-path) — `path` no se validaba. **Corregido 2026-10-03**: la fila decía "usa `resolve_under_workspace`" y nunca lo uso, en ninguna versión. `Path::join` con una ruta absoluta descarta la base, así que `path: "/etc"` se aceptaba entero y un `../` salía del workspace; la tool devolvía rutas y la primera línea de las definiciones de fuera. Ahora pasa por el helper, como el resto de tools de filesystem. |
 | `web_fetch` | ✅ | 4 gaps — binary content, SSRF, SSRF redirect, 404 handling |
 | `web_search` | ✅ | 0 gaps (delega a `ddgr` externo) |
 | ⚰️ `generate_image` | ✅ | 2 gaps (path-traversal + SSRF) — **tool retirada** |

@@ -207,6 +207,28 @@ def test_symbols():
     r = invoke("symbols", {"query": "Bar", "path": f"{TESTDIR}"})
     ok = r.get("ok") and "class Bar" in r.get("result", "")
     record("symbols: class Bar found", ok, r.get("result", r.get("error", ""))[:80])
+    # kind filter
+    r = invoke("symbols", {"query": "Bar", "path": f"{TESTDIR}", "kind": "class"})
+    ok = r.get("ok") and "class Bar" in r.get("result", "")
+    record("symbols: kind=class honoured", ok, r.get("result", r.get("error", ""))[:80])
+    # el nombre, no el patron: un $ debe rechazarse diciendo que hacer
+    r = invoke("symbols", {"query": "def $FUNC($$$ARGS):", "path": f"{TESTDIR}"})
+    ok = r.get("ok") is False and "symbol NAME" in r.get("error", "")
+    record("symbols: rejects raw ast-grep pattern", ok, r.get("error", "")[:60])
+    # sandbox: ESTAS TRES SON LAS QUE FALTABAN. test_symbols solo probaba el
+    # camino feliz, igual que grep/glob/list_dir las tienen y symbols no, y
+    # por eso nadie noto que `path` no se validaba contra readable_paths:
+    # `Path::join` con una ruta absoluta descarta la base, asi que "/etc"
+    # pasaba entero. Anadidas 2026-10-03 al arreglarlo.
+    r = invoke("symbols", {"query": "main", "path": "/srv"})
+    ok = r.get("ok") is False
+    record("symbols: /srv denied", ok, r.get("error", "")[:60])
+    r = invoke("symbols", {"query": "passwd", "path": "/etc"})
+    ok = r.get("ok") is False
+    record("symbols: /etc denied", ok, r.get("error", "")[:60])
+    r = invoke("symbols", {"query": "main", "path": "../../etc"})
+    ok = r.get("ok") is False
+    record("symbols: ../../etc denied (traversal)", ok, r.get("error", "")[:60])
 
 
 def test_web_search():
