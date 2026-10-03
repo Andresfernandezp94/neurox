@@ -445,14 +445,36 @@ async fn el_cerrojo_no_vive_en_el_workspace() {
 // Internal helpers (extracted to keep `execute` readable)
 // ────────────────────────────────────────────────────────────────────
 
-/// W1+W4+W5: atomic write — ensure the target exists, then write to
-/// a tmpfile in the same directory and rename into place. `rename(2)`
-/// is atomic on POSIX so readers always observe the old or the new
-/// file, never a partial state.
+/// W1+W5: atomic write — write to a tmpfile in the same directory and rename
+/// into place. `rename(2)` is atomic on POSIX, so readers always observe the
+/// old file or the new one, never a partial state.
 ///
-/// W4 fix: pre-create the target file (empty) before writing so
-/// concurrent readers never see ENOENT. During the write window they
-/// see an empty file; once rename lands they see the new content.
+/// SIN pre-create del target (2026-10-03). Antes se abria el destino con
+/// `.create(true).truncate(false)` para que un lector concurrente no viera
+/// ENOENT en la primera escritura. Eso estaba mal por dos motivos:
+///
+/// 1. **No cumplia su objetivo.** El audit ya lo medio: "Sigue fallando 10/10
+///    con barrier". `OpenOptions::open()` es async, asi que yieldea al event
+///    loop y el `read_to_string` del lector concurrente puede hacer su syscall
+///    antes de que el pre-create termine. El fix que si funciona esta en
+///    `read_file`: retry con backoff ante ENOENT.
+///
+/// 2. **Ocultaba el ENOENT y dejaba basura.** Con el pre-create, un lector
+///    durante la ventana de escritura ve un fichero VACIO, no un ENOENT, asi
+///    que no puede distinguir "aun no se ha escrito" de "este fichero esta
+///    vacio de verdad" — y el agente razona en funcion de lo que ve. Ademas,
+///    si el `write` del tmp falla (ENOSPC, por ejemplo), el target vacio se
+///    queda en disco: se devuelve error pero el fichero se crea igual.
+///    Este segundo efecto NO tiene test: reproducir "el pre-create tuvo exito
+///    y luego fallo la escritura" pide ENOSPC de verdad, o sea montar un tmpfs
+///    con limite de tamano, que no se puede hacer desde un test sin privileges.
+///    Se documenta en vez de fingir cobertura. El primer efecto si lo cubre
+///    `read_file_tolera_la_primera_escritura_concurrente`.
+///
+/// Lo que se pierde es la ventana de ENOENT en la primera escritura de cada
+/// ruta. `read_file` la cubre con retry (5 intentos, backoff 5-20ms), asi que
+/// para el lector es invisible. Ver
+/// `read_file_tolera_la_primera_escritura_concurrente`.
 async fn atomic_write(path: &Path, content: &[u8]) -> Result<(), String> {
     use uuid::Uuid;
     if let Some(parent) = path.parent() {
@@ -462,24 +484,15 @@ async fn atomic_write(path: &Path, content: &[u8]) -> Result<(), String> {
                 .map_err(|e| format!("mkdir: {e}"))?;
         }
     }
-    // Pre-create the target so a concurrent reader never sees ENOENT.
-    // If the file already exists this is a no-op (O_CREAT without
-    // O_TRUNC and without O_EXCL). The file may briefly be empty
-    // during the write window, but it always exists.
-    tokio::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)
-        .await
-        .map_err(|e| format!("precreate: {e}"))?;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let tmp = parent.join(format!(".tmp.{}", Uuid::new_v4()));
     // Write tmpfile (still invisible to readers of the original path).
-    tokio::fs::write(&tmp, content)
-        .await
-        .map_err(|e| format!("write failed: {e}"))?;
-    // Atomic rename onto the target path.
+    if let Err(e) = tokio::fs::write(&tmp, content).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(format!("write failed: {e}"));
+    }
+    // Atomic rename onto the target path. Este rename es lo que hace existir el
+    // fichero cuando la ruta es nueva: no hay estado intermedio visible.
     if let Err(e) = tokio::fs::rename(&tmp, path).await {
         // Best-effort cleanup so we don't leave .tmp.* files behind.
         let _ = tokio::fs::remove_file(&tmp).await;

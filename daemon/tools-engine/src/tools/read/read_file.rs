@@ -166,6 +166,106 @@ mod tests {
         }
     }
 
+    /// W4: un lector concurrente a la PRIMERA escritura de una ruta no debe
+    /// ver ENOENT.
+    ///
+    /// Esto importa porque `atomic_write` ya NO pre-crea el target (ver el
+    /// comentario de W4 en write_file.rs): en la primera escritura hay una
+    /// ventana real en la que la ruta no existe, y la cubre el retry con
+    /// backoff de este mismo modulo.
+    ///
+    /// El audit original afirmaba que el pre-create "no lo resolvia desde el
+    /// writer" porque el open async yieldea antes de completarse, y senalaba
+    /// el retry en read_file como el fix. Este test es la comprobacion de que
+    /// aquel retry aguanta de verdad, ahora que el pre-create no esta.
+    ///
+    /// Sin el retry, este test falla con ENOENT; con el pre-create hacia
+    /// trampa de otra forma (el lector ve un fichero vacio y no puede
+    /// distinguirlo de un fichero genuinamente vacio), que es peor porque no
+    /// se manifiesta como error.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn read_file_tolera_la_primera_escritura_concurrente() {
+        use crate::tools::write::write_file::WriteFileTool;
+
+        let mut fallos = 0usize;
+        let mut vacios = 0usize;
+        // Contenido grande para ensanchar la ventana entre crear el tmp y el
+        // rename, que es justo donde la ruta todavia no existe.
+        let contenido = "linea de contenido\n".repeat(4000);
+
+        for ronda in 0..30 {
+            let dir = tempfile::tempdir().unwrap();
+            let ruta = dir.path().join("nuevo.txt");
+            let sandbox = make_sandbox(vec![dir.path().to_string_lossy().to_string()]);
+
+            let escritor = WriteFileTool {
+                workspace_root: dir.path().to_path_buf(),
+                sandbox: sandbox.clone(),
+            };
+            let lector = ReadFileTool {
+                workspace_root: dir.path().to_path_buf(),
+                sandbox,
+            };
+
+            let barrera = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+            let b1 = barrera.clone();
+            let ruta_w = ruta.clone();
+            let contenido_w = contenido.clone();
+            let h_write = tokio::spawn(async move {
+                b1.wait().await;
+                escritor
+                    .execute(
+                        &crate::ExecuteContext {
+                            agent_id: "test".into(),
+                            cancel: None,
+                            http_client: None,
+                        },
+                        serde_json::json!({
+                            "path": ruta_w.to_string_lossy(),
+                            "command": "create",
+                            "content": contenido_w,
+                        }),
+                    )
+                    .await
+            });
+
+            let b2 = barrera.clone();
+            let ruta_r = ruta.clone();
+            let h_read = tokio::spawn(async move {
+                b2.wait().await;
+                lector
+                    .execute(
+                        &crate::ExecuteContext {
+                            agent_id: "test".into(),
+                            cancel: None,
+                            http_client: None,
+                        },
+                        serde_json::json!({ "path": ruta_r.to_string_lossy() }),
+                    )
+                    .await
+            });
+
+            h_write.await.unwrap().expect("la escritura debe salir bien");
+            match h_read.await.unwrap() {
+                Err(e) => {
+                    fallos += 1;
+                    eprintln!("ronda {ronda}: read fallo: {e}");
+                }
+                Ok(salida) => {
+                    // Nunca debe devolver exito con contenido VACIO: eso
+                    // seria el pre-create dejando ver el fichero a medio
+                    // escribir en vez de dar ENOENT.
+                    if salida.trim().is_empty() {
+                        vacios += 1;
+                        eprintln!("ronda {ronda}: read devolvio VACIO");
+                    }
+                }
+            }
+        }
+        assert_eq!(fallos, 0, "lectores que vieron ENOENT: {fallos}");
+        assert_eq!(vacios, 0, "lectores que vieron el fichero vacio: {vacios}");
+    }
+
     #[tokio::test]
     async fn read_file_returns_content() {
         let dir = tempfile::tempdir().unwrap();

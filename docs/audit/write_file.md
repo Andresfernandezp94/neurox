@@ -96,25 +96,57 @@ Run 3: partial=0 ✅
 Sigue fallando 10/10 con barrier (atomic_write no resuelve desde writer)
 ```
 
+> **2026-10-03: cerrado.** El pre-create nunca lo resolvió (el open async
+> yieldea antes de completarse); el fix real es el retry de `read_file`, y el
+> pre-create se eliminó por además ocultar el ENOENT detrás de un fichero
+> vacío. Ver "W4: ENOENT en read concurrente — CERRADO".
+
 ---
 
 ## Limitaciones conocidas
 
-### W4: ENOENT en read concurrente
+### W4: ENOENT en read concurrente — CERRADO 2026-10-03
 
 **Síntoma:** `threading.Barrier(2)` para lanzamiento simultáneo de write+read → 10/10 reads fallan con "No such file or directory".
 
-**Por qué atomic_write no lo resuelve:**
-- `atomic_write` pre-crea el target antes de escribir
+**Por qué atomic_write no lo resolvía:**
+- `atomic_write` pre-creaba el target antes de escribir
 - PERO `tokio::fs::OpenOptions.open()` es async → yields al event loop
 - El `read_to_string` del read concurrente puede ejecutar su syscall ANTES de que el pre-create complete
 - Ambos compiten por el thread pool de `spawn_blocking`
 
-**Fix posible (en read_file):**
-- Retry con backoff corto si ve ENOENT
-- O usar flock compartido/exclusivo coordinado
+O sea que el pre-create **no cumplía su propósito**: el propio audit medía 10/10
+fallos con él puesto. El fix que sí funciona estaba en `read_file`: retry con
+backoff ante ENOENT.
 
-**Impacto real:** bajo. LLMs típicamente no lanzan write+read concurrentes desde el mismo tool call.
+**Qué se cambió:** `atomic_write` ya no pre-crea el target. Se escribe el tmp y
+se renombra; el fichero aparece en la ruta con el `rename`. La ventana de
+ENOENT en la primera escritura la cubre el retry de `read_file`, que es
+invisible para quien lee.
+
+Dos cosas que el pre-create hacía mal y que nadie había medido:
+
+1. **Ocultaba el ENOENT.** Durante la ventana de escritura un lector veía un
+   fichero VACIO, no un ENOENT, así que no podía distinguir "todavía no se ha
+   escrito" de "este fichero está vacío de verdad". Para el agente, que razona
+   en función de lo que ve, eso es peor que un error: no se manifiesta como
+   fallo.
+2. **Podía dejar basura.** Si el `write` del tmp fallaba (ENOSPC), el target
+   vacío se quedaba en disco: se devolvía error y a la vez el fichero quedaba
+   creado. Este efecto **no tiene test**: reproducirlo pide ENOSPC real, o sea
+   montar un tmpfs con límite de tamaño, que un test sin privilegios no puede
+   hacer. Queda documentado en vez de fingir cobertura.
+
+**Test:** `read_file_tolera_la_primera_escritura_concurrente` (en read_file.rs).
+Verificado en ambas direcciones: con el retry desactivado falla **30 de 30**
+lecturas con ENOENT; con el retry, 0. El test también falla si alguien
+reintroduce el pre-create, porque el lector vería el fichero vacío en vez de
+recibir un ENOENT que el retry absorbe.
+
+**Nota sobre por qué el test original no lo veía:** con la pre-creación, el
+lector no falla —ve vacío—, así que un test que solo cuenta fallos pasa sin
+detectar el peor de los dos efectos. El test comprueba las dos cosas: ni
+ENOENT ni vacío.
 
 ---
 
