@@ -105,15 +105,22 @@
    * sumar padding del wrapper + padding del boton inflaba la fila
    * y la dejaba ~14px mas alta que las demas. */
   padding: 0;
-  /* Antes `background: var(--bg)`: un rectángulo negro opaco sin radio
-   * detrás de los iconos. Con el footer con superficie propia eso se
-   * lee como un agujero. Pasa a un inset tenue con el mismo lenguaje
-   * plano del resto de la fila (el trigger del ModelSelector es
-   * transparente y sin borde). */
-  background: var(--bg-tertiary);
+  /* EP-2026-10-03: transparente, sin blur.
+   *
+   * Antes `background: var(--bg)` (un rectángulo negro opaco detrás de
+   * los iconos) y después `--bg-tertiary` con `backdrop-filter`. Los
+   * dos nacieron cuando `.chat__footer` llevaba su propia superficie y
+   * este wrapper necesitaba destacarse sobre ella.
+   *
+   * Ya no: la superficie la aplica `.chat-layout` y todo el pie es
+   * transparente (ver el comentario de `.chat-layout` en
+   * organisms.css). Con el footer ya unificado, un `--bg-tertiary`
+   * encima se lee como un parche rectangular flotando sobre el fondo.
+   *
+   * Se conserva el `gap` y el `margin-left: auto`: los que organizan
+   * la fila. Lo que se va es la superficie. */
+  background: transparent;
   border-radius: 0.25rem;
-  backdrop-filter: var(--chrome-blur, blur(20px) saturate(140%));
-  -webkit-backdrop-filter: var(--chrome-blur, blur(20px) saturate(140%));
 }
 
 /* EP-0026-UX: en mobile (≤1024px) el footer debe ir edge-to-edge
