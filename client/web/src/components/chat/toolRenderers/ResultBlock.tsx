@@ -8,7 +8,7 @@
 //      y lo mostramos como badge (✓ ok / ✗ fail / ∅ empty).
 //   2. Si el registry conoce el tool, intenta su `renderBody` custom
 //      (ej. shell separa stdout/stderr, grep lista matches).
-//   3. Si no, cae al `SmartResult` (que ya maneja JSON, diff, media).
+//   3. Si no, cae al `SmartResult` (que ya maneja JSON, diff, texto).
 //
 // Tools sin schema conocido → badge genérico + SmartResult. Nunca
 // rompemos nada.
@@ -92,8 +92,8 @@ export function ResultBlock({
       )}
       <div className="tool-renderer__result-body">
         {customBody ?? (
-          // Fallback: SmartResult (JSON, diff, media, text).
-          <SmartResult tool={tool} output={output} />
+          // Fallback: SmartResult (JSON, diff, texto).
+          <SmartResult output={output} />
         )}
       </div>
     </div>

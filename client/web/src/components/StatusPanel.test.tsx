@@ -2,7 +2,7 @@
 // EP-0024: cubre la tab DefaultAgent (antes DefaultAgentStatusPanel).
 // EP-0026-UX: el contenido de Overview absorbe lo que antes vivía en
 // el tab "General" de ConfigViewer. Overview ahora muestra runtime
-// status + services + MCPs.
+// status + services.
 
 import { describe, expect, it, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
@@ -11,7 +11,6 @@ import { StatusPanel } from './StatusPanel';
 import { StoreProvider, useStore, type StoreAction } from '../store/StoreContext';
 import * as services from '../api/services';
 import * as health from '../api/health';
-import * as mcps from '../api/mcps';
 
 function Seed({ actions }: { actions: StoreAction[] }) {
   const { dispatch } = useStore();
@@ -48,7 +47,6 @@ describe('StatusPanel', () => {
       version: '0.4.0',
       uptime_seconds: 0,
     });
-    vi.spyOn(mcps, 'getPlugins').mockResolvedValue([]);
   }
 
   it('shows the connecting state when no health yet', async () => {
@@ -61,7 +59,7 @@ describe('StatusPanel', () => {
     expect(screen.getByTestId('overview-content')).toBeInTheDocument();
   });
 
-  it('overview: renders Service and MCP sections with counts', async () => {
+  it('overview: renders the Services section with counts', async () => {
     vi.spyOn(services, 'listServices').mockResolvedValue({
       services: [
         {
@@ -76,17 +74,6 @@ describe('StatusPanel', () => {
           uptime_seconds: 42,
           last_checked_at: '2026-01-01T00:00:00Z',
         },
-        {
-          id: 'memory',
-          name: 'Memory',
-          description: 'mem plugin',
-          kind: 'mcp',
-          status: 'ok',
-          version: '5.0.0',
-          endpoint: 'unix:///tmp/mem.sock',
-          latency_ms: 3,
-          last_checked_at: '2026-01-01T00:00:00Z',
-        },
       ],
       clients: [],
       server_time: '2026-01-01T00:00:00Z',
@@ -97,16 +84,13 @@ describe('StatusPanel', () => {
       version: '0.4.0',
       uptime_seconds: 0,
     });
-    vi.spyOn(mcps, 'getPlugins').mockResolvedValue([]);
 
     renderWithStore(<StatusPanel />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Services \(2\)/)).toBeInTheDocument();
+      expect(screen.getByText(/Services \(1\)/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/MCP tools \(0\)/)).toBeInTheDocument();
     expect(screen.getByText('Daemon')).toBeInTheDocument();
-    expect(screen.getByText('Memory')).toBeInTheDocument();
 
     // DOT-fix: el status bar del Runtime status debe incluir un
     // .badge__dot porque showDot=true por default. El color del
@@ -126,13 +110,11 @@ describe('StatusPanel', () => {
     await waitFor(() => {
       expect(screen.getByText(/No services reported/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/No tools exposed/)).toBeInTheDocument();
   });
 
   it('overview: shows error banner when services endpoint fails', async () => {
     vi.spyOn(services, 'listServices').mockRejectedValue(new Error('boom'));
     vi.spyOn(health, 'getHealth').mockRejectedValue(new Error('boom'));
-    vi.spyOn(mcps, 'getPlugins').mockRejectedValue(new Error('boom'));
 
     renderWithStore(<StatusPanel />);
 
@@ -155,7 +137,6 @@ describe('StatusPanel', () => {
       version: '0.4.0',
       uptime_seconds: 0,
     });
-    vi.spyOn(mcps, 'getPlugins').mockResolvedValue([]);
 
     renderWithStore(<StatusPanel />);
 

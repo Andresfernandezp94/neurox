@@ -28,7 +28,6 @@ import {
   IconPower,
   IconGrid,
   IconRobot,
-  IconPlug,
   IconMaximize,
   IconMinimize,
 } from "./Icons";
@@ -40,7 +39,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { logout } from "../../api/auth";
 import { useAppFullscreen } from "../hooks/useAppFullscreen";
 
-export type NavId = "status" | "chat" | "intelligence" | "mcp" | "config";
+export type NavId = "status" | "chat" | "intelligence" | "config";
 
 export interface SidebarProps {
   view: NavId;
@@ -157,9 +156,6 @@ export function Sidebar({ view, onTabChange, hidden = false, onLogout }: Sidebar
     // trabaja, igual que Chat. El icono es un robot, que es la lectura
     // literal del nombre; el set no tiene cerebro ni foco.
     { id: "intelligence", label: t("sidebar.intelligence"), icon: IconRobot },
-    // MCP debajo de Intelligence: son las dos piezas que sostienen a los
-    // agentes, y se consultan juntas. IconPlug, que es un enchufe.
-    { id: "mcp", label: t("sidebar.mcp"), icon: IconPlug },
     { id: "config", label: t("sidebar.config"), icon: IconConfig },
   ];
 

@@ -92,10 +92,6 @@ export const IconBuilding = () => (
   <svg viewBox="0 0 24 24" {...s}><rect x="4" y="2" width="16" height="20" rx="2" /><line x1="9" y1="6" x2="9" y2="6.01" /><line x1="15" y1="6" x2="15" y2="6.01" /><line x1="9" y1="10" x2="9" y2="10.01" /><line x1="15" y1="10" x2="15" y2="10.01" /><line x1="9" y1="14" x2="9" y2="14.01" /><line x1="15" y1="14" x2="15" y2="14.01" /><path d="M9 22v-4h6v4" /></svg>
 );
 
-export const IconDatabase = () => (
-  <svg viewBox="0 0 24 24" {...s}><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /></svg>
-);
-
 /** EP-0024: database dedicado (3 cilindros apilados) — usado para memory plugin. */
 export const IconDatabaseStacked = () => (
   <svg viewBox="0 0 24 24" {...s}>
@@ -223,10 +219,6 @@ export const IconSearch = () => (
   <svg viewBox="0 0 24 24" {...s}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
 );
 
-export const IconClickUp = () => (
-  <svg viewBox="0 0 24 24" {...s}><path d="M2 18.44l3.69-2.83c1.96 2.56 4.04 3.74 6.36 3.74 2.31 0 4.33-1.17 6.2-3.7L22 18.4C19.3 22.07 15.94 24 12.05 24 8.18 24 4.79 22.08 2 18.44z"/><path d="M12.04 6.15L5.47 11.81 2.44 8.29 12.05 0l9.54 8.3-3.05 3.51z"/></svg>
-);
-
 export const IconHammer = () => (
   <svg viewBox="0 0 24 24" {...s}><path d="M15 12l-8.5 8.5c-.83.83-2.17.83-3 0 0 0 0 0 0 0a2.12 2.12 0 0 1 0-3L12 9" /><path d="M17.64 15L22 10.64" /><path d="M20.91 11.7l-1.25-1.25c-.6-.6-.93-1.4-.93-2.25V6.5a.5.5 0 0 0-.5-.5H16.5a3.17 3.17 0 0 1-2.24-.93l-1.27-1.27a1 1 0 0 0-1.41 0L9 6.38" /></svg>
 );
@@ -311,10 +303,6 @@ export const IconUsers = () => (
 
 export const IconAttach = () => (
   <svg viewBox="0 0 24 24" {...s}><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
-);
-
-export const IconVoice = () => (
-  <svg viewBox="0 0 24 24" {...s}><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
 );
 
 export const IconPlay = () => (

@@ -1,5 +1,5 @@
 // SmartResult — renderer for tool results that picks a specialised
-// view based on the content shape (JSON, diff, media, plain text).
+// view based on the content shape (JSON, diff, plain text).
 //
 // EP-0024-UX. The tool result is a free-form string but in practice
 // it falls into a few common shapes that benefit from specialised
@@ -12,88 +12,14 @@
 //   - Shell command output       → monospace plain text
 //   - everything else            → monospace plain text with token colouring
 //
-// EP-2026-08-19 (media fix): media used to render as `<img src="/v1/files/...">`,
-// which broke in two ways: (1) the browser cannot send the Bearer token
-// on <img> requests, so a daemon with `auth_required: true` returned 401;
-// (2) the URL concatenated the empty VITE_API_BASE with a path starting
-// in `/`, producing a double-slash URL that the Vite dev proxy collapsed
-// to a single slash, turning the absolute file path into a relative one
-// (and 404-ing on the daemon). The fix is to fetch the media with the
-// Bearer header and feed the response blob into a `blob:` object URL via
-// `useMediaBlob`. That works in dev and prod, with or without auth.
 
 import { Highlight, themes } from "prism-react-renderer";
 import { ToolCodeBlock } from "../../shared/components/molecules/ToolCodeBlock";
-import { useMediaBlob } from "./useMediaBlob";
 
-type ResultKind =
-  | "json"
-  | "diff"
-  | "media-image"
-  | "media-audio"
-  | "media-video"
-  | "text";
+type ResultKind = "json" | "diff" | "text";
 
-const MEDIA_EXTS = {
-  image: ["jpg", "jpeg", "png", "gif", "webp", "svg"],
-  audio: ["mp3", "wav", "ogg", "m4a", "flac"],
-  video: ["mp4", "webm", "mov"],
-} as const;
-
-function extOf(path: string): string | null {
-  const i = path.lastIndexOf(".");
-  if (i < 0) return null;
-  return path.slice(i + 1).toLowerCase();
-}
-
-function detectResultKind(tool: string, output: string): ResultKind {
+function detectResultKind(output: string): ResultKind {
   const trimmed = output.trim();
-
-  // EP-2026-08-19: media detection ANTES del JSON check.
-  //
-  // El backend suele emitir un JSON tipo
-  //   {"ok": true, "path": "/home/user/img.png"}
-  // como tool_result de generate_image. Si chequeamos JSON primero,
-  // lo renderizamos como bloque JSON y el usuario nunca ve la imagen
-  // — solo "Image saved · /path/..." y un dump de `{"ok": true, ...}`.
-  //
-  // extractMediaPath() busca paths dentro del string sin importar que
-  // esté entre comillas JSON (el regex excluye `"` y `'`), así que
-  // funciona igual sobre JSON crudo.
-  //
-  // El daemon emite `generate_audio` (ver core/src/capabilities.rs:213)
-  // pero algunas versiones/configs lo nombran `generate_music`. Aceptamos
-  // ambos como sinónimos.
-  const MEDIA_TOOLS: Record<
-    "media-image" | "media-audio" | "media-video",
-    readonly string[]
-  > = {
-    "media-image": ["generate_image"],
-    "media-audio": ["generate_music", "generate_audio"],
-    "media-video": ["generate_video"],
-  };
-  const mediaPath = extractMediaPath(output);
-  const mediaExt = mediaPath ? extOf(mediaPath) : null;
-  if (mediaExt) {
-    if (
-      MEDIA_TOOLS["media-image"].includes(tool) &&
-      MEDIA_EXTS.image.includes(mediaExt as never)
-    ) {
-      return "media-image";
-    }
-    if (
-      MEDIA_TOOLS["media-audio"].includes(tool) &&
-      MEDIA_EXTS.audio.includes(mediaExt as never)
-    ) {
-      return "media-audio";
-    }
-    if (
-      MEDIA_TOOLS["media-video"].includes(tool) &&
-      MEDIA_EXTS.video.includes(mediaExt as never)
-    ) {
-      return "media-video";
-    }
-  }
 
   if (
     (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
@@ -124,13 +50,6 @@ function detectResultKind(tool: string, output: string): ResultKind {
     }
   }
   return "text";
-}
-
-function extractMediaPath(output: string): string | null {
-  const m = output.match(
-    /([/~][^\s'"\n]+\.(?:jpg|jpeg|png|gif|webp|svg|mp3|wav|ogg|m4a|flac|mp4|webm|mov))/i,
-  );
-  return m && m[1] ? m[1] : null;
 }
 
 // ─── Rich Text Tokeniser ─────────────────────────────────────────────────────
@@ -377,168 +296,14 @@ function DiffViewer({ raw }: { raw: string }) {
   );
 }
 
-function MediaBlock({
-  kind,
-  output,
-}: {
-  kind: "media-image" | "media-audio" | "media-video";
-  output: string;
-}) {
-  const path = extractMediaPath(output);
-  const filename = path ? path.split("/").pop() ?? path : "";
-  const isImage = kind === "media-image";
-  const isVideo = kind === "media-video";
-  const label = isImage
-    ? "Image saved"
-    : isVideo
-    ? "Video saved"
-    : "Audio saved";
-
-  // EP-2026-08-19: auth-aware fetch via useMediaBlob. The browser
-  // cannot add headers to <img>/<video>/<audio> requests, so we go
-  // through fetch() and a blob: object URL. The path we pass to the
-  // hook is the API path with the absolute file path URL-encoded into
-  // it so the request lands on the daemon's /v1/files handler.
-  //
-  // Bug visto el 2026-08-19: `path.split("/").join("/")` sobre
-  // "/home/user/img.png" devuelve "/home/user/img.png" (con `/` al
-  // inicio porque el primer elemento del split es `""`). Concatenado
-  // con `/v1/files/` daba `/v1/files//home/user/img.png` con doble
-  // slash, que el daemon rechaza con 404 — el MediaBlock quedaba
-  // eternamente en `loading` o `error` sin mostrar la imagen.
-  // Fix: filtrar los segmentos vacíos del split antes del join, y
-  // agregar `/` entre `/v1/files` y el path encoded.
-  const apiPath = path
-    ? `/v1/files/${path
-        .split("/")
-        .map((seg) => encodeURIComponent(seg))
-        .filter((seg) => seg.length > 0)
-        .join("/")}`
-    : null;
-  const { url, status, error } = useMediaBlob(apiPath, !!path);
-
-  return (
-    <div
-      className="chat__tool-result-inline chat__tool-result-inline--media"
-      data-testid="smart-result-media"
-      data-kind={kind}
-    >
-      <div className="chat__media-label">
-        {label}
-        {path && (
-          <>
-            {" · "}
-            <code className="chat__media-path" title={path}>
-              {path}
-            </code>
-            {/* EP-2026-08-19: el botón ↓ download SIEMPRE se muestra
-                cuando hay path, no solo cuando url está listo. Si el
-                fetch inline falló (auth, daemon config, etc.) el
-                usuario igualmente puede abrir el archivo en otra
-                pestaña usando `apiPath` directamente — el browser
-                agregará la cookie de sesión si existe, y sino la
-                URL es clara sobre qué pidió. */}
-            {apiPath && (
-              <a
-                className="chat__media-download"
-                href={apiPath}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={`Open ${filename}`}
-                data-testid="smart-result-media-open"
-              >
-                ↗ open
-              </a>
-            )}
-            {url && (
-              <a
-                className="chat__media-download"
-                href={url}
-                download={filename}
-                aria-label={`Download ${filename}`}
-                data-testid="smart-result-media-download"
-              >
-                ↓ download
-              </a>
-            )}
-          </>
-        )}
-      </div>
-      {!path ? (
-        <div
-          className="chat__media-thumb chat__media-thumb--missing"
-          aria-label="Media preview unavailable"
-        >
-          <span className="chat__media-thumb-glyph">🎵</span>
-          <span className="chat__media-thumb-hint">path not found in output</span>
-        </div>
-      ) : status === "error" ? (
-        <div
-          className="chat__media-thumb chat__media-thumb--missing"
-          aria-label="Media preview failed"
-          data-testid="smart-result-media-error"
-        >
-          <span className="chat__media-thumb-glyph">⚠</span>
-          <span className="chat__media-thumb-hint">
-            preview unavailable{error ? ` (${error})` : ""}
-          </span>
-        </div>
-      ) : status === "ready" && url ? (
-        isImage ? (
-          <img
-            src={url}
-            alt={filename || "generated image"}
-            className="chat__media-thumb"
-            loading="lazy"
-            data-testid="smart-result-image"
-          />
-        ) : isVideo ? (
-          <video
-            controls
-            preload="metadata"
-            className="chat__media-video"
-            data-testid="smart-result-video"
-          >
-            <source src={url} />
-            Your browser does not support inline video.
-          </video>
-        ) : (
-          <audio
-            controls
-            preload="none"
-            className="chat__media-audio"
-            data-testid="smart-result-audio"
-          >
-            <source src={url} />
-            Your browser does not support inline audio.
-          </audio>
-        )
-      ) : (
-        <div
-          className="chat__media-thumb chat__media-thumb--loading"
-          aria-label="Loading media"
-          data-testid="smart-result-media-loading"
-        >
-          <span className="chat__media-thumb-glyph">⏳</span>
-          <span className="chat__media-thumb-hint">loading…</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function SmartResult({ tool, output }: { tool: string; output: string | undefined }) {
+export function SmartResult({ output }: { output: string | undefined }) {
   const text = output ?? "";
-  const kind = detectResultKind(tool, text);
+  const kind = detectResultKind(text);
   switch (kind) {
     case "json":
       return <JsonBlock raw={text} />;
     case "diff":
       return <DiffViewer raw={text} />;
-    case "media-image":
-    case "media-audio":
-    case "media-video":
-      return <MediaBlock kind={kind} output={text} />;
     default:
       return <RichTextBlock text={text} />;
   }

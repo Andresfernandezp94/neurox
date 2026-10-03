@@ -4,7 +4,6 @@
 // Refactor: dividido en ChatHeader + ChatMain + ChatFooter.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { VoiceCallOverlay } from "./VoiceCallOverlay";
 import { useChatTabs } from "../hooks/useChatTabs";
 import { useDefaultAgentId } from "../hooks/useDefaultAgentId";
 import { useNotifications } from "../store/NotificationsContext";
@@ -16,7 +15,6 @@ import {
 import { getDefaultAgentStatus, type DefaultAgentResponse } from "../api/default";
 import { countTranscriptMatches } from "./chat/searchTranscript";
 import type { Message, MessageMetrics } from "../types";
-import { PanelToggle } from "../shared/components/PanelToggle";
 import { useAppFullscreen } from "../shared/hooks/useAppFullscreen";
 import { useChatStream } from "../hooks/useChatStream";
 import { ChatHeader } from "./ChatHeader";
@@ -78,10 +76,6 @@ export function ChatPanel(_: ChatPanelProps = {}) {
    */
   const notify = useNotifications();
   const [showHistory, setShowHistory] = useState(false);
-  // EP-0002: voice call overlay visibility. Toggle desde el botón 📞
-  // en la barra de tools del chat. Independiente del MicButton inline —
-  // son dos affordances distintas para el mismo MCP.
-  const [voiceOverlayOpen, setVoiceOverlayOpen] = useState(false);
   // EP-0026-UX: "Fullscreen real con sidebar" — el botón de maximizar
   // usa la Fullscreen API sobre el shell `.app` (sidebar + chat). Así el
   // chat ocupa todo el viewport como antes, PERO la sidebar queda visible
@@ -720,29 +714,17 @@ useLayoutEffect(() => {
         }}
         showHistory={showHistory}
         onToggleHistory={() => setShowHistory(!showHistory)}
-        voiceOverlayOpen={voiceOverlayOpen}
-        onOpenVoiceCall={() => setVoiceOverlayOpen(true)}
         isExpanded={isExpanded}
         onToggleExpanded={toggleExpanded}
         defaultAgent={defaultAgent}
         input={input}
         onInputChange={setInput}
         onKeyDown={handleKeyDown}
-        onMicTranscript={setInput}
         isStreaming={isStreaming}
         onSend={() => void handleSend()}
         onCancel={() => void handleCancel()}
         inputRef={inputRef}
       />
-
-      {/* EP-0002: voice call overlay (fullscreen, hands-free mode) */}
-      <PanelToggle id="chat-voice-overlay">
-        <VoiceCallOverlay
-          open={voiceOverlayOpen}
-          sessionId={sessionId}
-          onClose={() => setVoiceOverlayOpen(false)}
-        />
-      </PanelToggle>
     </div>
   );
 }

@@ -140,6 +140,10 @@ export interface ToolSpec {
   description: string;
   parameters: Record<string, unknown>;
   requires_approval: boolean;
+  /** Categorías declarativas (filesystem, web, shell, task_management…). */
+  categories?: string[];
+  /** Modos en los que la tool está disponible (build, plan, chat). */
+  mode_compatible?: string[];
 }
 
 export interface ToolsResponse {

@@ -8,8 +8,7 @@ import { useState, useMemo, useCallback, type ReactNode } from "react";
 import { listTools } from "../api/tools";
 import { usePolling } from "../hooks/usePolling";
 import {
-  IconFolder, IconTerminal, IconDefaultAgent, IconGlobe,
-  IconMonitor, IconSparkles, IconLink, IconZap,
+  IconFolder, IconTerminal, IconGlobe, IconZap,
 } from "../shared/components/Icons";
 import type { ToolsResponse, ToolSpec } from "../types";
 
@@ -25,11 +24,8 @@ interface ToolCategory {
 const CATEGORIES: ToolCategory[] = [
   { id: "files", label: "Files & Code", icon: IconFolder, match: (n) => /^(read_file|write_file|list_dir|glob|grep|symbols)$/.test(n) },
   { id: "shell", label: "Shell", icon: IconTerminal, match: (n) => n === "shell" },
-  { id: "memory", label: "Memory", icon: IconDefaultAgent, match: (n) => /^(memory_|save_fact|search_memory|knowledge)/.test(n) },
+  { id: "tasks", label: "Tasks", icon: IconZap, match: (n) => /^todo_/.test(n) },
   { id: "web", label: "Web", icon: IconGlobe, match: (n) => /^(web_fetch|web_search)$/.test(n) },
-  { id: "desktop", label: "Desktop", icon: IconMonitor, match: (n) => /^(clipboard_|screenshot|ocr_screen)/.test(n) },
-  { id: "generation", label: "Generation", icon: IconSparkles, match: (n) => /^generate_/.test(n) },
-  { id: "delegation", label: "Delegation", icon: IconLink, match: (n) => n === "kiro_sixbell" },
   { id: "other", label: "Other", icon: IconZap, match: () => true },
 ];
 

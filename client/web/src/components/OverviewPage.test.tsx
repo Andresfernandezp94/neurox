@@ -13,9 +13,7 @@ const mockStore = vi.hoisted(() => ({
 
 const mockApi = vi.hoisted(() => ({
   providers: [] as unknown[],
-  plugins: [] as unknown[],
   tools: [] as unknown[],
-  toolsCalled: false,
   rejectAll: false,
 }));
 
@@ -30,23 +28,11 @@ vi.mock("../api/llm", () => ({
         }),
 }));
 
-// OJO: `getPlugins` devuelve el CATÁLOGO DE TOOLS, no servidores plugin.
-// Ver api/mcps.ts — el shape real no tiene `status`, `tools` ni `base_url`.
-vi.mock("../api/mcps", () => ({
-  getPlugins: () =>
+vi.mock("../api/tools", () => ({
+  getTools: () =>
     mockApi.rejectAll
       ? Promise.reject(new Error("boom"))
-      : Promise.resolve(mockApi.plugins),
-}));
-
-vi.mock("../api/tools", () => ({
-  // El overview ya NO pide /v1/tools: el total de tools viene como hint
-  // de la tarjeta de Categorías. El mock queda para detectar si alguien
-  // vuelve a introducir ese request.
-  listTools: () => {
-    mockApi.toolsCalled = true;
-    return Promise.resolve({ tools: mockApi.tools });
-  },
+      : Promise.resolve({ tools: mockApi.tools }),
 }));
 
 vi.mock("../store/StoreContext", () => ({
@@ -101,9 +87,7 @@ describe("OverviewPage", () => {
     mockStore.sessions = 2;
     mockStore.approvals = 1;
     mockApi.rejectAll = false;
-    mockApi.toolsCalled = false;
     mockApi.providers = [];
-    mockApi.plugins = [];
     mockApi.tools = [];
   });
 
@@ -199,8 +183,8 @@ describe("OverviewPage", () => {
 
   it("renders the tool catalog grouped by category", async () => {
     // Regresión del bug reportado: antes se hacía `p.tools.length` sobre
-    // /v1/mcps, que devuelve un array de tool specs sin esa propiedad.
-    mockApi.plugins = [
+    // el catálogo, que devuelve un array de tool specs sin esa propiedad.
+    mockApi.tools = [
       makeTool({ name: "shell", categories: ["system"] }),
       makeTool({ name: "read_file", categories: ["fs"] }),
       makeTool({ name: "grep", categories: ["fs"] }),
@@ -215,7 +199,7 @@ describe("OverviewPage", () => {
 
   it("does not crash on tools without categories", async () => {
     // El daemon puede mandar un item sin `categories`; no debe romper.
-    mockApi.plugins = [
+    mockApi.tools = [
       makeTool({ name: "sin_cat", categories: undefined as unknown as string[] }),
     ];
     render(<OverviewPage />);

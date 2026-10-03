@@ -1,15 +1,13 @@
 // ChatFooter — sección inferior del ChatPanel.
-// Contiene: tools bar (model, agent, history/sidebar/voice/fullscreen) +
+// Contiene: tools bar (model, agent, history/sidebar/fullscreen) +
 // context bar (tokens, msgs, skills, facts) + workspace bar (cwd, branch,
-// sandbox) + input area (textarea + mic + send/cancel).
+// sandbox) + input area (textarea + send/cancel).
 
 import { PanelToggle } from "../shared/components/PanelToggle";
 import { ModelSelector, type ModelSelection } from "./ModelSelector";
 import { AgentSelector } from "./AgentSelector";
-import { MicButton } from "./MicButton";
 import {
   IconHistory,
-  IconVoice,
   IconMaximize,
   IconMinimize,
   IconSend,
@@ -26,8 +24,6 @@ export interface ChatFooterProps {
   onChangeAgent: (id: string) => void;
   showHistory: boolean;
   onToggleHistory: () => void;
-  voiceOverlayOpen: boolean;
-  onOpenVoiceCall: () => void;
   /**
    * True cuando el chat está "expandido": fullscreen real del shell
    * (Fullscreen API sobre `.app`) o fallback CSS (chat-layout--focus)
@@ -43,7 +39,6 @@ export interface ChatFooterProps {
   input: string;
   onInputChange: (v: string) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-  onMicTranscript: (text: string) => void;
   isStreaming: boolean;
   onSend: () => void;
   onCancel: () => void;
@@ -58,15 +53,12 @@ export function ChatFooter({
   onChangeAgent,
   showHistory,
   onToggleHistory,
-  voiceOverlayOpen,
-  onOpenVoiceCall,
   isExpanded,
   onToggleExpanded,
   defaultAgent,
   input,
   onInputChange,
   onKeyDown,
-  onMicTranscript,
   isStreaming,
   onSend,
   onCancel,
@@ -97,18 +89,6 @@ export function ChatFooter({
               data-testid="chat-history-toggle"
             >
               <IconHistory />
-            </button>
-            <button
-              type="button"
-              className={`chat__bar-actions__btn${voiceOverlayOpen ? " chat__bar-actions__btn--active" : ""}`}
-              onClick={onOpenVoiceCall}
-              disabled={!sessionId}
-              title="Open voice call"
-              aria-label="Open voice call"
-              aria-pressed={voiceOverlayOpen}
-              data-testid="chat-voice-call-open"
-            >
-              <IconVoice />
             </button>
             <button
               type="button"
@@ -204,12 +184,6 @@ export function ChatFooter({
               rows={1}
             />
             <div className="chat__footer-actions">
-              <PanelToggle id="chat-mic">
-                <MicButton
-                  sessionId={sessionId}
-                  onUserTranscript={onMicTranscript}
-                />
-              </PanelToggle>
               {isStreaming ? (
                 <button
                   className="btn btn-primary chat__action"

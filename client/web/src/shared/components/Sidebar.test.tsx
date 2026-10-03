@@ -48,7 +48,6 @@ describe("Sidebar", () => {
       "status",
       "chat",
       "intelligence",
-      "mcp",
       "config",
     ];
     for (const id of ids) {
@@ -70,13 +69,12 @@ describe("Sidebar", () => {
     // Config es configuracion puntual, Workspace es trabajo en curso.
     // `status` es el NavId histórico de Overview.
     // Intelligence va debajo de Chat: es donde se habla con los agentes, asi
-    // que acompaña a Chat en el uso diario. MCP va debajo de Intelligence.
-    // Workspace salio de la nav, asi que ya no aparece.
+    // que acompaña a Chat en el uso diario.
+    // MCP y Workspace saliron de la nav, asi que ya no aparecen.
     expect(order).toEqual([
       "sidebar-nav-status",
       "sidebar-nav-chat",
       "sidebar-nav-intelligence",
-      "sidebar-nav-mcp",
       "sidebar-nav-config",
     ]);
   });
@@ -119,7 +117,6 @@ describe("Sidebar", () => {
       "status",
       "chat",
       "intelligence",
-      "mcp",
       "config",
     ];
 

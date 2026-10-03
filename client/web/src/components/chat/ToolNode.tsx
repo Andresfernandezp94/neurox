@@ -52,28 +52,6 @@ function previewResult(result: string | undefined, tool: string): string {
   // "142 bytes"). Si no, primer línea del output.
   const caption = TOOL_REGISTRY[tool]?.caption?.(result, null);
   if (caption) return caption;
-  // EP-2026-08-19: para tools media (generate_image / audio / video)
-  // el body va a ser un <img>/<video>/<audio>. El preview del toggle
-  // debería decir algo legible ("image saved", "saved"), no el JSON
-  // crudo que el backend manda (ej. `{"ok":true,"output":"...Image
-  // generated..."}`). Si vemos una extensión media en el output,
-  // mostramos un preview específico.
-  if (
-    tool === "generate_image" ||
-    tool === "generate_music" ||
-    tool === "generate_audio" ||
-    tool === "generate_video"
-  ) {
-    if (/\.(png|jpg|jpeg|gif|webp|svg|mp3|wav|ogg|m4a|flac|mp4|webm|mov)/i.test(result)) {
-      const kind =
-        tool === "generate_image"
-          ? "image"
-          : tool === "generate_video"
-            ? "video"
-            : "audio";
-      return `${kind} saved`;
-    }
-  }
   const trimmed = result.trim();
   const first = trimmed.split("\n")[0] ?? "";
   if (first.length > 80) return first.slice(0, 80) + "…";
@@ -104,10 +82,6 @@ function toolGlyph(tool: string): string {
       return "S";
     case "web_fetch":
       return "↗";
-    case "save_fact":
-      return "+";
-    case "search_memory":
-      return "M";
     case "symbols":
       return "Σ";
     default:

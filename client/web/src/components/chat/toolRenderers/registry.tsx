@@ -1,7 +1,7 @@
 // toolRenderers/registry.ts — configuración hardcoded por tool.
 //
 // Para los ~13 tools principales del agente (shell, read/write_file,
-// edit_file, grep, glob, list_dir, web_*, save_fact, search_memory,
+// edit_file, grep, glob, list_dir, web_*,
 // generate_*, symbols) definimos:
 //
 //   - labels legibles para los parámetros más comunes
@@ -10,7 +10,7 @@
 //     plano (ej. shell separa stdout/stderr, write_file dice "ok · N
 //     bytes")
 //
-// Tools desconocidas (MCPs dinámicos, plugins nuevos) caen al
+// Tools desconocidas caen al
 // `SmartResult` existente — no rompemos nada.
 //
 // EP-2026-08-19.
@@ -89,13 +89,6 @@ function genericParseStatus(raw: string): ParsedStatus | null {
   return null;
 }
 
-// ─── labels compartidos ─────────────────────────────────────────────
-
-const SCOPE_LABELS: ArgLabels = {
-  scope: { label: "Scope" },
-  category: { label: "Category" },
-};
-
 // ─── per-tool configs ──────────────────────────────────────────────
 
 const shellArgs: ArgLabels = {
@@ -155,33 +148,10 @@ const webFetchArgs: ArgLabels = {
   max_bytes: { label: "Max bytes", presentation: "number" },
 };
 
-const saveFactArgs: ArgLabels = {
-  ...SCOPE_LABELS,
-  key: { label: "Key" },
-  value: { label: "Value", presentation: "multiline-code" },
-};
-
-const searchMemoryArgs: ArgLabels = {
-  query: { label: "Query" },
-  limit: { label: "Limit", presentation: "number" },
-  offset: { label: "Offset", presentation: "number" },
-};
-
 const symbolsArgs: ArgLabels = {
   query: { label: "Query" },
   path: { label: "Path", presentation: "path" },
 };
-
-const generateArgs = (kind: string): ArgLabels => ({
-  prompt: { label: "Prompt", presentation: "multiline-code" },
-  path: { label: "Path", presentation: "path" },
-  width: { label: "Width", presentation: "number" },
-  height: { label: "Height", presentation: "number" },
-  duration: { label: "Duration", presentation: "duration" },
-  size_bytes: { label: "Size", presentation: "number" },
-  // El tool real puede tener args extra — los desconocidos caen a JSON.
-  _kind: { label: kind, hideIfEmpty: true },
-});
 
 // ─── registry ──────────────────────────────────────────────────────
 
@@ -454,59 +424,12 @@ export const TOOL_REGISTRY: ToolRegistry = {
     },
   },
 
-  // ─── save_fact ───────────────────────────────────────────────────
-  save_fact: {
-    argLabels: saveFactArgs,
-    parseStatus: (raw) => genericParseStatus(raw),
-  },
-
-  // ─── search_memory ───────────────────────────────────────────────
-  search_memory: {
-    argLabels: searchMemoryArgs,
-    parseStatus: (raw) =>
-      raw.trim().length === 0 ? { status: "empty" } : genericParseStatus(raw),
-    renderBody: (raw) => {
-      const obj = tryParseJsonObject(raw);
-      if (obj && Array.isArray(obj.results ?? obj.memories)) {
-        const items = ((obj.results ?? obj.memories) as unknown[]).slice(0, 20);
-        return (
-          <ul className="tool-renderer__memories">
-            {items.map((it, i) => {
-              if (!it || typeof it !== "object") return null;
-              const e = it as Record<string, unknown>;
-              return (
-                <li key={i} className="tool-renderer__memory">
-                  {typeof e.content === "string" && (
-                    <div className="tool-renderer__memory-content">
-                      {String(e.content)}
-                    </div>
-                  )}
-                  {typeof e.score === "number" && (
-                    <div className="tool-renderer__memory-score">
-                      score {(e.score as number).toFixed(2)}
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        );
-      }
-      return null;
-    },
-  },
-
   // ─── symbols ─────────────────────────────────────────────────────
   symbols: {
     argLabels: symbolsArgs,
     parseStatus: (raw) =>
       raw.trim().length === 0 ? { status: "empty" } : genericParseStatus(raw),
   },
-
-  // ─── media generation (args only — body ya lo renderiza SmartResult) ─
-  generate_image: { argLabels: generateArgs("image") },
-  generate_music: { argLabels: generateArgs("audio") },
-  generate_video: { argLabels: generateArgs("video") },
 
   // ─── aliases comunes (algunos backends los nombran distinto) ─
   shell_exec: { argLabels: shellArgs },

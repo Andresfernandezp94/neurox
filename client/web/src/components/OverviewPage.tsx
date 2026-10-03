@@ -8,11 +8,11 @@
 //   store    → agents, sessions, approvals, health, latencia. Ya los
 //              mantiene el WS global; leerlos de ahí evita duplicar
 //              requests y garantiza que el WS y la vista coincidan.
-//   fetch    → providers, plugins, tools. El store NO los tiene, así que
+//   fetch    → providers, tools. El store NO los tiene, así que
 //              se piden directo.
 //
 // Orden de la página: estado → lo que requiere atención → providers →
-// detalle de runtime y plugins. Lo accionable va arriba, no enterrado.
+// detalle de runtime y tools. Lo accionable va arriba, no enterrado.
 
 import { useCallback, useEffect, useState } from "react";
 import { useStore, useConnectionState } from "../store/StoreContext";
@@ -33,7 +33,8 @@ import {
   IconRobot,
 } from "../shared/components/Icons";
 import { getProviders, type LlmProviderStatus } from "../api/llm";
-import { getPlugins, type McpToolSpec } from "../api/mcps";
+import { getTools } from "../api/tools";
+import type { ToolSpec } from "../types";
 import { providerDisplayName } from "../shared/providerLabels";
 
 export function OverviewPage() {
@@ -41,7 +42,7 @@ export function OverviewPage() {
   const conn = useConnectionState();
 
   const [providers, setProviders] = useState<LlmProviderStatus[] | null>(null);
-  const [plugins, setPlugins] = useState<McpToolSpec[]>([]);
+  const [tools, setTools] = useState<ToolSpec[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -50,15 +51,15 @@ export function OverviewPage() {
     try {
       // Promise.allSettled: que falle el catálogo no debe tumbar el
       // overview entero. Cada bloque se pinta por separado.
-      const [provR, plugR] = await Promise.allSettled([
+      const [provR, toolsR] = await Promise.allSettled([
         getProviders(),
-        getPlugins(),
+        getTools(),
       ]);
 
       if (provR.status === "fulfilled") setProviders(provR.value.providers);
-      if (plugR.status === "fulfilled") setPlugins(plugR.value);
+      if (toolsR.status === "fulfilled") setTools(toolsR.value.tools);
 
-      const failed = [provR, plugR].filter((r) => r.status === "rejected");
+      const failed = [provR, toolsR].filter((r) => r.status === "rejected");
       if (failed.length === 2) {
         // Ambos fallaron: el daemon probablemente está caído o el token
         // expiró. Se da un mensaje accionable y se conserva la causa real,
@@ -90,7 +91,7 @@ export function OverviewPage() {
   // bajo "sin categoría" explícito.
   const NO_CATEGORY = "sin categoría";
   const categories = Array.from(
-    new Set(plugins.flatMap((t) => t.categories?.filter(Boolean).length ? t.categories : [NO_CATEGORY])),
+    new Set(tools.flatMap((t) => t.categories?.filter(Boolean).length ? t.categories : [NO_CATEGORY])),
   ).sort();
 
   // ─── Cosas que requieren atención ───
@@ -148,8 +149,8 @@ export function OverviewPage() {
             Categorías, y mantener las dos era redundante. */}
         <StatCard
           label="Categorías"
-          value={plugins.length === 0 && loading ? "—" : categories.length}
-          hint={plugins.length ? `${plugins.length} tools` : undefined}
+          value={tools.length === 0 && loading ? "—" : categories.length}
+          hint={tools.length ? `${tools.length} tools` : undefined}
           icon={<IconGrid />}
         />
         <StatCard
@@ -241,20 +242,20 @@ export function OverviewPage() {
         <SectionHeader
           title="Tools publicadas"
           description={
-            plugins.length
-              ? `${plugins.length} tools en ${categories.length} categorías`
+            tools.length
+              ? `${tools.length} tools en ${categories.length} categorías`
               : undefined
           }
         />
-        {plugins.length === 0 ? (
+        {tools.length === 0 ? (
           loading ? (
             <p className="muted">Cargando tools…</p>
           ) : (
             <EmptyState>
               <EmptyState.Title>No hay tools registradas.</EmptyState.Title>
               <EmptyState.Hint>
-                El motor expone las tools nativas; los plugins publican las
-                suyas vía POST /v1/plugins.
+                El motor expone las tools nativas. Registralas en
+                <code> config.yaml </code> o reiniciá el daemon.
               </EmptyState.Hint>
             </EmptyState>
           )
@@ -264,7 +265,7 @@ export function OverviewPage() {
               <div key={cat} className="overview__category">
                 <span className="overview__category-name">{cat}</span>
                 <div className="overview__tool-list">
-                  {plugins
+                  {tools
                     .filter((t) => {
                       const cats = t.categories?.filter(Boolean) ?? [];
                       return cats.length ? cats.includes(cat) : cat === NO_CATEGORY;

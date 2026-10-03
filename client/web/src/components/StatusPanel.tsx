@@ -3,7 +3,7 @@
 // <Stack>, <Badge> + utility classes instead of inline styles.
 // EP-0024: tabs internas — "Overview" (default), "Host", "DefaultAgent".
 // EP-0026-UX: el contenido de Overview absorbe lo que antes vivía en
-// `ConfigViewer > GeneralTab` (runtime + services + plugins). El tab
+// `ConfigViewer > GeneralTab` (runtime + services). El tab
 // "General" de ConfigViewer se eliminó.
 // cleanup-2026-08: los tabs "Host" (SystemMonitor), "Capabilities" y
 // "Logs" se eliminaron junto con sus endpoints HTTP; solo queda Overview.
@@ -20,16 +20,13 @@ import { Row } from "../shared/components/molecules/Row";
 import { Stack } from "../shared/components/molecules/Stack";
 import { StatPair } from "../shared/components/molecules/StatPair";
 import { Button } from "../shared/components/atoms/Button";
-import { Badge } from "../shared/components/atoms/Badge";
 import { StatusBar } from "../shared/components/StatusBar";
 import { useConnectionState } from "../store/StoreContext";
 import { listServices, type ServiceInfo, type ClientInfo } from "../api/services";
 import { getHealth } from "../api/health";
-import { getPlugins, type McpToolSpec } from "../api/mcps";
 import type { Health } from "../types";
 import {
   IconCpu,
-  IconIntegrations,
   IconLoop,
   IconStatus,
 } from "../shared/components/Icons";
@@ -39,7 +36,6 @@ export function StatusPanel() {
   const [servicesError, setServicesError] = useState<string | null>(null);
   const [, setClients] = useState<ClientInfo[]>([]);
   const [serverTime, setServerTime] = useState<string | null>(null);
-  const [plugins, setPlugins] = useState<McpToolSpec[]>([]);
   const [healthInfo, setHealthInfo] = useState<Health | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -47,16 +43,11 @@ export function StatusPanel() {
   // TODO: agregar polling con AbortController cuando lo pidan.
   const fetchAll = useCallback(async () => {
     try {
-      const [h, svc, pls] = await Promise.all([
-        getHealth(),
-        listServices(),
-        getPlugins(),
-      ]);
+      const [h, svc] = await Promise.all([getHealth(), listServices()]);
       setHealthInfo(h);
       setServices(svc.services);
       setClients(svc.clients ?? []);
       setServerTime(svc.server_time);
-      setPlugins(pls);
       setServicesError(null);
     } catch (e) {
       setServicesError((e as Error).message);
@@ -76,7 +67,6 @@ export function StatusPanel() {
           health={healthInfo}
           services={services}
           serverTime={serverTime}
-          plugins={plugins}
           loading={loading}
           error={servicesError}
           onRefresh={() => void fetchAll()}
@@ -87,7 +77,7 @@ export function StatusPanel() {
 }
 
 /* -----------------------------------------------------------------------
- * Overview content — runtime + services + MCPs (absorbed de ConfigViewer
+ * Overview content — runtime + services (absorbed de ConfigViewer
  * > GeneralTab en EP-0026-UX).
  * --------------------------------------------------------------------- */
 
@@ -95,7 +85,6 @@ interface OverviewContentProps {
   health: Health | null;
   services: ServiceInfo[];
   serverTime: string | null;
-  plugins: McpToolSpec[];
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
@@ -105,12 +94,11 @@ function OverviewContent({
   health,
   services,
   serverTime,
-  plugins,
   loading,
   error,
   onRefresh,
 }: OverviewContentProps) {
-  const hasData = health !== null || services.length > 0 || plugins.length > 0;
+  const hasData = health !== null || services.length > 0;
 
   // DOT-fix: deriva el status de la status bar del estado de la
   // conexión WS. Si el daemon no responde, el último fetch dejó
@@ -134,7 +122,7 @@ function OverviewContent({
           title="Overview"
           description={
             health
-              ? "Runtime status, services and connected MCP plugins."
+              ? "Runtime status and services."
               : "Connecting to the daemon…"
           }
         />
@@ -230,48 +218,6 @@ function OverviewContent({
         </Stack>
       )}
 
-      {/* ─── MCP tools ─── */}
-      {/* OJO: /v1/mcps devuelve el CATÁLOGO DE TOOLS del motor, no
-       * servidores plugin registrados. No hay status ni base_url que
-       * mostrar: lo que existe es el spec de cada tool. */}
-      <Row gap="sm" align="center" className="overview-content__section-header">
-        <IconIntegrations />
-        <h3 className="overview-content__section-title">
-          MCP tools ({plugins.length})
-        </h3>
-      </Row>
-      {plugins.length === 0 ? (
-        <p className="muted">No tools exposed.</p>
-      ) : (
-        <Stack gap="sm">
-          {plugins.map((p) => (
-            <Card key={p.name} className="overview-content__card">
-              <Row gap="sm" align="center">
-                <span
-                  className={`overview-content__item-icon overview-content__item-icon--${p.requires_approval ? "warn" : "success"}`}
-                  aria-hidden="true"
-                >
-                  <IconIntegrations />
-                </span>
-                <strong className="overview-content__service-name">{p.name}</strong>
-                {p.requires_approval && (
-                  <Badge variant="warn">requiere aprobación</Badge>
-                )}
-                {p.categories.map((c) => (
-                  <span key={c} className="muted text-sm">
-                    · {c}
-                  </span>
-                ))}
-              </Row>
-              {p.description && (
-                <p className="muted overview-content__service-desc">
-                  {p.description}
-                </p>
-              )}
-            </Card>
-          ))}
-        </Stack>
-      )}
     </Stack>
   );
 }

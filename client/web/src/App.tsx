@@ -31,12 +31,11 @@ import { LoginScreen } from "./components/LoginScreen";
 import { PanelFrame } from "./shared/components/PanelFrame";
 import { NotificationStack } from "./shared/components/molecules/NotificationStack";
 import { AgentsPanel } from "./components/AgentsPanel";
-import { MCP } from "./components/MCP";
 import { BootLoader } from "./shared/components/BootLoader";
 import { HomePage } from "./components/HomePage";
 import { GridBackdrop } from "./shared/components/GridBackdrop";
 
-const VALID_NAV_IDS: NavId[] = ["status", "chat", "intelligence", "mcp", "config"];
+const VALID_NAV_IDS: NavId[] = ["status", "chat", "intelligence", "config"];
 
 function isValidNavId(s: string): boolean {
   return (VALID_NAV_IDS as string[]).includes(s);
@@ -207,11 +206,6 @@ function Admin({ onExitLanding, onLogout }: AdminProps) {
         {activeTab === "intelligence" && (
           <PanelFrame testId="intelligence-panel">
             <AgentsPanel />
-          </PanelFrame>
-        )}
-        {activeTab === "mcp" && (
-          <PanelFrame testId="mcp-panel">
-            <MCP />
           </PanelFrame>
         )}
         {activeTab === "config" && (

@@ -36,22 +36,6 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
-      // EP-0002: WebSocket para el voice MCP (`mcps/voice/voiced`,
-      // puerto 9998). Mismo patrón que /v1/events — DEBE ir antes que
-      // cualquier regla `/voice*` más amplia.
-      '/voice/ws': {
-        target: 'ws://127.0.0.1:9998',
-        ws: true,
-        changeOrigin: true,
-      },
-      // EP-0002: REST del voice MCP (POST /voice/start, /voice/end,
-      // /voice/speak, …). En producción estos endpoints deberían
-      // estar expuestos por el daemon en `/v1/voice/*` con forward al
-      // plugin; mientras tanto, en dev Vite los redirige directo.
-      '/voice': {
-        target: 'http://127.0.0.1:9998',
-        changeOrigin: true,
-      },
       // API REST
       '/v1': {
         target: 'http://127.0.0.1:7878',
