@@ -820,6 +820,28 @@ body[data-sidebar-hidden="true"] .sidebar-wrapper {
                 visibility 0s linear calc(var(--duration-fast) + 160ms);
   }
 
+  /* EP-2026-10-03: el WRAPPER cerrado tampoco recibe eventos.
+   *
+   * El `pointer-events: none` de arriba alcanza solo a los botones. El
+   * wrapper `.sidebar-footer-actions` es `position: absolute; bottom: 100%`
+   * — se dibuja encima del nav — y sus hijos con `visibility: hidden`
+   * SIGUEN OCUPANDO ESPACIO, asi que el wrapper tiene una caja con
+   * tamaño real sobre los ultimos items del nav. Con `pointer-events:
+   * auto` (el default) esa caja se come los clicks de "sesiones" y
+   * "agentes": el usuario ve el menu cerrado y no puede hacer nada.
+   *
+   * Con esto el wrapper cerrado es un hole transparente para el puntero
+   * y el nav vuelve a recibir los clicks. Al abrir se restituye el
+   * `auto` para que las fichas sean accionables. */
+  .sidebar-panel__footer:not(.sidebar-panel__footer--actions-open)
+    .sidebar-footer-actions {
+    pointer-events: none;
+  }
+
+  .sidebar-panel__footer--actions-open .sidebar-footer-actions {
+    pointer-events: auto;
+  }
+
   .sidebar-panel__footer--actions-open
     .sidebar-footer-actions
     .sidebar-footer-action {

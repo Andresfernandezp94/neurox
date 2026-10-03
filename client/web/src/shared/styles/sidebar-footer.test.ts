@@ -134,6 +134,27 @@ describe("sidebar: el bloque de usuario en mobile", () => {
       expect(cerrado).toMatch(/visibility:\s*hidden/);
       expect(cerrado).toMatch(/pointer-events:\s*none/);
     });
+
+    it("cerrado, el WRAPPER tampoco intercepta el puntero (EP-2026-10-03)", () => {
+      // El bug que se reporto: no se podia clickear sesiones ni agentes.
+      //
+      // `pointer-events: none` de arriba alcanza solo a los botones. El
+      // wrapper es `position: absolute; bottom: 100%` — encima del nav —
+      // y con los hijos en `visibility: hidden` SIGUE TENIENDO CAJA, asi
+      // que con el `auto` default se come los clicks del nav.
+      const wrapperCerrado = mobile.get(
+        ".sidebar-panel__footer:not(.sidebar-panel__footer--actions-open) .sidebar-footer-actions",
+      );
+      expect(wrapperCerrado).toBeDefined();
+      expect(wrapperCerrado).toMatch(/pointer-events:\s*none/);
+
+      // Y al abrir tiene que ser accionable, si no el menu no sirve.
+      const wrapperAbierto = mobile.get(
+        ".sidebar-panel__footer--actions-open .sidebar-footer-actions",
+      );
+      expect(wrapperAbierto).toBeDefined();
+      expect(wrapperAbierto).toMatch(/pointer-events:\s*auto/);
+    });
   });
 
   it("el panel no recorta la columna en mobile", () => {
