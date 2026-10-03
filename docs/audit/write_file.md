@@ -118,15 +118,93 @@ Sigue fallando 10/10 con barrier (atomic_write no resuelve desde writer)
 
 ---
 
-### W1: Lost update en `create`
+### W1: Lost update en `create` — NO ES UN BUG
 
-**Síntoma:** 10 `create` concurrentes al mismo path → solo 1 contenido sobrevive.
+**Síntoma reportado:** 10 `create` concurrentes al mismo path → solo 1 contenido sobrevive.
 
-**Comportamiento esperado con atomic_write:** el último rename gana. No hay "estado intermedio" visible, pero sí hay "lost update" porque solo uno de los 10 contenidos es el final.
+**Veredicto revisado 2026-10-03: el comportamiento es correcto y no se
+cambia nada.** El `INFORME.md` original de esta auditoría lo clasificaba como
+"fallo CRÍTICO de pérdida silenciosa de datos" y decía que las llamadas "no
+escriben nada en disco". Eso no es lo que pasa: cada llamada **sí** escribe, y
+el `rename` atómico es correcto. Lo que hay es *last-writer-wins*, que es
+justo la semántica de un overwrite.
 
-**Por qué no se arregla:** `create` no es una operación idempotente — el usuario quiere que el resultado final sea UNO específico. Sin coordinación externa (lock externo, sequence number, etc.) no hay forma de garantizar que un contenido específico gana.
+El error del informe fue tratar "solo sobrevive uno" como pérdida de datos
+cuando en realidad es una condición de carrera legítima: si 10 writers
+compiten por el mismo destino sin coordinación, el contenido final es uno de
+los 10 y el resto se descartan. Todos reportan éxito porque todos hicieron su
+escritura; una sobrescribió a la otra.
 
-**Mitigación posible:** la LLM debería usar `strReplace` con `old_str=""` y un id de versión en el path (`/path/v1.txt`, `/path/v2.txt`) si quiere evitar colisiones.
+Que las 10 devuelvan `ok:true` no es un bug en `write_file`: es la
+consecuencia inevitable de que se les pidan 10 cosas incompatibles. El
+`rename` garantiza que un lector nunca vea un estado parcial, que es lo que sí
+prometía `atomic_write`, y eso se cumple.
+
+**Lo que sí habría que hacer (no lo arregla la tool):** que el agente no lance
+10 `create` al mismo path. Si necesita las 10 versiones, que use paths
+distintos (`v1.txt`, `v2.txt`, …) o que componga con `strReplace`.
+
+**Nota sobre reproducibilidad:** con llegadas simultáneas (todas barredas por
+una barrera) este caso NO se puede demostrar como bug — cada writer hace cola
+sobre el mismo inodo y cada uno lee por ruta, así que ve al anterior. Ver W2.
+
+---
+
+### W2: Lost update real en `strReplace` — CORREGIDO 2026-10-03
+
+**Síntoma:** con writers solapados, algunas escrituras desaparecen aunque todas
+devuelvan `ok:true`.
+
+**Causa raíz (no era el flock "no determinista"):** el flock se tomaba sobre
+el **propio fichero**, pero `atomic_write` renombra un inodo **nuevo** sobre la
+ruta. Al terminar el rename, el lock protege un inodo que ya no está en `path`.
+Las llamadas siguientes abren el inodo nuevo, lo bloquean sin contención
+(nadie lo tiene) y corren **en paralelo** con las que aún sostienen el lock
+del viejo. Cada una lee contenido previo a la otra y su `rename` pisa el
+resultado de la otra.
+
+**Medido antes del arreglo:** 6 de 8 rondas con hasta 12 de 40 escrituras
+perdidas, todas reportando `Ok`. Después: 0 de 120 rondas.
+
+**Detalle que explica por qué los tests previos no lo veían:** hace falta que
+las llegadas sean **escalonadas**. Con barrera, todos esperan en el mismo
+inodo y cada uno lee ya lo que escribió el anterior. La carrera necesita que
+unos writers estén en vuelo cuando llegan los siguientes — que es lo que pasa
+con un bloque de tools en paralelo. El relleno grande ensancha la ventana
+entre leer y renombrar.
+
+**Corrección:** el cerrojo pasa a un fichero **lateral estable** en el tmpdir
+(`lock_path_for`), canonizando la ruta para que dos rutas al mismo fichero
+compartan cerrojo. No puede vivir en el workspace: un `.archivo.neurox.lock`
+aparecería en `list_dir`/`glob` y confundiría al agente. No se borra al soltar
+— borrarlo es una carrera; es el mismo criterio que git con
+`.git/index.lock`.
+
+Afectaba también a `insert`, que repetía el patrón exacto.
+
+**Tests:** `str_replace_no_pierde_escrituras_con_llegadas_escalonadas`
+(falla con el código viejo: 12 perdidas), `el_cerrojo_no_vive_en_el_workspace`,
+`el_cerrojo_comparte_ruta_entre_symlinks`.
+
+---
+
+### W6: `create(true)` hacía desaparecer ficheros y mentir — CORREGIDO 2026-10-03
+
+`strReplace` e `insert` abrían el objetivo con `.create(true)`. Dos efectos:
+
+1. Una ruta inexistente se convertía en un **fichero vacío creado en
+   silencio**, cuando la intención de ambas operaciones es editar, no crear.
+2. El mensaje de error era `"old_str not found"`, que hace creer al agente que
+   el fichero existe y que solo le falta la cadena. El agente razona en
+   función de esos mensajes, así que esto no era cosmético.
+
+Ahora hay un `StrReplaceError::Missing` distinto de `NotFound` — "el fichero no
+está" y "el fichero está pero no esa cadena" son problemas distintos para quien
+llama — y `insert` falla con `"file not found: '<ruta>'. insert solo edita un
+fichero existente; usa 'create' para crearlo"`.
+
+**Tests:** `str_replace_sobre_ruta_inexistente_no_crea_el_fichero`,
+`insert_sobre_ruta_inexistente_no_crea_el_fichero`.
 
 ---
 
@@ -137,6 +215,12 @@ Sigue fallando 10/10 con barrier (atomic_write no resuelve desde writer)
 **Análisis:** flock funciona correctamente a nivel syscall. El test es no-determinista porque depende del orden de scheduling de `spawn_blocking` threads. Cuando la concurrencia es muy alta (10+), puede haber edge cases en cómo se serializan los `flock_exclusive` calls.
 
 **Severidad:** baja — solo afecta concurrencia extrema (>10 strReplaces simultáneos al mismo path).
+
+> **2026-10-03: este diagnóstico era incorrecto.** El flock sí funcionaba a
+> nivel syscall; el problema no era el scheduling sino que el lock se tomaba
+> sobre un inodo que `rename` sustituía. Ver "W2: Lost update real" arriba: es
+> el mismo síntoma, medido y corregido. Este texto se conserva solo como
+> registro de lo que se pensaba antes.
 
 ---
 

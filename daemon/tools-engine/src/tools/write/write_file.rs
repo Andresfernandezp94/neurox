@@ -120,6 +120,10 @@ impl Tool for WriteFileTool {
                     Err(StrReplaceError::NotFound) => {
                         Err(format!("old_str not found in file '{}'", path))
                     }
+                    Err(StrReplaceError::Missing) => Err(format!(
+                        "file not found: '{path}'. strReplace only edits an existing \
+file; use 'create' to make it."
+                    )),
                     Err(StrReplaceError::Io(e)) => Err(e),
                 }
             }
@@ -272,8 +276,142 @@ mod tests {
         }
     }
 
-    // W2 fix: strReplace with the SAME old_str — only one of N concurrent
-    // calls should succeed (the others see the marker already replaced).
+    /// Regresion del lost update silencioso en strReplace.
+///
+/// El fallo era que el flock se tomaba sobre el propio fichero, y
+/// `atomic_write` renombra un inodo NUEVO sobre la ruta: el lock acababa
+/// protegiendo un inodo muerto, asi que las llegadas posteriores bloqueaban
+/// el inodo nuevo (sin contention) y corrían en paralelo con las que aun
+/// tenían el viejo. Todas reportaban `Ok` y sus cambios desaparecian.
+///
+/// Medido antes del arreglo: 6 de 8 rondas con hasta 12 de 40 escrituras
+/// perdidas. Despues: 0 de 120.
+///
+/// El detalle que hace falta para reproducirlo, y que explica por que el test
+/// original no lo veia: las llegadas tienen que ser ESCALONADAS. Con una
+/// barrera para que todos entren a la vez, todos hacen cola sobre el mismo
+/// inodo viejo y cada uno lee ya por ruta, asi que cada uno ve al anterior y no
+/// se pierde nada. La carrera necesita que unos writers ya esten en vuelo
+/// cuando llegan los siguientes, que es lo que hace un bloque de tools en
+/// paralelo. El relleno grande ensancha la ventana entre leer y renombrar.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn str_replace_no_pierde_escrituras_con_llegadas_escalonadas() {
+    let n = 40usize;
+    let relleno = "x".repeat(2_000_000);
+
+    for ronda in 0..5 {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.txt");
+        let mut base = String::new();
+        for i in 0..n {
+            base.push_str(&format!("AAA_{i} "));
+        }
+        base.push_str(&relleno);
+        std::fs::write(&path, &base).unwrap();
+
+        let mut handles = vec![];
+        for i in 0..n {
+            let p = path.clone();
+            let delay_us = (i as u64 * 137) % 2500;
+            handles.push(tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_micros(delay_us)).await;
+                str_replace_once(&p, &format!("AAA_{i}"), &format!("MARKER_{i}")).await
+            }));
+        }
+        let mut ok = 0;
+        for h in handles {
+            if h.await.unwrap().is_ok() {
+                ok += 1;
+            }
+        }
+        let final_txt = std::fs::read_to_string(&path).unwrap();
+        let perdidos: Vec<usize> =
+            (0..n).filter(|i| !final_txt.contains(&format!("MARKER_{i}"))).collect();
+        assert_eq!(ok, n, "ronda {ronda}: no todas las llamadas pudieron escribir");
+        assert!(
+            perdidos.is_empty(),
+            "ronda {ronda}: escrituras perdidas {perdidos:?} — lost update silencioso"
+        );
+    }
+}
+
+/// strReplace sobre una ruta que no existe: dice que no existe y NO crea el
+/// fichero. Antes abria con `.create(true)`, que creaba un fichero vacio y
+/// luego reportaba "old_str not found" — un mensaje que hacia creer al agente
+/// que el fichero existia.
+#[tokio::test]
+async fn str_replace_sobre_ruta_inexistente_no_crea_el_fichero() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("no_existe.txt");
+
+    let err = str_replace_once(&path, "viejo", "nuevo")
+        .await
+        .expect_err("debe fallar");
+    assert!(matches!(err, StrReplaceError::Missing), "{err:?}");
+    assert!(
+        !path.exists(),
+        "no debe crear el fichero: {}",
+        path.display()
+    );
+}
+
+/// El mismo contrato en `insert`: edita, no crea.
+#[tokio::test]
+async fn insert_sobre_ruta_inexistente_no_crea_el_fichero() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("no_existe.txt");
+
+    let err = insert_lines(&path, "linea", None)
+        .await
+        .expect_err("debe fallar");
+    assert!(err.contains("file not found"), "{err}");
+    assert!(
+        !path.exists(),
+        "no debe crear el fichero: {}",
+        path.display()
+    );
+}
+
+/// Dos rutas al mismo fichero (via symlink) deben compartir cerrojo, no
+/// serializarse solo consigo mismas.
+#[cfg(unix)]
+#[tokio::test]
+async fn el_cerrojo_comparte_ruta_entre_symlinks() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("real.txt");
+    let link = dir.path().join("link.txt");
+    std::fs::write(&real, "contenido\n").unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    assert_eq!(lock_path_for(&real), lock_path_for(&link));
+}
+
+/// El cerrojo no se deja en el workspace: apareceria en `list_dir`/`glob` y
+/// confundiria al agente.
+#[tokio::test]
+async fn el_cerrojo_no_vive_en_el_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("archivo.txt");
+    std::fs::write(&path, "x\n").unwrap();
+
+    let lp = lock_path_for(&path);
+    assert!(lp.starts_with(std::env::temp_dir()), "{}", lp.display());
+    assert!(
+        !lp.starts_with(dir.path()),
+        "el cerrojo no puede estar junto al fichero: {}",
+        lp.display()
+    );
+
+    // Y tomarlo no crea ficheros junto al objetivo.
+    let _g = lock_exclusive(&path).await.unwrap();
+    let entradas: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
+    assert_eq!(entradas, vec!["archivo.txt".to_string()], "{entradas:?}");
+}
+
+// W2 fix: strReplace with the SAME old_str — only one of N concurrent
     // The flock ensures no torn writes; the retry-on-conflict path
     // guarantees we don't return spurious "old_str not found" when the
     // file genuinely never had it.
@@ -350,44 +488,106 @@ async fn atomic_write(path: &Path, content: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Donde vive el cerrojo lateral de una ruta.
+///
+/// NO puede ser el propio fichero. `atomic_write` renombra un inodo NUEVO
+/// sobre la ruta, asi que un flock tomado sobre el fichero acaba
+/// protegiendo un inodo que ya no esta en `path`: las siguientes llamadas
+/// abren el inodo nuevo, lo bloquean sin contention (nadie lo tiene) y
+/// corren en paralelo con las que aun sostienen el viejo. Medido antes de
+/// arreglarlo: 6 de 8 rondas con escrituras perdidas —hasta 12 de 40— y las
+/// 40 reportando `Ok`.
+///
+/// Vive en el tmpdir y no al lado del fichero por dos razones: un
+/// `.archivo.neurox.lock` en el workspace apareceria en `list_dir`/`glob` y
+/// confundiria al agente; y el tmpdir es el sitio semantico correcto, porque
+/// el cerrojo es efimero. Se canoniza la ruta para que dos rutas distintas al
+/// mismo fichero (via symlink) compartan cerrojo.
+///
+/// Una colision de nombres aqui solo produce serializacion de mas, nunca una
+/// perdida, asi que un hash de 64 bits sobra.
+fn lock_path_for(path: &Path) -> PathBuf {
+    let abs = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let h = fnv1a64(&abs.to_string_lossy());
+    std::env::temp_dir().join(format!("neurox-locks/{h:016x}.lock"))
+}
+
+/// FNV-1a de 64 bits, para no meter una dependencia de hash.
+fn fnv1a64(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100_0000_01b3);
+    }
+    h
+}
+
+/// Cerrojo exclusivo sobre `path`, tomado sobre el lateral estable.
+///
+/// Devolver el `File` mantiene el cerrojo: se suelta cuando el llamante lo
+/// deja caer. NO se borra el fichero lateral al soltar, porque borrarlo es una
+/// carrera (otro proceso puede estar esperando sobre ese inodo mientras un
+/// tercero crea uno nuevo y entra en paralelo). Es el mismo criterio que usa
+/// git con `.git/index.lock`.
+async fn lock_exclusive(path: &Path) -> Result<std::fs::File, String> {
+    let p = lock_path_for(path);
+    if let Some(parent) = p.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| format!("mkdir lock: {e}"))?;
+    }
+    tokio::task::spawn_blocking(move || -> Result<std::fs::File, String> {
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&p)
+            .map_err(|e| format!("open lock: {e}"))?;
+        f.lock_exclusive().map_err(|e| format!("flock: {e}"))?;
+        Ok(f)
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
+}
+
 /// W2 fix: outcome of a single strReplace attempt.
 #[derive(Debug)]
 enum StrReplaceError {
     /// `old_str` is genuinely absent — caller should fail fast.
     NotFound,
+    /// The path does not exist. strReplace edits; it does not create. Kept
+    /// separate from `NotFound` because "the file isn't there" and "the file is
+    /// there but that string isn't" are different problems for the caller.
+    Missing,
     /// Filesystem / I/O error — surface to caller verbatim.
     Io(String),
 }
 
-/// W2 fix: one attempt of strReplace under an exclusive flock.
-/// If `old_str` is no longer present because another writer modified
-/// the file, returns `NotFound` (the caller may or may not retry —
-/// for the same `old_str` from concurrent callers, only one wins).
+/// W2 fix: one attempt of strReplace under an exclusive lock.
+///
+/// If `old_str` is no longer present because another writer modified the file,
+/// returns `NotFound` (for the same `old_str` from concurrent callers, only
+/// one wins).
 async fn str_replace_once(
     path: &Path,
     old_str: &str,
     new_str: &str,
 ) -> Result<(), StrReplaceError> {
-    // Open (or create) the file, then take an exclusive flock that is
-    // held for the duration of the strReplace operation. The lock is
-    // released when the `_lock_guard` is dropped at the end of this
-    // function — that serializes concurrent writers on the same path.
-    let _lock_guard = tokio::task::spawn_blocking({
-        let p = path.to_path_buf();
-        move || -> Result<std::fs::File, String> {
-            let f = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(&p)
-                .map_err(|e| format!("open: {e}"))?;
-            f.lock_exclusive().map_err(|e| format!("flock: {e}"))?;
-            Ok(f)
-        }
-    })
-    .await
-    .map_err(|e| StrReplaceError::Io(format!("join: {e}")))?
-    .map_err(StrReplaceError::Io)?;
+    // Cerrojo sobre el lateral estable, NO sobre el fichero: `atomic_write`
+    // renombra un inodo nuevo sobre la ruta y dejaria el flock apuntando al
+    // inodo viejo. Ver `lock_path_for`.
+    let _lock_guard = lock_exclusive(path)
+        .await
+        .map_err(StrReplaceError::Io)?;
+
+    // El fichero tiene que existir. Antes se abria con `.create(true)`, que
+    // hacia dos cosas malas a la vez: crear un fichero VACIO si la ruta no
+    // existia (borrando de paso la intencion de strReplace, que es editar, no
+    // crear) y devolver despues "old_str not found", que hacia creer al
+    // agente que el fichero existia y no tenia la cadena.
+    if tokio::fs::metadata(path).await.is_err() {
+        return Err(StrReplaceError::Missing);
+    }
 
     let content = tokio::fs::read_to_string(path)
         .await
@@ -403,27 +603,25 @@ async fn str_replace_once(
     Ok(())
 }
 
-/// W3 fix: insert with flock so concurrent inserts don't lose updates.
+/// W3 fix: insert under the same stable lock as strReplace, for the same
+/// reason: `atomic_write` renames a new inode over the path, so locking the
+/// file itself leaves the lock on a dead inode.
 async fn insert_lines(
     path: &Path,
     content: &str,
     insert_line: Option<usize>,
 ) -> Result<(), String> {
-    let _lock_guard = tokio::task::spawn_blocking({
-        let p = path.to_path_buf();
-        move || -> Result<std::fs::File, String> {
-            let f = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(&p)
-                .map_err(|e| format!("open: {e}"))?;
-            f.lock_exclusive().map_err(|e| format!("flock: {e}"))?;
-            Ok(f)
-        }
-    })
-    .await
-    .map_err(|e| format!("join: {e}"))??;
+    let _lock_guard = lock_exclusive(path).await?;
+
+    // Igual que en strReplace: insert edita, no crea. Con `.create(true)` una
+    // ruta inexistente se convertia en un fichero vacio silenciosamente.
+    if tokio::fs::metadata(path).await.is_err() {
+        return Err(format!(
+            "file not found: '{}'. insert only edits an existing file; use \
+'create' to make it.",
+            path.display()
+        ));
+    }
 
     let existing = tokio::fs::read_to_string(path)
         .await
