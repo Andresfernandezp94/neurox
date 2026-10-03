@@ -56,6 +56,15 @@ pub enum Event {
         tool: String,
         args: serde_json::Value,
         iteration: u32,
+        /// EP-2026-10-03: identificador de ESTA llamada. Es el `id` que
+        /// genero el modelo y llega intacto desde el agente.
+        ///
+        /// Antes no existia y el cliente no podia emparejar una llamada
+        /// con su resultado: seatia por posicion, lo cual se rompe en
+        /// cuanto el modelo pide dos tools iguales. Con `iteration` tampoco
+        /// vale: todas las tools de un lote comparten numero de iteracion.
+        /// Va en ambos eventos para que el par se pueda cerrar por id.
+        call_id: String,
         /// EP-2026-09-05 (stream seq): see `Thinking::seq`.
         #[serde(default)]
         seq: u64,
@@ -65,6 +74,9 @@ pub enum Event {
         tool: String,
         result: String,
         iteration: u32,
+        /// EP-2026-10-03: ver `ToolCall::call_id`. Mismo valor que el de
+        /// la llamada a la que responde este resultado.
+        call_id: String,
         /// EP-2026-09-05 (stream seq): see `Thinking::seq`.
         #[serde(default)]
         seq: u64,

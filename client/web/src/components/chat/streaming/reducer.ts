@@ -233,30 +233,49 @@ export function streamReducer(
 
     case "tool_call": {
       const iteration = chunk.iteration ?? 0;
-      // W3 dedupe: if a tool_call with the same (tool, iteration)
-      // is already pending, drop the duplicate. The daemon emits
-      // tool_call once per dispatch, but a buggy backend or a
-      // re-emission from a retried connection could produce a
-      // duplicate — better to render one node than two.
-      const dupTimeline = state.timeline.findIndex(
-        (e) =>
-          e.type === "tool" &&
-          e.tool === chunk.tool &&
-          e.iteration === iteration,
-      );
-      const dupLog = state.toolLog.findIndex(
-        (t) => t.tool === chunk.tool && t.iteration === iteration,
-      );
+      // EP-2026-10-03: el dedupe pasa a ser por `call_id`.
+      //
+      // Antes se deduplicaba por (tool, iteration), lo cual era una
+      // trampa: TODAS las tools de un lote comparten numero de iteracion,
+      // asi que pedir tres `read_file` en paralelo colapsaba en una sola
+      // entrada y dos desaparecian. Ese dedupe solo era correcto en el
+      // caso de una tool por iteracion.
+      //
+      // Sin `call_id` (daemon antiguo) se mantiene el criterio anterior
+      // como red de seguridad, que es lo unico que hay disponible.
+      const dupTimeline = chunk.call_id
+        ? state.timeline.findIndex(
+            (e) =>
+              e.type === "tool" &&
+              e.call_id !== undefined &&
+              e.call_id === chunk.call_id,
+          )
+        : state.timeline.findIndex(
+            (e) =>
+              e.type === "tool" &&
+              e.tool === chunk.tool &&
+              e.iteration === iteration,
+          );
+      const dupLog = chunk.call_id
+        ? state.toolLog.findIndex(
+            (t) =>
+              t.call_id !== undefined && t.call_id === chunk.call_id,
+          )
+        : state.toolLog.findIndex(
+            (t) => t.tool === chunk.tool && t.iteration === iteration,
+          );
       const activity: ToolActivity = {
         tool: chunk.tool,
         args: chunk.args,
         iteration,
+        call_id: chunk.call_id,
       };
       const timelineEntry: TimelineEntry = {
         type: "tool",
         tool: chunk.tool,
         args: chunk.args,
         iteration,
+        call_id: chunk.call_id,
       };
       return {
         ...state,
@@ -276,18 +295,35 @@ export function streamReducer(
     case "tool_result": {
       const iteration = chunk.iteration ?? 0;
 
-      // EP-2026-08-19: previously matched by tool name only, which
-      // latched the result onto the LAST entry with that name. When
-      // the agent ran two `shell` calls in a row, the first one's
-      // result overwrote (or was overwritten by) the second, leaving
-      // the other pending forever in the UI — the symptom that
-      // looked like "the agent hung". Now we match by iteration too:
+      // EP-2026-10-03: si el chunk trae `call_id`, se busca la entrada
+      // con ese id y punto. Es el unico emparejado que aguanta N tools
+      // iguales en el mismo turno.
       //
-      //   - Primary: same tool AND same iteration
-      //   - Fallback (legacy backends that omit iteration): match
-      //     by tool name only against the most recent entry
+      // EP-2026-08-19: el resto es el fallback para daemons sin `call_id`.
+      // Antes emparejaba solo por nombre de tool, lo que enganchaba el
+      // resultado a la ULTIMA entrada con ese nombre: con dos `shell`
+      // seguidas, una se quedaba girando para siempre — el sintoma que
+      // parecía "el agente se ha colgado". Luego se le sumo `iteration`.
+      // Ese camino sigue siendo necesario para historial antigo.
+      //
+      //   - Con `call_id`: coincidencia exacta por id, y SOLO eso. Si el id
+      //     no esta, el resultado se cuelga suelto en vez de pegarse a una
+      //     entrada que no es suya: con `call_id` se sabe a que tool
+      //     pertenece, y adivinar lo meteria en el sitio equivocado.
+      //   - Sin `call_id` (daemon antiguo): mismo tool y misma iteracion;
+      //     si no, el mas reciente con ese nombre.
+      const exact = chunk.call_id !== undefined;
       let matchedTimelineIdx = -1;
-      if (chunk.iteration !== undefined) {
+      if (exact) {
+        for (let i = state.timeline.length - 1; i >= 0; i--) {
+          const e = state.timeline[i];
+          if (e && e.type === "tool" && e.call_id === chunk.call_id) {
+            matchedTimelineIdx = i;
+            break;
+          }
+        }
+      }
+      if (!exact && matchedTimelineIdx < 0 && chunk.iteration !== undefined) {
         for (let i = state.timeline.length - 1; i >= 0; i--) {
           const e = state.timeline[i];
           if (
@@ -301,7 +337,7 @@ export function streamReducer(
           }
         }
       }
-      if (matchedTimelineIdx < 0) {
+      if (!exact && matchedTimelineIdx < 0) {
         for (let i = state.timeline.length - 1; i >= 0; i--) {
           const e = state.timeline[i];
           if (e && e.type === "tool" && e.tool === chunk.tool) {

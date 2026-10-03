@@ -64,6 +64,7 @@ fn tool_call_carries_iteration() {
         tool: "shell".to_string(),
         args: serde_json::json!({"cmd": "ls"}),
         iteration: 3,
+        call_id: "call_test".into(),
         seq: 1,
     };
     let v = serde_json::to_value(&ev).unwrap();
@@ -110,6 +111,7 @@ fn session_id_extractor_works_on_all_variants() {
             tool: "x".into(),
             args: serde_json::json!({}),
             iteration: 0,
+            call_id: "call_test".into(),
             seq: 3,
         },
         Event::ToolResult {
@@ -117,6 +119,7 @@ fn session_id_extractor_works_on_all_variants() {
             tool: "x".into(),
             result: "r".into(),
             iteration: 0,
+            call_id: "call_test".into(),
             seq: 4,
         },
         Event::AgentSpawned {

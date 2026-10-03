@@ -408,6 +408,36 @@ impl SessionStore {
             .await
     }
 
+    /// Persiste la PETICION de una tool (`role = "tool_call"`).
+    ///
+    /// EP-2026-10-03. Antes el forwarder guardaba la peticion con
+    /// `log_tool_message`, que escribe `role = "tool"`: en la base de datos
+    /// no habia ni una sola fila `tool_call`, asi que el agrupador del
+    /// cliente (`hydrateHistory`) nunca encontraba el par del que deducir
+    /// los args, y tras recargar la pagina cada tool aparecia duplicada —
+    /// una fila con el JSON de los args presentada como resultado, y otra
+    /// con el resultado real.
+    ///
+    /// `tool_call_id` se guarda en las DOS filas (peticion y resultado) para
+    /// que el emparejado sea por id y no por posicion.
+    pub async fn log_tool_call_message(
+        &self,
+        session_id: Uuid,
+        tool: &str,
+        args_json: &str,
+        tool_call_id: Option<&str>,
+    ) -> anyhow::Result<i64> {
+        self.log_message_full(
+            session_id,
+            ROLE_TOOL_CALL,
+            args_json,
+            None,
+            Some(tool),
+            tool_call_id,
+        )
+        .await
+    }
+
     /// Igual que `log_message` pero con los campos de tool.
     ///
     /// EP-2026-10-03: `tool_name` / `tool_call_id` solo se llenan para

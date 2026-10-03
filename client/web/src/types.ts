@@ -106,7 +106,18 @@ export interface Message {
  */
 export type TimelineEntry =
   | { type: 'thinking'; text: string }
-  | { type: 'tool'; tool: string; args?: unknown; result?: string; iteration: number }
+  | {
+      type: 'tool';
+      tool: string;
+      args?: unknown;
+      result?: string;
+      iteration: number;
+      /** EP-2026-10-03: id de la llamada, para emparejar con su
+       *  resultado aunque el modelo pida dos tools iguales en el mismo
+       *  turno. Opcional: las entradas rehidratadas de sesiones antiguas
+       *  no lo tienen. */
+      call_id?: string;
+    }
   | {
       type: 'approval';
       id: string;
@@ -122,6 +133,8 @@ export interface ToolActivity {
   args?: unknown;
   result?: string;
   iteration: number;
+  /** EP-2026-10-03: ver `TimelineEntry` tool. */
+  call_id?: string;
 }
 
 export interface ApprovalActivity {

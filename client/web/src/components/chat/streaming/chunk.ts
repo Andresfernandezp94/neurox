@@ -15,8 +15,8 @@
 //   {"type":"thinking",       "text":"...", "seq":N}
 //   {"type":"content",        "text":"...", "seq":N}
 //   {"type":"error",          "message":"..."}
-//   {"type":"tool_call",      "tool":"...", "args":{...}, "iteration":N, "seq":N}
-//   {"type":"tool_result",    "tool":"...", "result":"...", "iteration":N, "seq":N}
+//   {"type":"tool_call",      "tool":"...", "args":{...}, "iteration":N, "call_id":"...", "seq":N}
+//   {"type":"tool_result",    "tool":"...", "result":"...", "iteration":N, "call_id":"...", "seq":N}
 //   {"type":"approval_request","id":"...", "tool":"...", "args":{...},
 //                                  "reason":"..."}
 //   {"type":"approval_resolved","id":"...", "decision":"approve"|"deny"}
@@ -58,6 +58,13 @@ export interface ToolCallChunk {
   tool: string;
   args?: unknown;
   iteration?: number;
+  /** EP-2026-10-03: id de ESTA llamada, el mismo que genera el modelo.
+   *  Viaja tanto en el `tool_call` como en su `tool_result`, y es lo
+   *  unico que empareja una llamada con su resultado de forma fiable: con
+   *  dos tools iguales en el mismo turno, `tool` + `iteration` no las
+   *  distinguen. Opcional por compatibilidad con daemons antiguos; si
+   *  falta se cae al emparejado por posicion de siempre. */
+  call_id?: string;
   /** Monotonic per-session sequence number (see `ThinkingChunk.seq`). */
   seq?: number;
 }
@@ -70,6 +77,8 @@ export interface ToolResultChunk {
   tool: string;
   result: string;
   iteration?: number;
+  /** EP-2026-10-03: ver `ToolCallChunk.call_id`. */
+  call_id?: string;
   /** Monotonic per-session sequence number (see `ThinkingChunk.seq`). */
   seq?: number;
 }
@@ -140,6 +149,7 @@ export function parseStreamChunk(raw: unknown): StreamChunk | null {
         tool: o.tool,
         args: o.args,
         iteration: typeof o.iteration === "number" ? o.iteration : undefined,
+        call_id: typeof o.call_id === "string" && o.call_id ? o.call_id : undefined,
         seq,
       };
     }
@@ -151,6 +161,7 @@ export function parseStreamChunk(raw: unknown): StreamChunk | null {
         tool: o.tool,
         result: o.result,
         iteration: typeof o.iteration === "number" ? o.iteration : undefined,
+        call_id: typeof o.call_id === "string" && o.call_id ? o.call_id : undefined,
         seq,
       };
     }

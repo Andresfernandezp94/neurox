@@ -223,3 +223,224 @@ describe("streamReducer — error chunks surface to StreamState.error", () => {
     // "interrupted (no result received)" cuando el stream termine.
   });
 });
+
+// EP-2026-10-03: el daemon ejecuta el lote de tools en paralelo, asi que
+// emite N `tool_call` seguidos y despues N `tool_result`. Estas fijan el
+// emparejado por `call_id`, que es lo que hace que dos tools IGUALES en el
+// mismo turno no se pisen entre si.
+//
+// El fallo que esto tapa: el dedupe de `tool_call` comparaba
+// (tool, iteration), y todas las tools de un lote comparten iteracion, asi
+// que tres `read_file` en paralelo se colapsaban en una sola entrada.
+describe("streamReducer — lote de tools en paralelo", () => {
+  it("no colapsa tools identicas del mismo lote", () => {
+    let s = initStreamState();
+    s = streamReducer(s, {
+      type: "tool_call",
+      tool: "read_file",
+      args: { path: "a" },
+      iteration: 2,
+      call_id: "c1",
+    });
+    s = streamReducer(s, {
+      type: "tool_call",
+      tool: "read_file",
+      args: { path: "b" },
+      iteration: 2,
+      call_id: "c2",
+    });
+    s = streamReducer(s, {
+      type: "tool_call",
+      tool: "read_file",
+      args: { path: "c" },
+      iteration: 2,
+      call_id: "c3",
+    });
+
+    expect(s.timeline).toHaveLength(3);
+    expect(s.toolLog).toHaveLength(3);
+    expect(s.toolLog.map((t) => (t.args as { path: string }).path)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+  });
+
+  it("cada resultado llena la llamada de su call_id", () => {
+    let s = initStreamState();
+    for (const [id, path] of [
+      ["c1", "a"],
+      ["c2", "b"],
+      ["c3", "c"],
+    ] as const) {
+      s = streamReducer(s, {
+        type: "tool_call",
+        tool: "read_file",
+        args: { path },
+        iteration: 2,
+        call_id: id,
+      });
+    }
+    // Los resultados llegan en orden, que es como los emite el daemon.
+    s = streamReducer(s, {
+      type: "tool_result",
+      tool: "read_file",
+      result: "contenido a",
+      iteration: 2,
+      call_id: "c1",
+    });
+    s = streamReducer(s, {
+      type: "tool_result",
+      tool: "read_file",
+      result: "contenido b",
+      iteration: 2,
+      call_id: "c2",
+    });
+    s = streamReducer(s, {
+      type: "tool_result",
+      tool: "read_file",
+      result: "contenido c",
+      iteration: 2,
+      call_id: "c3",
+    });
+
+    const tools = s.timeline.filter((e) => e.type === "tool");
+    expect(tools).toHaveLength(3);
+    expect(
+      tools.map((t) => (t as { args: unknown; result?: string }).args),
+    ).toEqual([{ path: "a" }, { path: "b" }, { path: "c" }]);
+    expect(
+      tools.map((t) => (t as { result?: string }).result),
+    ).toEqual(["contenido a", "contenido b", "contenido c"]);
+  });
+
+  it("aguanta un tool_result que llega en otro orden que las llamadas", () => {
+    let s = initStreamState();
+    for (const [id, path] of [
+      ["c1", "a"],
+      ["c2", "b"],
+    ] as const) {
+      s = streamReducer(s, {
+        type: "tool_call",
+        tool: "read_file",
+        args: { path },
+        iteration: 0,
+        call_id: id,
+      });
+    }
+    // Al reves: el daemon no lo hace hoy, pero el id no depende del orden.
+    s = streamReducer(s, {
+      type: "tool_result",
+      tool: "read_file",
+      result: "contenido b",
+      iteration: 0,
+      call_id: "c2",
+    });
+    s = streamReducer(s, {
+      type: "tool_result",
+      tool: "read_file",
+      result: "contenido a",
+      iteration: 0,
+      call_id: "c1",
+    });
+
+    const tools = s.timeline.filter((e) => e.type === "tool");
+    expect(tools).toHaveLength(2);
+    expect(tools[0]).toMatchObject({ args: { path: "a" }, result: "contenido a" });
+    expect(tools[1]).toMatchObject({ args: { path: "b" }, result: "contenido b" });
+  });
+
+  it("dedupe por call_id: una reemision con el mismo id no duplica", () => {
+    let s = initStreamState();
+    s = streamReducer(s, {
+      type: "tool_call",
+      tool: "shell",
+      args: { cmd: "ls" },
+      iteration: 0,
+      call_id: "c1",
+    });
+    // Mismo id otra vez (reconexion que reemite el chunk): una sola entrada.
+    s = streamReducer(s, {
+      type: "tool_call",
+      tool: "shell",
+      args: { cmd: "ls" },
+      iteration: 0,
+      call_id: "c1",
+    });
+    expect(s.timeline).toHaveLength(1);
+    expect(s.toolLog).toHaveLength(1);
+  });
+
+  it("sin call_id sigue el camino legacy sin romperse", () => {
+    // Daemon antiguo: no manda call_id. Con una tool por iteracion todo
+    // sigue igual (una entrada, un resultado).
+    let s = initStreamState();
+    s = streamReducer(s, { type: "tool_call", tool: "shell", args: {}, iteration: 0 });
+    s = streamReducer(s, {
+      type: "tool_result",
+      tool: "shell",
+      result: "salida",
+      iteration: 0,
+    });
+    expect(s.timeline).toHaveLength(1);
+    expect(s.toolLog[0]!.result).toBe("salida");
+  });
+
+  it("tool_result de una tool en vuelo y otra ya cerrada", () => {
+    // Una sola llamada, dos resultados: el segundo no debe crear una
+    // entrada nueva si su call_id ya se cerro.
+    let s = initStreamState();
+    s = streamReducer(s, {
+      type: "tool_call",
+      tool: "shell",
+      args: {},
+      iteration: 0,
+      call_id: "c1",
+    });
+    s = streamReducer(s, {
+      type: "tool_result",
+      tool: "shell",
+      result: "primero",
+      iteration: 0,
+      call_id: "c1",
+    });
+    s = streamReducer(s, {
+      type: "tool_result",
+      tool: "shell",
+      result: "segundo",
+      iteration: 0,
+      call_id: "c1",
+    });
+    expect(s.timeline).toHaveLength(1);
+    expect(s.timeline[0]).toMatchObject({ result: "segundo" });
+  });
+  it("un call_id desconocido no secuestra otra entrada", () => {
+    // Con `call_id` se sabe a que tool pertenece el resultado. Si ese id no
+    // esta en el timeline, el resultado se cuelga suelto: pegarlo a la
+    // entrada mas cercana pondria el texto en el sitio equivocado.
+    let s = initStreamState();
+    s = streamReducer(s, {
+      type: "tool_call",
+      tool: "read_file",
+      args: { path: "a" },
+      iteration: 0,
+      call_id: "c1",
+    });
+    s = streamReducer(s, {
+      type: "tool_result",
+      tool: "read_file",
+      result: "huerfano",
+      iteration: 0,
+      call_id: "no_existe",
+    });
+
+    const tools = s.timeline.filter((e) => e.type === "tool");
+    expect(tools).toHaveLength(2);
+    // La original sigue sin resultado...
+    expect(tools[0]).toMatchObject({ args: { path: "a" } });
+    expect((tools[0] as { result?: string }).result).toBeUndefined();
+    // ...y el huerfano aparece con lo suyo, sin los args de la otra.
+    expect(tools[1]).toMatchObject({ result: "huerfano" });
+    expect((tools[1] as { args?: unknown }).args).toBeUndefined();
+  });
+});

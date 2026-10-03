@@ -22,7 +22,11 @@ const row = (
   id: number,
   role: string,
   content: string,
-  extra: Partial<{ tool_name: string | null; thinking: string | null }> = {},
+  extra: Partial<{
+    tool_name: string | null;
+    thinking: string | null;
+    tool_call_id: string | null;
+  }> = {},
 ) => ({
   id,
   role,
@@ -30,6 +34,7 @@ const row = (
   ts: `2026-10-03T00:00:0${id}Z`,
   tool_name: extra.tool_name ?? null,
   thinking: extra.thinking ?? null,
+  tool_call_id: extra.tool_call_id ?? null,
 });
 
 describe("hydrateMessages", () => {
@@ -208,5 +213,273 @@ describe("hydrateMessages", () => {
     );
     expect((at(msg(out, 1), 0) as { iteration: number }).iteration).toBe(0);
     expect((at(msg(out, 1), 1) as { iteration: number }).iteration).toBe(1);
+  });
+  // ── EP-2026-10-03: despacho en paralelo ────────────────────────────
+  //
+  // Con el lote ejecutado en paralelo el daemon emite TODOS los
+  // `tool_call` seguidos y despues TODOS los `tool_result`, en el orden
+  // del modelo. Estos tests fijan ese emparejado: antes el agrupador
+  // llevaba un unico "abierto", de modo que el primer resultado se
+  // pegaba a la ultima llamada y los demas salian sueltos sin `args`.
+
+  it("empareja N tool_call seguidos con sus N resultados, en orden", () => {
+    const out = hydrateMessages(
+      [
+        row(1, "user", "x"),
+        row(2, "tool_call", '{"path":"a"}', { tool_name: "read_file" }),
+        row(3, "tool_call", '{"path":"b"}', { tool_name: "read_file" }),
+        row(4, "tool_call", '{"path":"c"}', { tool_name: "read_file" }),
+        row(5, "tool", "contenido a", { tool_name: "read_file" }),
+        row(6, "tool", "contenido b", { tool_name: "read_file" }),
+        row(7, "tool", "contenido c", { tool_name: "read_file" }),
+        row(8, "assistant", "listo"),
+      ],
+      "s1",
+    );
+
+    const timeline = tl(msg(out, 1));
+    // Tres entradas, no tres sueltas mas tres con args huerfanos.
+    expect(timeline).toHaveLength(3);
+    expect(timeline.map((e) => (e as { args: unknown }).args)).toEqual([
+      { path: "a" },
+      { path: "b" },
+      { path: "c" },
+    ]);
+    // Cada resultado cae en su tool, no todas en la ultima.
+    expect(timeline.map((e) => (e as { result?: string }).result)).toEqual([
+      "contenido a",
+      "contenido b",
+      "contenido c",
+    ]);
+  });
+
+  it("cada tool_call conserva su args aunque se ejecute en paralelo", () => {
+    const out = hydrateMessages(
+      [
+        row(1, "user", "x"),
+        row(2, "tool_call", '{"path":"a"}', { tool_name: "read_file" }),
+        row(3, "tool_call", '{"cmd":"ls"}', { tool_name: "shell" }),
+        row(4, "tool", "contenido a", { tool_name: "read_file" }),
+        row(5, "tool", "listing", { tool_name: "shell" }),
+        row(6, "assistant", "y"),
+      ],
+      "s1",
+    );
+
+    const timeline = tl(msg(out, 1));
+    expect(timeline).toHaveLength(2);
+    // Herramientas distintas: el emparejado usa el nombre cuando puede, y
+    // no depende de que el lote sea homogeneo.
+    expect(at(msg(out, 1), 0)).toMatchObject({
+      tool: "read_file",
+      args: { path: "a" },
+      result: "contenido a",
+    });
+    expect(at(msg(out, 1), 1)).toMatchObject({
+      tool: "shell",
+      args: { cmd: "ls" },
+      result: "listing",
+    });
+  });
+
+  it("deja en running las llamadas cuyo resultado aun no llego", () => {
+    // A mitad de un lote en vuelo: hay mas tool_call que tool.
+    const out = hydrateMessages(
+      [
+        row(1, "user", "x"),
+        row(2, "tool_call", '{"path":"a"}', { tool_name: "read_file" }),
+        row(3, "tool_call", '{"path":"b"}', { tool_name: "read_file" }),
+        row(4, "tool_call", '{"path":"c"}', { tool_name: "read_file" }),
+        row(5, "tool", "contenido a", { tool_name: "read_file" }),
+        row(6, "assistant", "y"),
+      ],
+      "s1",
+    );
+
+    const timeline = tl(msg(out, 1));
+    expect(timeline).toHaveLength(3);
+    expect((at(msg(out, 1), 0) as { result?: string }).result).toBe(
+      "contenido a",
+    );
+    // Las dos siguientes siguen sin resultado -> el renderer las muestra
+    // girando. Y no se han comido el resultado de la primera.
+    expect(
+      (at(msg(out, 1), 1) as { result?: string }).result,
+    ).toBeUndefined();
+    expect(
+      (at(msg(out, 1), 2) as { result?: string }).result,
+    ).toBeUndefined();
+    expect((at(msg(out, 1), 1) as { args: unknown }).args).toEqual({
+      path: "b",
+    });
+  });
+
+  it("un tool sin call se emite suelto sin romper el resto", () => {
+    // Tool desconocida: el daemon persiste el resultado pero nunca el
+    // call (prepare_tool_call sale antes de emitirlo).
+    const out = hydrateMessages(
+      [
+        row(1, "user", "x"),
+        row(2, "tool", "[error] unknown tool: inventada", {
+          tool_name: "inventada",
+        }),
+        row(3, "tool_call", '{"path":"a"}', { tool_name: "read_file" }),
+        row(4, "tool", "contenido a", { tool_name: "read_file" }),
+        row(5, "assistant", "y"),
+      ],
+      "s1",
+    );
+
+    const timeline = tl(msg(out, 1));
+    expect(timeline).toHaveLength(2);
+    expect(at(msg(out, 1), 0)).toMatchObject({
+      tool: "inventada",
+      result: "[error] unknown tool: inventada",
+    });
+    // El resultado siguiente NO se engancha a la tool suelta anterior.
+    expect(at(msg(out, 1), 1)).toMatchObject({
+      tool: "read_file",
+      result: "contenido a",
+    });
+  });
+
+  it("el emparejado no cruza un limite de turno", () => {
+    // Turno 1 deja una tool en vuelo; el turno 2 trae sus propias calls.
+    // Sin resetear la cola, el resultado del turno 2 cerraria la tool del
+    // turno 1.
+    const out = hydrateMessages(
+      [
+        row(1, "user", "x"),
+        row(2, "tool_call", '{"path":"a"}', { tool_name: "read_file" }),
+        row(3, "assistant", "sin terminar"),
+        row(4, "user", "otra cosa"),
+        row(5, "tool_call", '{"path":"b"}', { tool_name: "read_file" }),
+        row(6, "tool", "contenido b", { tool_name: "read_file" }),
+        row(7, "assistant", "y"),
+      ],
+      "s1",
+    );
+
+    expect(
+      (at(msg(out, 1), 0) as { result?: string }).result,
+    ).toBeUndefined();
+    expect(at(msg(out, 3), 0)).toMatchObject({
+      args: { path: "b" },
+      result: "contenido b",
+    });
+  });
+  // ── EP-2026-10-03: emparejado por tool_call_id ────────────────────────
+  //
+  // El daemon escribe el mismo `tool_call_id` en la fila de la llamada y
+  // en la de su resultado. Es el emparejado exacto, y el que de verdad
+  // usa la app: antes el `tool_call` se guardaba con role="tool" y no
+  // existia ninguna fila `tool_call`, asi que este camino no se ejecucionaba
+  // nunca contra datos reales.
+
+  it("empareja por tool_call_id aunque las tools sean iguales", () => {
+    const out = hydrateMessages(
+      [
+        row(1, "user", "x"),
+        row(2, "tool_call", '{"path":"a"}', { tool_name: "read_file", tool_call_id: "c1" }),
+        row(3, "tool_call", '{"path":"b"}', { tool_name: "read_file", tool_call_id: "c2" }),
+        row(4, "tool", "contenido a", { tool_name: "read_file", tool_call_id: "c1" }),
+        row(5, "tool", "contenido b", { tool_name: "read_file", tool_call_id: "c2" }),
+        row(6, "assistant", "y"),
+      ],
+      "s1",
+    );
+
+    const timeline = tl(msg(out, 1));
+    expect(timeline).toHaveLength(2);
+    expect(timeline[0]).toMatchObject({
+      args: { path: "a" },
+      result: "contenido a",
+      call_id: "c1",
+    });
+    expect(timeline[1]).toMatchObject({
+      args: { path: "b" },
+      result: "contenido b",
+      call_id: "c2",
+    });
+  });
+
+  it("el id manda sobre el orden: un resultado puede llegar antes que otro", () => {
+    const out = hydrateMessages(
+      [
+        row(1, "user", "x"),
+        row(2, "tool_call", '{"path":"a"}', { tool_name: "read_file", tool_call_id: "c1" }),
+        row(3, "tool_call", '{"path":"b"}', { tool_name: "read_file", tool_call_id: "c2" }),
+        // El resultado de c2 se persiste antes que el de c1.
+        row(4, "tool", "contenido b", { tool_name: "read_file", tool_call_id: "c2" }),
+        row(5, "tool", "contenido a", { tool_name: "read_file", tool_call_id: "c1" }),
+        row(6, "assistant", "y"),
+      ],
+      "s1",
+    );
+
+    const timeline = tl(msg(out, 1));
+    expect(timeline).toHaveLength(2);
+    expect(timeline[0]).toMatchObject({ args: { path: "a" }, result: "contenido a" });
+    expect(timeline[1]).toMatchObject({ args: { path: "b" }, result: "contenido b" });
+  });
+
+  it("mezcla de tools distintas con id: cada resultado va a la suya", () => {
+    const out = hydrateMessages(
+      [
+        row(1, "user", "x"),
+        row(2, "tool_call", '{"path":"a"}', { tool_name: "read_file", tool_call_id: "c1" }),
+        row(3, "tool_call", '{"cmd":"ls"}', { tool_name: "shell", tool_call_id: "c2" }),
+        row(4, "tool", "listing", { tool_name: "shell", tool_call_id: "c2" }),
+        row(5, "tool", "contenido a", { tool_name: "read_file", tool_call_id: "c1" }),
+        row(6, "assistant", "y"),
+      ],
+      "s1",
+    );
+
+    const timeline = tl(msg(out, 1));
+    expect(timeline).toHaveLength(2);
+    expect(timeline[0]).toMatchObject({ tool: "read_file", result: "contenido a" });
+    expect(timeline[1]).toMatchObject({ tool: "shell", result: "listing" });
+  });
+
+  it("una tool en vuelo con id sigue mostrando su args sin resultado", () => {
+    const out = hydrateMessages(
+      [
+        row(1, "user", "x"),
+        row(2, "tool_call", '{"path":"a"}', { tool_name: "read_file", tool_call_id: "c1" }),
+        row(3, "tool_call", '{"path":"b"}', { tool_name: "read_file", tool_call_id: "c2" }),
+        row(4, "tool", "contenido a", { tool_name: "read_file", tool_call_id: "c1" }),
+        row(5, "assistant", "y"),
+      ],
+      "s1",
+    );
+
+    const timeline = tl(msg(out, 1));
+    expect(timeline).toHaveLength(2);
+    expect(timeline[0]).toMatchObject({ args: { path: "a" }, result: "contenido a" });
+    expect((timeline[1] as { result?: string }).result).toBeUndefined();
+    expect((timeline[1] as { args: unknown }).args).toEqual({ path: "b" });
+  });
+  it("un tool_call_id sin fila tool_call se emite suelto sin robar otra", () => {
+    // El daemon persiste el resultado de una tool cuya peticion no llego a
+    // guardarse. Con id, se sabe que no pertenece a ninguna de las abiertas,
+    // asi que va suelto en vez de meterse en la primera.
+    const out = hydrateMessages(
+      [
+        row(1, "user", "x"),
+        row(2, "tool_call", '{"path":"a"}', { tool_name: "read_file", tool_call_id: "c1" }),
+        row(3, "tool", "huerfano", { tool_name: "read_file", tool_call_id: "perdida" }),
+        row(4, "tool", "contenido a", { tool_name: "read_file", tool_call_id: "c1" }),
+        row(5, "assistant", "y"),
+      ],
+      "s1",
+    );
+
+    const timeline = tl(msg(out, 1));
+    expect(timeline).toHaveLength(2);
+    // La peticion c1 acaba con SU resultado, no con el huerfano.
+    expect(timeline[0]).toMatchObject({ args: { path: "a" }, result: "contenido a" });
+    expect(timeline[1]).toMatchObject({ result: "huerfano" });
+    expect((timeline[1] as { args?: unknown }).args).toBeUndefined();
   });
 });

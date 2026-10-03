@@ -1536,6 +1536,7 @@ pub async fn post_message_stream(
                     tool,
                     args,
                     iteration,
+                    call_id,
                     seq,
                 }) if session_id == session_for_task => {
                     if tx_for_forward
@@ -1544,6 +1545,7 @@ pub async fn post_message_stream(
                             "tool": tool,
                             "args": args,
                             "iteration": iteration,
+                            "call_id": call_id,
                             "seq": seq,
                             "request_id": request_id_for_forward,
                             "client_id": client_id_for_forward,
@@ -1556,10 +1558,12 @@ pub async fn post_message_stream(
                     // EP-2026-10-03: el tool_call va a SQLite como
                     // role="tool_call". El contenido es el args JSON:
                     // el timeline lo necesita para reconstruir qué se
-                    // pidió, aunque la tool falle.
+                    // pidió, aunque la tool falle. Antes se guardaba con
+                    // role="tool" y el par args/resultado era
+                    // indistinguible al rehidratar.
                     let args_text = args.to_string();
                     if let Err(e) = session_store
-                        .log_tool_message(session_for_task, &tool, &args_text, None)
+                        .log_tool_call_message(session_for_task, &tool, &args_text, Some(&call_id))
                         .await
                     {
                         tracing::warn!(
@@ -1576,6 +1580,7 @@ pub async fn post_message_stream(
                     tool,
                     result,
                     iteration,
+                    call_id,
                     seq,
                 }) if session_id == session_for_task => {
                     if tx_for_forward
@@ -1584,6 +1589,7 @@ pub async fn post_message_stream(
                             "tool": tool,
                             "result": result,
                             "iteration": iteration,
+                            "call_id": call_id,
                             "seq": seq,
                             "request_id": request_id_for_forward,
                             "client_id": client_id_for_forward,
@@ -1597,7 +1603,7 @@ pub async fn post_message_stream(
                     // role="tool". Un F5 en mitad de una tool larga
                     // (shell con timeout de 30s) ya no la pierde.
                     if let Err(e) = session_store
-                        .log_tool_message(session_for_task, &tool, &result, None)
+                        .log_tool_message(session_for_task, &tool, &result, Some(&call_id))
                         .await
                     {
                         tracing::warn!(

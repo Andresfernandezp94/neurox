@@ -504,6 +504,9 @@ async fn handle_method(
         }
         "process" => handle_process(params, state, stdout).await,
         "tool_result" => handle_tool_result(params, state, stdout).await,
+        // EP-2026-10-03: todos los resultados de un lote de una vez. Ver
+        // `handle_tool_results`.
+        "tool_results" => handle_tool_results(params, state, stdout).await,
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -764,6 +767,117 @@ async fn handle_process(
         filtered_tools,
     )
     .await
+}
+
+/// EP-2026-10-03: resultados de UN LOTE de tools, todos juntos.
+///
+/// Por que existe: `handle_tool_result` hace una llamada al LLM por cada
+/// resultado. Con un lote de 3 tools eso produce un historial donde el
+/// mensaje `assistant` con sus tres `tool_calls` va seguido de UN solo
+/// mensaje `tool`, y despues otro mensaje `assistant`... Los proveedores
+/// rechazan eso con `400 invalid_request_error`: un `assistant` con
+/// `tool_calls` debe ir seguido de exactamente un mensaje `tool` por cada
+/// `tool_call_id`, y no vale contestarlo antes de tiempo.
+///
+/// Antes de este metodo el daemon ejecutaba el lote en SECUENCIAL, asi que
+/// el problema no se vea: cada tool_call se mandaba solo y su resultado
+/// cerraba el turno entero. Al paralelizar la ejecucion (que es justo lo
+/// que pide un modelo que pide tres ficheros a la vez) el fallo aparece.
+///
+/// Aqui se validan todos los ids, se anaden todos los mensajes `tool` y se
+/// hace UNA sola llamada al LLM. El historial queda bien formado.
+///
+/// Es idempotente por lote, no por resultado: un `call_id` repetido dentro
+/// del mismo lote se rechaza, porque seria un resultado duplicado.
+async fn handle_tool_results(
+    params: Value,
+    state: Arc<Mutex<DefaultAgentState>>,
+    stdout: Arc<Mutex<tokio::io::Stdout>>,
+) -> Result<Value, String> {
+    let results = params
+        .get("params")
+        .and_then(|p| p.get("results"))
+        .and_then(|v| v.as_array())
+        .ok_or("missing 'results' array")?
+        .clone();
+
+    if results.is_empty() {
+        return Err("tool_results with an empty batch".to_string());
+    }
+
+    // Validar TODOS los ids antes de tocar la memoria. Si uno falla no
+    // dejamos el historial a medias, que es justo lo que hacia fallar
+    // turnos enteros antes de este metodo.
+    let mut pairs: Vec<(String, String)> = Vec::with_capacity(results.len());
+    {
+        let mut s = state.lock().await;
+        for r in &results {
+            let call_id = r
+                .get("call_id")
+                .and_then(|v| v.as_str())
+                .ok_or("missing call_id in tool_results entry")?
+                .to_string();
+            let result = match r.get("result") {
+                Some(Value::String(s)) => s.clone(),
+                Some(other) => other.to_string(),
+                None => "null".to_string(),
+            };
+            if !s.pending_tool_calls.contains_key(&call_id) {
+                return Err(format!(
+                    "tool_result for unknown/unmatched call_id '{call_id}' \
+                     (pending: {:?})",
+                    s.pending_tool_calls.keys().collect::<Vec<_>>()
+                ));
+            }
+            if pairs.iter().any(|(id, _)| *id == call_id) {
+                return Err(format!("duplicate call_id '{call_id}' in tool_results"));
+            }
+            s.pending_tool_calls.remove(&call_id);
+            pairs.push((call_id, result));
+        }
+
+        // Todos los mensajes `tool` del lote, en el orden en que llegaron.
+        for (call_id, result) in &pairs {
+            s.memory.add_raw_message(ChatMessage {
+                role: "tool".to_string(),
+                content: Some(result.clone()),
+                tool_calls: None,
+                tool_call_id: Some(call_id.clone()),
+            });
+        }
+    }
+
+    eprintln!(
+        "[default] tool_results: {} results joined into a single LLM turn",
+        pairs.len()
+    );
+
+    let sid = params
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default")
+        .to_string();
+
+    // Mismo criterio de tools que `handle_tool_result`: el allowlist sigue
+    // aplicando en la continuacion, para que un tool chain no se salte el
+    // modo lectura.
+    let filtered_tools = {
+        let s = state.lock().await;
+        match s.tools_allowlist.as_deref() {
+            Some(list) if !list.is_empty() => {
+                let set: std::collections::HashSet<&str> =
+                    list.iter().map(String::as_str).collect();
+                s.all_tools
+                    .iter()
+                    .filter(|t| set.contains(t.function.name.as_str()))
+                    .cloned()
+                    .collect()
+            }
+            _ => s.all_tools.clone(),
+        }
+    };
+
+    call_llm(state, stdout, &sid, &Mode::Build, &[], filtered_tools).await
 }
 
 async fn handle_tool_result(
