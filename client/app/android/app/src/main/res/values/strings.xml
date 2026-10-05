@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Neurox</string>
+    <string name="title_activity_main">Neurox</string>
+    <string name="package_name">net.neurox.app</string>
+    <string name="custom_url_scheme">net.neurox.app</string>
+</resources>
