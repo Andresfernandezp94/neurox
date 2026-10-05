@@ -18,19 +18,26 @@ export class ApiError extends Error {
 const TOKEN_KEY = 'neurox_token';
 
 // VITE_API_BASE se inyecta en build-time por Vite. Si está vacío, las URLs
-// son relativas al origen actual (útil en dev: Vite proxy reenvía /v1/*
-// al daemon). En producción hay que setearlo al dominio del backend (e.g.
-// "https://mcp.example.com") para evitar same-origin y que la SPA pegue
-// contra Pages en vez del daemon.
+// son relativas al origen actual.
 //
-// En producción (import.meta.env.PROD), un build sin VITE_API_BASE
-// falla loudly — antes el comportamiento "silencioso" hacía que la SPA
-// se deployara correcta y simplemente no conectara con nada (los /v1/*
-// se resolvían contra CF Pages, que devuelve el index.html HTML, no
-// JSON, derivando en 'Unexpected token <' al parsear).
+// Hay dos despliegues legítimos y ninguno usa VITE_API_BASE:
+//
+//  1. `neurox-web`: sirve la SPA y hace de proxy de /v1/* hacia el daemon,
+//     así que same-origin funciona y el bundle anda desde cualquier máquina
+//     de la LAN sin rebuild. Se declara con VITE_SAME_ORIGIN_PROXY=true.
+//  2. Cloudflare Pages: ahí el origen NO tiene superficie /v1/* y la SPA
+//     pegaría contra Pages en vez del daemon. Hay que setear VITE_API_BASE
+//     al dominio del backend (e.g. "https://mcp.neurox.pro").
+//
+// El guard de abajo solo aplica al caso 2. Antes disparaba en cualquier build
+// de producción sin VITE_API_BASE, lo que rompía el caso 1; y sin él el fallo
+// era silencioso: la SPA se deployaba correcta y simplemente no conectaba con
+// nada (los /v1/* se resolvían contra Pages, que devuelve el index.html HTML,
+// no JSON, derivando en 'Unexpected token <' al parsear).
 export function getApiBase(): string {
   const base = (import.meta.env?.VITE_API_BASE as string | undefined) ?? '';
-  if (!base && import.meta.env.PROD) {
+  const viaSameOriginProxy = import.meta.env?.VITE_SAME_ORIGIN_PROXY === 'true';
+  if (!base && import.meta.env.PROD && !viaSameOriginProxy) {
     throw new Error(
       "[neurox-web] VITE_API_BASE is not set. Building for production " +
         "without VITE_API_BASE makes the SPA send REST + WS calls to its " +
