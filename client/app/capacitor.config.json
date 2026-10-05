@@ -1,0 +1,12 @@
+{
+  "appId": "net.neurox.app",
+  "appName": "Neurox",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#101014"
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

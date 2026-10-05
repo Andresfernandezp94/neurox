@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  El panel de Neurox se sirve por HTTP en la LAN (http://<host>:8787).
+  Desde targetSdk 28 Android bloquea el trafico en claro, y un WebView que
+  carga http:// carga una pagina en blanco sin esto.
+
+  <domain> no admite rangos CIDR, solo nombres o IPs literales, asi que no
+  se puede acotar a 192.168.0.0/16. Se permite cleartext de forma general
+  y el riesgo se acota porque la app solo carga la URL que el usuario
+  configura en su pantalla de ajustes, nunca una arbitraria.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
