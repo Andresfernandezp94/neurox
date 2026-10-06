@@ -14,7 +14,7 @@ mod common;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use neurox::auth::{issue_token, AuthState, JwtSecret, ReauthTokens, Role, UserStore};
+use neurox::auth::{issue_token, AuthState, JwtSecret, ReauthTokens, RefreshStore, Role, UserStore};
 use neurox::router::state::AppState;
 use tools_engine::config::{LlmProviderConfig, LlmProviderKind};
 
@@ -59,6 +59,11 @@ async fn spawn_daemon(tmp: &tempfile::TempDir) -> (String, String, Arc<AppState>
         secret: secret.clone(),
         expiry_hours: 1,
         reauth_tokens: Arc::new(ReauthTokens::new()),
+        refresh_store: Arc::new(RefreshStore::in_memory()),
+        refresh_ttl_days: 30,
+        google_client_id: String::new(),
+        google_client_secret: String::new(),
+        google_audience: String::new(),
     });
 
     // alpha tiene key; beta es local (sin api_key_env ⇒ siempre

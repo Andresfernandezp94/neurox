@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 mod common;
 
 use neurox::approval::ApprovalManager;
-use neurox::auth::{issue_token, AuthState, JwtSecret, ReauthTokens, Role, UserStore};
+use neurox::auth::{issue_token, AuthState, JwtSecret, ReauthTokens, RefreshStore, Role, UserStore};
 use neurox::config::{
     AgentsConfig, CoreConfig, LlmConfig, SandboxConfig, SessionAgentSpec, SessionAgentsConfig,
 };
@@ -185,6 +185,11 @@ impl TestRig {
             secret: secret.clone(),
             expiry_hours: 1,
             reauth_tokens: Arc::new(ReauthTokens::new()),
+        refresh_store: Arc::new(RefreshStore::in_memory()),
+        refresh_ttl_days: 30,
+        google_client_id: String::new(),
+        google_client_secret: String::new(),
+        google_audience: String::new(),
         };
         state.auth = state.auth.with_auth(auth_state);
         let token = issue_token(&secret, Uuid::new_v4(), "tester", Role::Admin, 1).unwrap();

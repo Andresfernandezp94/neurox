@@ -10,13 +10,18 @@
 // `CoreConfig`. When disabled, no middleware runs and the legacy
 // `api_token` behavior applies.
 
+pub mod google;
 pub mod handlers;
+#[cfg(test)]
+mod handlers_tests;
 pub mod middleware;
+pub mod refresh;
 pub mod tokens;
 pub mod users;
 
 pub use handlers::{auth_routes, users_routes, AuthState, ReauthTokens};
 pub use middleware::{JwtAuthLayer, Role, UserContext};
+pub use refresh::{RefreshGrant, RefreshStore, RefreshStoreError};
 pub use tokens::{issue_token, verify_token, JwtError, JwtSecret};
 pub use users::{User, UserStore, UserStoreError};
 
@@ -31,6 +36,11 @@ pub struct AuthConfig {
     pub user_store_path: PathBuf,
     pub jwt_secret_path: PathBuf,
     pub jwt_expiry_hours: u64,
+    pub refresh_store_path: PathBuf,
+    pub refresh_ttl_days: u64,
+    pub google_client_id: String,
+    pub google_client_secret: String,
+    pub google_audience: String,
 }
 
 impl Default for AuthConfig {
@@ -45,6 +55,11 @@ impl Default for AuthConfig {
             user_store_path: default_user_store_path(),
             jwt_secret_path: default_jwt_secret_path(),
             jwt_expiry_hours: default_jwt_expiry_hours(),
+            refresh_store_path: crate::config::default_refresh_store_path(),
+            refresh_ttl_days: crate::config::default_refresh_ttl_days(),
+            google_client_id: String::new(),
+            google_client_secret: String::new(),
+            google_audience: String::new(),
         }
     }
 }
@@ -56,6 +71,11 @@ impl AuthConfig {
             user_store_path: core.auth.user_store_path.clone(),
             jwt_secret_path: core.auth.jwt_secret_path.clone(),
             jwt_expiry_hours: core.auth.jwt_expiry_hours,
+            refresh_store_path: core.auth.refresh_store_path.clone(),
+            refresh_ttl_days: core.auth.refresh_ttl_days,
+            google_client_id: core.auth.google_client_id.clone(),
+            google_client_secret: core.auth.google_client_secret.clone(),
+            google_audience: core.auth.google_audience.clone(),
         }
     }
 }

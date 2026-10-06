@@ -10,7 +10,7 @@ use futures::StreamExt;
 mod common;
 
 use neurox::auth::{
-    issue_token, AuthState, JwtSecret, ReauthTokens, Role, UserStore,
+    issue_token, AuthState, JwtSecret, ReauthTokens, RefreshStore, Role, UserStore,
 };
 use neurox::config::{
     AgentKind, AgentsConfig, CoreConfig, PersistentAgentSpec, RestartPolicy, SandboxConfig,
@@ -318,6 +318,11 @@ async fn websocket_streams_session_events() {
         secret: secret.clone(),
         expiry_hours: 1,
         reauth_tokens: Arc::new(ReauthTokens::new()),
+        refresh_store: Arc::new(RefreshStore::in_memory()),
+        refresh_ttl_days: 30,
+        google_client_id: String::new(),
+        google_client_secret: String::new(),
+        google_audience: String::new(),
     };
     state.auth = state.auth.with_auth(auth_state);
     let token = issue_token(&secret, Uuid::new_v4(), "tester", Role::Admin, 1).unwrap();
@@ -648,6 +653,11 @@ async fn sse_stream_terminates_even_when_the_agent_cannot_run() {
         secret: secret.clone(),
         expiry_hours: 1,
         reauth_tokens: Arc::new(ReauthTokens::new()),
+        refresh_store: Arc::new(RefreshStore::in_memory()),
+        refresh_ttl_days: 30,
+        google_client_id: String::new(),
+        google_client_secret: String::new(),
+        google_audience: String::new(),
     });
     let token = issue_token(&secret, Uuid::new_v4(), "tester", Role::Admin, 1).unwrap();
 

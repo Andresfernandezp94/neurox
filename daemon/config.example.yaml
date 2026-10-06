@@ -175,6 +175,26 @@ auth:
   # Paths por defecto: ~/.config/neurox/users.json y ~/.config/neurox/jwt_secret
   jwt_expiry_hours: 24
 
+  # ── Refresh tokens ──
+  # El JWT de acceso caduca a `jwt_expiry_hours` a propósito. Junto a él el
+  # login emite un refresh token (opaco, persistido solo como SHA-256, rotado
+  # en cada uso) que los clientes guardan para renovar sesión sin volver a
+  # escribir la contraseña. Se Canjea en POST /v1/auth/refresh-token.
+  # refresh_store_path: ~/.config/neurox/refresh_tokens.json
+  refresh_ttl_days: 30
+
+  # ── Google Sign-In ──
+  # Con `google_client_id` vacío el proveedor queda DESACTIVADO: /health
+  # reporta "google": false y POST /v1/auth/google responde 404, en vez de
+  # fingir que funciona. Los clientes leen ese flag para decidir si pintan el
+  # botón (ver /health, que es público justamente por eso).
+  # google_client_id: "1234-abc.apps.googleusercontent.com"
+  #
+  # El secret va por entorno (NEUROX_GOOGLE_CLIENT_SECRET en
+  # ~/.config/neurox/env): sólo el daemon lo necesita y así no sale del repo
+  # ni del fichero de configuración.
+  # google_audience: ""   # si está vacío se usa google_client_id
+
 # ─── Session agents (un subproceso por sesión de chat) ─────────────────────
 # `default` es un SESSION agent: cada sesión (pestaña web, sidebar, clientes
 # concurrentes) spawnea su PROPIO subproceso `agent`. Esto da paralelismo real

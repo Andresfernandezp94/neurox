@@ -11,6 +11,8 @@
 //! - /v1/users/me/password any authenticated user can change their own
 //! - Logout is idempotent (no auth required in v1)
 //! - Public paths (/health, /v1/auth/login) bypass JWT
+//! - /v1/auth/refresh-token y /revoke-token también son públicas (canjean una
+//!   credencial larga por un JWT, así que sin sesión son su único camino)
 //! - Bootstrap admin creation on first run
 //! - UserStore atomic write + reload
 
@@ -20,7 +22,7 @@ use std::time::Duration;
 
 mod common;
 
-use neurox::auth::{AuthConfig, AuthState, JwtSecret, ReauthTokens, Role, UserStore};
+use neurox::auth::{AuthConfig, AuthState, JwtSecret, ReauthTokens, RefreshStore, Role, UserStore};
 use neurox::config::{AuthConfigSection, CoreConfig};
 use serde_json::json;
 
@@ -63,6 +65,11 @@ async fn build_app_with_auth(admin_password: &str) -> TestEnv {
         secret: secret.clone(),
         expiry_hours: 1,
         reauth_tokens: Arc::new(ReauthTokens::new()),
+        refresh_store: Arc::new(RefreshStore::in_memory()),
+        refresh_ttl_days: 30,
+        google_client_id: String::new(),
+        google_client_secret: String::new(),
+        google_audience: String::new(),
     };
 
     let auth_cfg = AuthConfig {
@@ -70,6 +77,9 @@ async fn build_app_with_auth(admin_password: &str) -> TestEnv {
         user_store_path: users_path,
         jwt_secret_path: secret_path,
         jwt_expiry_hours: 1,
+        // El store de refresh tokens va a disco real: este test lo usa.
+        refresh_store_path: tmp.path().join("refresh_tokens.json"),
+        ..Default::default()
     };
     let mut core_cfg = CoreConfig::default();
     core_cfg.auth = AuthConfigSection {
@@ -77,6 +87,7 @@ async fn build_app_with_auth(admin_password: &str) -> TestEnv {
         user_store_path: auth_cfg.user_store_path.clone(),
         jwt_secret_path: auth_cfg.jwt_secret_path.clone(),
         jwt_expiry_hours: 1,
+        ..Default::default()
     };
 
     let tools = Arc::new(tools_engine::tools::ToolRegistry::new());
@@ -216,6 +227,133 @@ async fn health_endpoint_is_public() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["auth_required"], true);
+    // El cliente Android lee este flag para pintar el botón de Google, y lo
+    // hace ANTES de tener token. Sin el campo, `googleConfigured()` da false
+    // siempre y el botón no aparece nunca.
+    assert_eq!(body["google"], false);
+}
+
+/// El canje de refresh token tiene que funcionar SIN Bearer.
+///
+/// Este test monta el router completo (con `JwtAuthLayer`), no `auth_routes()`
+/// pelado como los de `handlers_tests.rs`: una ruta que canjea una credencial
+/// larga por un JWT solo sirve si es pública, y montarla sin la capa lo
+/// esconde justo del test que lo comprueba.
+#[tokio::test]
+async fn refresh_token_endpoint_is_public_and_rotates() {
+    let env = build_app_with_auth("admin-password-1").await;
+    let client = reqwest::Client::new();
+
+    let login_body: serde_json::Value = login(env.port, "admin", "admin-password-1")
+        .await
+        .json()
+        .await
+        .unwrap();
+    let refresh = login_body["refresh_token"].as_str().expect("login sin refresh_token");
+
+    // Sin header Authorization: es un arranque en frío.
+    let resp = client
+        .post(format!(
+            "http://127.0.0.1:{port}/v1/auth/refresh-token",
+            port = env.port
+        ))
+        .json(&json!({ "refresh_token": refresh, "client": "test" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "el canje cold-start debe ser público");
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(body["token"].as_str().unwrap().len() > 50);
+    let rotated = body["refresh_token"].as_str().unwrap();
+    assert_ne!(rotated, refresh, "el token tiene que rotar en cada canje");
+    assert_eq!(body["user"]["username"], "admin");
+
+    // El canje es de un solo uso: repetirlo con el token viejo muere.
+    let replay = client
+        .post(format!(
+            "http://127.0.0.1:{port}/v1/auth/refresh-token",
+            port = env.port
+        ))
+        .json(&json!({ "refresh_token": refresh }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(replay.status(), 401);
+}
+
+/// El logout de un dispositivo tiene que poder revocar su refresh token aunque
+/// su JWT ya haya caducado: si no, el token robado sigue sirviendo 30 días.
+#[tokio::test]
+async fn revoke_token_is_public_and_kills_the_token() {
+    let env = build_app_with_auth("admin-password-1").await;
+    let client = reqwest::Client::new();
+    let login_body: serde_json::Value = login(env.port, "admin", "admin-password-1")
+        .await
+        .json()
+        .await
+        .unwrap();
+    let refresh = login_body["refresh_token"].as_str().unwrap().to_string();
+    let revoke_url =
+        format!("http://127.0.0.1:{port}/v1/auth/revoke-token", port = env.port);
+    let redeem_url =
+        format!("http://127.0.0.1:{port}/v1/auth/refresh-token", port = env.port);
+
+    let resp = client
+        .post(&revoke_url)
+        .json(&json!({ "refresh_token": refresh }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // Revocado ⇒ el canje ya no sirve.
+    let after = client
+        .post(&redeem_url)
+        .json(&json!({ "refresh_token": refresh }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(after.status(), 401, "un token revocado no puede canjearse");
+
+    // Revocar algo que no existe también 200: no se puede sondear el store.
+    let ghost = client
+        .post(&revoke_url)
+        .json(&json!({ "refresh_token": "f".repeat(64) }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ghost.status(), 200);
+
+    // Revocar uno no toca el otro: dos sesiones del mismo usuario siguen
+    // siendo independientes.
+    let second: serde_json::Value = login(env.port, "admin", "admin-password-1")
+        .await
+        .json()
+        .await
+        .unwrap();
+    let other = second["refresh_token"].as_str().unwrap().to_string();
+    let still_good = client
+        .post(&redeem_url)
+        .json(&json!({ "refresh_token": other }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(still_good.status(), 200);
+}
+
+/// `/v1/auth/refresh` (el que desliza la caducidad) SÍ exige Bearer: con
+/// `refresh_token` público, sin esto el canje de una credencial larga sería
+/// indistinguible de este.
+#[tokio::test]
+async fn auth_refresh_still_requires_a_bearer_token() {
+    let env = build_app_with_auth("admin-password-1").await;
+    let resp = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{port}/v1/auth/refresh", port = env.port))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 401);
 }
 
 // ────────────────────────────────────────────────────────────────────

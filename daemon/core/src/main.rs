@@ -376,12 +376,38 @@ async fn serve(
             eprintln!();
         }
 
+        let refresh_store = std::sync::Arc::new(
+            neurox::auth::RefreshStore::load(&auth_cfg.refresh_store_path)
+                .unwrap_or_else(|e| {
+                    eprintln!(
+                        "  ⚠️  no se pudo cargar el store de refresh tokens ({}): {}",
+                        auth_cfg.refresh_store_path.display(),
+                        e
+                    );
+                    neurox::auth::RefreshStore::in_memory()
+                }),
+        );
+
         let auth_state = neurox::auth::AuthState {
             user_store: std::sync::Arc::new(user_store),
             secret,
             expiry_hours: auth_cfg.jwt_expiry_hours,
             reauth_tokens: std::sync::Arc::new(neurox::auth::ReauthTokens::new()),
+            refresh_store,
+            refresh_ttl_days: auth_cfg.refresh_ttl_days,
+            google_client_id: auth_cfg.google_client_id.clone(),
+            google_client_secret: std::env::var("NEUROX_GOOGLE_CLIENT_SECRET")
+                .unwrap_or(auth_cfg.google_client_secret.clone()),
+            google_audience: auth_cfg.google_audience.clone(),
         };
+
+        if auth_state.google_client_id.is_empty() {
+            eprintln!(
+                "  ℹ️  Google Sign-In desactivado (auth.google_client_id vacío)."
+            );
+        } else {
+            eprintln!("  ℹ️  Google Sign-In habilitado.");
+        }
         // Replace the auth layer with one that has the JWT secret.
         let mut state = state;
         state.auth = state.auth.with_auth(auth_state);
