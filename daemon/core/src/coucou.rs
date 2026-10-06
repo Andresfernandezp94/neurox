@@ -209,6 +209,61 @@ pub async fn publish(ev: &Event, path: &PathBuf, seen: &mut Seen) {
     send(&line, path).await;
 }
 
+/// Ruta del propio binario, para relanzarse como hook.
+///
+/// `std::env::current_exe()` es lo correcto y no una constante: el daemon
+/// corre como servicio de systemd desde `~/.local/bin`, pero en desarrollo
+/// desde `target/release`, y un path fijo fallaría en uno de los dos casos.
+fn self_exe() -> Option<PathBuf> {
+    std::env::current_exe().ok()
+}
+
+/// Publica una APROBACIÓN y espera la decisión del usuario.
+///
+/// A diferencia de `publish`, esto no puede ser un `write`: una decisión
+/// humana tarda, y esperar aquí detendría el `recv()` del bus, que es
+/// compartido. Así que corre en su propia tarea y el bucle sigue.
+///
+/// El subproceso es `neurox coucou-hook PermissionRequest`, que es este mismo
+/// binario con otro subcomando. El límite de proceso es lo que hace segura la
+/// garantía: si el hook se cuelga o el usuario nunca contesta, neurox sigue
+/// sirviendo y su propia aprobación sigue esperándolo por su canal.
+pub fn spawn_approval_bridge(request: &crate::approval::ApprovalRequest) {
+    let Some(exe) = self_exe() else {
+        tracing::debug!("coucou: no se puede localizar el propio binario, sin aprobaciones");
+        return;
+    };
+
+    // Todo se copia a `String` antes del spawn: la tarea vive en el runtime y
+    // no puede prête del `request` del bus.
+    let payload_arg = serde_json::json!({
+        "approval_id": request.id.to_string(),
+        "tool_name": request.tool,
+        "tool_input": request.args,
+        "prompt": format!("Allow {}?", request.tool),
+    })
+    .to_string();
+    let session_arg = request.session_id.to_string();
+
+    tokio::spawn(async move {
+        let out = tokio::process::Command::new(exe)
+            .arg("coucou-hook")
+            .arg("PermissionRequest")
+            .arg(&payload_arg)
+            .arg("--session")
+            .arg(&session_arg)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .await;
+
+        match out {
+            Ok(o) if o.status.success() => tracing::debug!("coucou: aprobación resuelta"),
+            Ok(o) => tracing::debug!("coucou: el hook salió con {:?}", o.status),
+            Err(e) => tracing::debug!("coucou: no se pudo lanzar el hook: {e}"),
+        }
+    });
+}
+
 /// Tarea de fondo. Se queda escuchando el bus mientras el daemon viva.
 ///
 /// Si Coucou no está instalado, el primer `send` falla y el bucle sigue
@@ -227,7 +282,16 @@ pub async fn run(mut rx: Receiver<Event>) {
     let mut seen = Seen::default();
     loop {
         match rx.recv().await {
-            Ok(ev) => publish(&ev, &path, &mut seen).await,
+            Ok(ev) => {
+                // Las aprobaciones salen por el hook en un subproceso, no por
+                // el socket directo: el hook espera la decisión del usuario y
+                // eso no puede bloquear este bucle.
+                if let Event::ApprovalRequest { request } = &ev {
+                    spawn_approval_bridge(request);
+                    continue;
+                }
+                publish(&ev, &path, &mut seen).await;
+            }
             // Lagged: nos pasamos de la capacidad del canal (1024). Coucou es
             // un adorno, no una fuente de verdad: mejor perder eventos sueltos
             // que retencer el bus para neurox.
@@ -596,6 +660,53 @@ mod tests {
         assert!(v["hook_event_name"].is_string());
         assert_eq!(v["session_id"].as_str().unwrap().len(), 36);
         assert_eq!(v["session_id"].as_str().unwrap(), s.to_string());
+    }
+
+    #[test]
+    fn una_aprobacion_no_pasa_por_el_socket_directo() {
+        // El camino de una aprobación es un subproceso, no un write. Si algún
+        // día `to_coucou` empieza a mapear `ApprovalRequest`, vuelve el
+        // problema que motivó el hook: el hook espera al usuario y el bucle del
+        // bus se detiene.
+        let req = crate::approval::ApprovalRequest {
+            id: uuid::Uuid::new_v4(),
+            session_id: sid(),
+            tool: "shell".into(),
+            args: json!({ "command": "ls" }),
+            reason: None,
+            created_at: "2026-10-06T00:00:00Z".into(),
+        };
+        let ev = Event::ApprovalRequest {
+            request: req,
+        };
+        assert!(
+            to_coucou(&ev, &mut Seen::default()).is_none(),
+            "ApprovalRequest no debe mapearse a un evento directo de Coucou"
+        );
+    }
+
+    #[test]
+    fn el_hook_de_aprobacion_lleva_lo_que_coucou_necesita_para_la_tarjeta() {
+        // Coucou arma la tarjeta con `tool_name`, `tool_input` y `prompt`. Si
+        // falta alguno, la isla muestra una hoja en blanco y el usuario no sabe
+        // qué está autorizando.
+        let r = crate::approval::ApprovalRequest {
+            id: uuid::Uuid::new_v4(),
+            session_id: sid(),
+            tool: "write_file".into(),
+            args: json!({ "path": "x.rs" }),
+            reason: None,
+            created_at: "2026-10-06T00:00:00Z".into(),
+        };
+        let p = serde_json::json!({
+            "approval_id": r.id.to_string(),
+            "tool_name": r.tool,
+            "tool_input": r.args,
+            "prompt": format!("Allow {}?", r.tool),
+        });
+        assert_eq!(p["tool_name"], "write_file");
+        assert_eq!(p["tool_input"]["path"], "x.rs");
+        assert!(p["prompt"].as_str().unwrap().contains("write_file"));
     }
 
     #[tokio::test]
