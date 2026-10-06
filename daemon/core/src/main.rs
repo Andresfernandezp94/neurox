@@ -439,6 +439,13 @@ async fn serve(
             }
         });
     }
+    // Coucou bridge: publica la actividad de las sesiones en la isla de
+    // Coucou (el compañero del notch). Es un LECTOR pasivo y su presencia es
+    // opcional: si el socket no existe, cada envío falla solo y el daemon
+    // sigue exactamente igual. Sin esto, un neurox con Coucou cerrado se
+    // comportaría distinto de uno con Coucou abierto.
+    tokio::spawn(neurox::coucou::run(state.events.event_tx.subscribe()));
+
     let app = neurox::router::router(state);
 
     if let Some(tls) = &core_config.tls {
