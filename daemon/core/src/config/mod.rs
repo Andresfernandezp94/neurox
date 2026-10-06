@@ -25,6 +25,39 @@ pub struct AuthConfigSection {
     /// Token validity in hours.
     #[serde(default = "default_jwt_expiry_hours")]
     pub jwt_expiry_hours: u64,
+    /// Path to the JSON file holding hashed refresh tokens. Created on first
+    /// issue, mode `0600`.
+    #[serde(default = "default_refresh_store_path")]
+    pub refresh_store_path: PathBuf,
+    /// Refresh token validity in days. This is the long-lived credential:
+    /// the mobile stores it and trades it for a fresh JWT, so it can stay
+    /// valid for weeks without weakening the 24 h access token.
+    #[serde(default = "default_refresh_ttl_days")]
+    pub refresh_ttl_days: u64,
+    /// Google Sign-In. Empty `client_id` disables the provider entirely:
+    /// `/v1/auth/google` answers 404 instead of pretending to work.
+    #[serde(default)]
+    pub google_client_id: String,
+    /// OAuth client secret from the Google Cloud console. Only the daemon
+    /// needs it, so it can live in `~/.config/neurox/env` and stay out of
+    /// the repo and out of the config file.
+    #[serde(default)]
+    pub google_client_secret: String,
+    /// `aud` claim accepted in Google's ID tokens. Defaults to
+    /// `google_client_id` when empty.
+    #[serde(default)]
+    pub google_audience: String,
+}
+
+pub(crate) fn default_refresh_store_path() -> PathBuf {
+    let mut p = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    p.push("neurox");
+    p.push("refresh_tokens.json");
+    p
+}
+
+pub(crate) fn default_refresh_ttl_days() -> u64 {
+    30
 }
 
 pub(crate) fn default_user_store_path() -> PathBuf {
@@ -52,6 +85,11 @@ impl Default for AuthConfigSection {
             user_store_path: default_user_store_path(),
             jwt_secret_path: default_jwt_secret_path(),
             jwt_expiry_hours: default_jwt_expiry_hours(),
+            refresh_store_path: default_refresh_store_path(),
+            refresh_ttl_days: default_refresh_ttl_days(),
+            google_client_id: String::new(),
+            google_client_secret: String::new(),
+            google_audience: String::new(),
         }
     }
 }

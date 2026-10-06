@@ -46,6 +46,44 @@ enum Commands {
         #[command(subcommand)]
         action: UsersCmd,
     },
+    /// Log in and store a session for later commands.
+    Login,
+    /// Log out and revoke the stored refresh token.
+    Logout,
+    /// Send a message to an agent and stream the reply to stdout.
+    Chat {
+        /// The message. With --stdin it is read from standard input instead.
+        message: Option<String>,
+        #[arg(long)]
+        stdin: bool,
+        /// Continue an existing session instead of creating one.
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long, default_value = "default")]
+        agent: String,
+    },
+    /// List, show or delete chat sessions.
+    Sessions {
+        #[command(subcommand)]
+        action: neurox::cli::SessionsAction,
+    },
+    /// List pending tool approvals, or answer one.
+    Approvals {
+        #[command(subcommand)]
+        action: neurox::cli::ApprovalsAction,
+    },
+    /// List configured LLM providers and their models.
+    Models,
+    /// Emit one hook event to Coucou. Used by the daemon; rarely by hand.
+    #[command(hide = true)]
+    CoucouHook {
+        /// Canonical Coucou event name.
+        event: String,
+        /// Optional JSON payload merged into the hook payload.
+        payload: Option<String>,
+        #[arg(long)]
+        session: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -89,6 +127,13 @@ async fn main() -> anyhow::Result<()> {
     let is_json = std::env::var("NEUROX_LOG_FORMAT").as_deref() == Ok("json");
     let builder = tracing_subscriber::fmt()
         .with_env_filter(env_filter)
+        // Los logs van a stderr, no a stdout. Para `serve` da igual, pero los
+        // subcomandos de cliente usan stdout como canal de datos: `neurox chat`
+        // imprime ahí la respuesta del modelo y `neurox models` sus filas. Con
+        // los logs en stdout, `neurox chat ... > respuesta.txt` guardaba el log
+        // mezclado con la respuesta. Es la convención de toda CLI: stdout son
+        // datos, stderr es ruido.
+        .with_writer(std::io::stderr)
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE);
     if is_json {
         builder.json().init();
@@ -138,9 +183,62 @@ async fn main() -> anyhow::Result<()> {
         Commands::Users { action } => {
             handle_users_action(action).await?;
         }
+        other => {
+            // Todo lo demás es un cliente del daemon: necesita HTTP, no el
+            // estado interno, así que va por `neurox::cli`.
+            run_client_command(other).await?;
+        }
     }
 
     Ok(())
+}
+
+/// Los subcomandos que hablan con el daemon por HTTP.
+async fn run_client_command(cmd: Commands) -> anyhow::Result<()> {
+    use anyhow::Context;
+    match cmd {
+        Commands::Login => neurox::cli_client::login_interactive().await,
+        Commands::Logout => neurox::cli_client::logout().await,
+        Commands::Chat {
+            message,
+            stdin,
+            session,
+            agent,
+        } => {
+            // `--stdin` existe para no meter el prompt en la lista de procesos
+            // ni en el historial del shell, que es donde quedan los secretos
+            // cuando el texto viene de una pipe.
+            let text = if stdin {
+                use std::io::Read;
+                let mut s = String::new();
+                std::io::stdin().read_to_string(&mut s)?;
+                s.trim().to_string()
+            } else {
+                message.context("hace falta un mensaje, o --stdin para leerlo de la entrada")?
+            };
+            neurox::cli::chat(text, session, agent).await
+        }
+        Commands::Sessions { action } => neurox::cli::sessions(action).await,
+        Commands::Approvals { action } => neurox::cli::approvals(action).await,
+        Commands::Models => neurox::cli::models().await,
+        Commands::CoucouHook {
+            event,
+            payload,
+            session,
+        } => {
+            let payload = match payload {
+                Some(p) => serde_json::from_str(&p)
+                    .with_context(|| format!("--payload no es JSON válido: {p}"))?,
+                None => serde_json::json!({}),
+            };
+            neurox::coucou_hook::hook(&event, payload, session).await
+        }
+        // Los despacha el `match` de main antes de llegar acá.
+        Commands::Serve { .. }
+        | Commands::Agents { .. }
+        | Commands::Providers { .. }
+        | Commands::Users { .. } => unreachable!("comando no-cliente"),
+    }
 }
 
 async fn serve(
@@ -376,12 +474,38 @@ async fn serve(
             eprintln!();
         }
 
+        let refresh_store = std::sync::Arc::new(
+            neurox::auth::RefreshStore::load(&auth_cfg.refresh_store_path)
+                .unwrap_or_else(|e| {
+                    eprintln!(
+                        "  ⚠️  no se pudo cargar el store de refresh tokens ({}): {}",
+                        auth_cfg.refresh_store_path.display(),
+                        e
+                    );
+                    neurox::auth::RefreshStore::in_memory()
+                }),
+        );
+
         let auth_state = neurox::auth::AuthState {
             user_store: std::sync::Arc::new(user_store),
             secret,
             expiry_hours: auth_cfg.jwt_expiry_hours,
             reauth_tokens: std::sync::Arc::new(neurox::auth::ReauthTokens::new()),
+            refresh_store,
+            refresh_ttl_days: auth_cfg.refresh_ttl_days,
+            google_client_id: auth_cfg.google_client_id.clone(),
+            google_client_secret: std::env::var("NEUROX_GOOGLE_CLIENT_SECRET")
+                .unwrap_or(auth_cfg.google_client_secret.clone()),
+            google_audience: auth_cfg.google_audience.clone(),
         };
+
+        if auth_state.google_client_id.is_empty() {
+            eprintln!(
+                "  ℹ️  Google Sign-In desactivado (auth.google_client_id vacío)."
+            );
+        } else {
+            eprintln!("  ℹ️  Google Sign-In habilitado.");
+        }
         // Replace the auth layer with one that has the JWT secret.
         let mut state = state;
         state.auth = state.auth.with_auth(auth_state);
@@ -413,6 +537,13 @@ async fn serve(
             }
         });
     }
+    // Coucou bridge: publica la actividad de las sesiones en la isla de
+    // Coucou (el compañero del notch). Es un LECTOR pasivo y su presencia es
+    // opcional: si el socket no existe, cada envío falla solo y el daemon
+    // sigue exactamente igual. Sin esto, un neurox con Coucou cerrado se
+    // comportaría distinto de uno con Coucou abierto.
+    tokio::spawn(neurox::coucou::run(state.events.event_tx.subscribe()));
+
     let app = neurox::router::router(state);
 
     if let Some(tls) = &core_config.tls {

@@ -145,7 +145,20 @@ pub fn router(state: AppState) -> axum::Router {
     let state = Arc::new(state);
     let api = if let Some(auth_state) = auth_state.clone() {
         let secret = auth_state.secret.clone();
-        let public_paths = vec!["/health", "/livez", "/readyz", "/v1/auth/login"];
+        // Rutas públicas. Las tres de `/v1/auth/*` que.canjean una credencial
+        // larga (password, refresh token, ID token de Google) por un JWT: si
+        // exigieran un Bearer no podrían usarse justo cuando hacen falta,
+        // que es sin sesión. `/v1/auth/refresh` NO va aquí: solo desliza la
+        // caducidad de un JWT vigente.
+        let public_paths = vec![
+            "/health",
+            "/livez",
+            "/readyz",
+            "/v1/auth/login",
+            "/v1/auth/refresh-token",
+            "/v1/auth/revoke-token",
+            "/v1/auth/google",
+        ];
         axum::Router::new()
             .route("/health", get(http::health))
             .route("/livez", get(http::livez))

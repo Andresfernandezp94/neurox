@@ -6,7 +6,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 mod common;
 
-use neurox::auth::{issue_token, AuthState, JwtSecret, ReauthTokens, Role, UserStore};
+use neurox::auth::{issue_token, AuthState, JwtSecret, ReauthTokens, RefreshStore, Role, UserStore};
 use neurox::approval::{ApprovalDecision, ApprovalManager};
 use neurox::config::{
     AgentKind, AgentsConfig, CoreConfig, PersistentAgentSpec, RestartPolicy, SandboxConfig,
@@ -127,6 +127,11 @@ async fn cancel_endpoint_marks_session_inactive() {
         secret: secret.clone(),
         expiry_hours: 1,
         reauth_tokens: Arc::new(ReauthTokens::new()),
+        refresh_store: Arc::new(RefreshStore::in_memory()),
+        refresh_ttl_days: 30,
+        google_client_id: String::new(),
+        google_client_secret: String::new(),
+        google_audience: String::new(),
     };
     state.auth = state.auth.with_auth(auth_state);
     let token = issue_token(&secret, uuid::Uuid::new_v4(), "tester", Role::Admin, 1).unwrap();

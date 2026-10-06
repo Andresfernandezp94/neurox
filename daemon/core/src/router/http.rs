@@ -30,6 +30,15 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
     // auth so the LoginScreen gate can decide to render or skip.
     // EP-0007: also true when the new JWT-based auth is enabled.
     let auth_required = state.auth.auth.is_some();
+    // Whether Google Sign-In is available. The Android LoginScreen reads it
+    // to decide whether to render the button — it has to come from `/health`
+    // because the check happens before any token exists. It only says which
+    // providers are wired, never anything about the user.
+    let google_available = state
+        .auth
+        .auth
+        .as_ref()
+        .is_some_and(crate::auth::google::is_configured);
 
     // Per-session detail: gather pid/process + model from SQLite +
     // message count.
@@ -71,6 +80,7 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
         "started_at": started.to_rfc3339(),
         "uptime_seconds": uptime_seconds,
         "auth_required": auth_required,
+        "google": google_available,
         "sessions": {
             "running": details.len(),
             "specs": state.lifecycle.session_agents.list_specs().await.len(),

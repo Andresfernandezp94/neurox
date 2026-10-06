@@ -24,6 +24,15 @@ pub struct AuthState {
     pub expiry_hours: u64,
     /// EP-0014 C-005: re-authentication tokens required for role changes.
     pub reauth_tokens: Arc<ReauthTokens>,
+    /// Long-lived refresh tokens. The access JWT stays short-lived; this is
+    /// what lets the mobile stay signed in for weeks.
+    pub refresh_store: Arc<super::refresh::RefreshStore>,
+    pub refresh_ttl_days: u64,
+    /// Google Sign-In. `client_id` empty means the provider is not
+    /// configured and `/v1/auth/google` answers 404.
+    pub google_client_id: String,
+    pub google_client_secret: String,
+    pub google_audience: String,
 }
 
 /// EP-0014 C-005: short-lived tokens for sensitive operations. Each
@@ -119,11 +128,35 @@ pub struct LoginResponse {
     pub user: UserView,
     /// EP-0014 C-005: short-lived token for sensitive ops (e.g. role changes).
     pub reauth_token: String,
+    /// Long-lived credential to obtain a new `token` without re-entering the
+    /// password. `None` when the refresh store could not issue one, so an
+    /// old client that ignores it keeps working unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+}
+
+/// Body of `POST /v1/auth/refresh-token`. Distinct from `/v1/auth/refresh`
+/// (which needs a still-valid JWT and only slides the expiry): this one
+/// takes the long-lived credential, so it works from a cold start on the
+/// mobile without any access token at all.
+#[derive(Deserialize)]
+pub struct RefreshTokenRequest {
+    pub refresh_token: String,
+    /// Free-form label stored with the session ("android", "web"...).
+    #[serde(default)]
+    pub client: String,
 }
 
 #[derive(Serialize)]
 pub struct RefreshResponse {
     pub token: String,
+    /// Only present on `/v1/auth/refresh-token`, where the token rotates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_expires_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<UserView>,
 }
 
 #[derive(Serialize)]
@@ -160,7 +193,10 @@ pub async fn login(
     Json(req): Json<LoginRequest>,
 ) -> Response {
     let user_opt = state.user_store.find_by_username(&req.username);
-    let (token_res, view) = match user_opt {
+    let mut refresh_plain: Option<String> = None;
+    let mut token_res: Option<String> = None;
+    let mut view: Option<UserView> = None;
+    match user_opt {
         Some(u) => {
             // EP-0012 P-004: Argon2 verify is CPU-bound (~100-500ms).
             // Running it on the tokio worker thread blocks other tasks.
@@ -173,7 +209,8 @@ pub async fn login(
             .await
             .unwrap_or(false);
             if !ok {
-                (None, None)
+                // Wrong password: fall through with empty results so the
+                // response is identical to an unknown user.
             } else {
                 let _ = state.user_store.record_login(u.id);
                 let t = issue_token(
@@ -184,20 +221,32 @@ pub async fn login(
                     state.expiry_hours,
                 )
                 .ok();
-                (t, Some(u.view()))
+                // Long-lived credential for the same login. Best-effort: if
+                // the refresh store can't persist, the caller still gets a
+                // working access token and `refresh_token` is omitted.
+                let rt = state
+                    .refresh_store
+                    .issue(u.id, state.refresh_ttl_days, "login")
+                    .ok()
+                    .map(|(plain, _)| plain);
+                refresh_plain = rt;
+                token_res = t;
+                view = Some(u.view());
             }
         }
         None => {
+            // Verify against a dummy hash anyway so a missing user and a
+            // wrong password take the same time (no user enumeration).
             let _ = super::users::verify_password(
                 &req.password,
                 "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             );
-            (None, None)
         }
-    };
+    }
 
     match (token_res, view) {
         (Some(token), Some(user)) => {
+            let refresh = refresh_plain;
             // EP-0014 C-005: issue a fresh reauth_token (5min TTL).
             let reauth = state.reauth_tokens.issue();
             (
@@ -206,6 +255,7 @@ pub async fn login(
                     token,
                     user,
                     reauth_token: reauth,
+                    refresh_token: refresh,
                 }),
             )
                 .into_response()
@@ -221,6 +271,99 @@ pub async fn login(
     }
 }
 
+/// Exchanges a long-lived refresh token for a fresh JWT, rotating it.
+///
+/// Unlike `/v1/auth/refresh` this needs no prior session, so the mobile can
+/// boot straight into the panel. The presented token is invalidated as soon
+/// as it is used.
+pub async fn refresh_with_token(
+    Extension(state): Extension<AuthState>,
+    Json(req): Json<RefreshTokenRequest>,
+) -> Response {
+    let rotated = match state
+        .refresh_store
+        .validate_and_rotate(&req.refresh_token, state.refresh_ttl_days)
+    {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("  ⚠️  refresh store error: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorBody {
+                    error: "internal",
+                    message: "could not renew session".into(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let Some((grant, new_plain, expires_at)) = rotated else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorBody {
+                error: "unauthorized",
+                message: "refresh token invalid or expired".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    // The token survived rotation but the user may have been deleted since.
+    let Some(user) = state.user_store.find_by_id(grant.user_id) else {
+        let _ = state.refresh_store.revoke_all_for_user(grant.user_id);
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorBody {
+                error: "unauthorized",
+                message: "user no longer exists".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match issue_token(
+        &state.secret,
+        user.id,
+        &user.username,
+        user.role,
+        state.expiry_hours,
+    ) {
+        Ok(token) => (
+            StatusCode::OK,
+            Json(RefreshResponse {
+                token,
+                refresh_token: Some(new_plain),
+                refresh_expires_at: Some(expires_at),
+                user: Some(user.view()),
+            }),
+        )
+            .into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorBody {
+                error: "internal",
+                message: "failed to issue token".into(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+/// Revokes a refresh token (logout from a device). Always answers 200 so a
+/// client can't probe which tokens exist.
+pub async fn revoke_refresh_token(
+    Extension(state): Extension<AuthState>,
+    Json(req): Json<RefreshTokenRequest>,
+) -> Response {
+    let _ = state.refresh_store.revoke(&req.refresh_token);
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "revoked": true })),
+    )
+        .into_response()
+}
+
 pub async fn refresh(
     Extension(state): Extension<AuthState>,
     Extension(user): Extension<UserContext>,
@@ -234,7 +377,12 @@ pub async fn refresh(
     ) {
         Ok(token) => (
             StatusCode::OK,
-            Json(RefreshResponse { token }),
+            Json(RefreshResponse {
+                token,
+                refresh_token: None,
+                refresh_expires_at: None,
+                user: None,
+            }),
         )
             .into_response(),
         Err(_) => (
@@ -407,6 +555,13 @@ pub fn auth_routes() -> Router {
         .route("/v1/auth/login", post(login))
         .route("/v1/auth/refresh", post(refresh))
         .route("/v1/auth/logout", post(logout))
+        // Cold-start session renewal: takes the long-lived refresh token
+        // instead of a JWT, so the mobile can get a token with no session
+        // at all. Rotates the refresh token on every call.
+        .route("/v1/auth/refresh-token", post(refresh_with_token))
+        .route("/v1/auth/revoke-token", post(revoke_refresh_token))
+        // Google Sign-In. 404 while `auth.google_client_id` is empty.
+        .route("/v1/auth/google", post(super::google::google_sign_in))
 }
 
 /// Admin user CRUD (mounted at `/v1/users*`).

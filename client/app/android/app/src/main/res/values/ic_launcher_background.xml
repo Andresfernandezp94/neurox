@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Fondo del icono adaptativo. Era #FFFFFF (el default de Capacitor), que
+     dejaba un icono claro con un logo ámbar encima y chirriaba al lado de las
+     pantallas de la app, que ya son #101014. -->
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <color name="ic_launcher_background">#101014</color>
 </resources>
