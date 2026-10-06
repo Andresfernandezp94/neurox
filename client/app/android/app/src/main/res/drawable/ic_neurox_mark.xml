@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Marca de neurox: hexágono con un punto, como en el logo del panel.
+     Se usa en el launcher en lugar de fetching el favicon del panel. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M54,28 L75,41 L75,67 L54,80 L33,67 L33,41 Z"
+        android:strokeColor="#818CF8"
+        android:strokeWidth="3"
+        android:fillColor="#0F0F14" />
+    <path
+        android:pathData="M54,49 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0"
+        android:fillColor="#818CF8" />
+</vector>

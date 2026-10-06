@@ -29,7 +29,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val NeuroxDark = darkColorScheme(
+// Compartido con LoadingScreen y la pantalla de auth: un solo sitio donde
+// vive la paleta, para que login, carga y panel no se desincronicen.
+internal val NeuroxDark = darkColorScheme(
     primary = Color(0xFF9B8CFF),
     onPrimary = Color(0xFF17123A),
     background = Color(0xFF101014),
