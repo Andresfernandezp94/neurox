@@ -46,6 +46,44 @@ enum Commands {
         #[command(subcommand)]
         action: UsersCmd,
     },
+    /// Log in and store a session for later commands.
+    Login,
+    /// Log out and revoke the stored refresh token.
+    Logout,
+    /// Send a message to an agent and stream the reply to stdout.
+    Chat {
+        /// The message. With --stdin it is read from standard input instead.
+        message: Option<String>,
+        #[arg(long)]
+        stdin: bool,
+        /// Continue an existing session instead of creating one.
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long, default_value = "default")]
+        agent: String,
+    },
+    /// List, show or delete chat sessions.
+    Sessions {
+        #[command(subcommand)]
+        action: neurox::cli::SessionsAction,
+    },
+    /// List pending tool approvals, or answer one.
+    Approvals {
+        #[command(subcommand)]
+        action: neurox::cli::ApprovalsAction,
+    },
+    /// List configured LLM providers and their models.
+    Models,
+    /// Emit one hook event to Coucou. Used by the daemon; rarely by hand.
+    #[command(hide = true)]
+    CoucouHook {
+        /// Canonical Coucou event name.
+        event: String,
+        /// Optional JSON payload merged into the hook payload.
+        payload: Option<String>,
+        #[arg(long)]
+        session: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -89,6 +127,13 @@ async fn main() -> anyhow::Result<()> {
     let is_json = std::env::var("NEUROX_LOG_FORMAT").as_deref() == Ok("json");
     let builder = tracing_subscriber::fmt()
         .with_env_filter(env_filter)
+        // Los logs van a stderr, no a stdout. Para `serve` da igual, pero los
+        // subcomandos de cliente usan stdout como canal de datos: `neurox chat`
+        // imprime ahí la respuesta del modelo y `neurox models` sus filas. Con
+        // los logs en stdout, `neurox chat ... > respuesta.txt` guardaba el log
+        // mezclado con la respuesta. Es la convención de toda CLI: stdout son
+        // datos, stderr es ruido.
+        .with_writer(std::io::stderr)
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE);
     if is_json {
         builder.json().init();
@@ -138,9 +183,62 @@ async fn main() -> anyhow::Result<()> {
         Commands::Users { action } => {
             handle_users_action(action).await?;
         }
+        other => {
+            // Todo lo demás es un cliente del daemon: necesita HTTP, no el
+            // estado interno, así que va por `neurox::cli`.
+            run_client_command(other).await?;
+        }
     }
 
     Ok(())
+}
+
+/// Los subcomandos que hablan con el daemon por HTTP.
+async fn run_client_command(cmd: Commands) -> anyhow::Result<()> {
+    use anyhow::Context;
+    match cmd {
+        Commands::Login => neurox::cli_client::login_interactive().await,
+        Commands::Logout => neurox::cli_client::logout().await,
+        Commands::Chat {
+            message,
+            stdin,
+            session,
+            agent,
+        } => {
+            // `--stdin` existe para no meter el prompt en la lista de procesos
+            // ni en el historial del shell, que es donde quedan los secretos
+            // cuando el texto viene de una pipe.
+            let text = if stdin {
+                use std::io::Read;
+                let mut s = String::new();
+                std::io::stdin().read_to_string(&mut s)?;
+                s.trim().to_string()
+            } else {
+                message.context("hace falta un mensaje, o --stdin para leerlo de la entrada")?
+            };
+            neurox::cli::chat(text, session, agent).await
+        }
+        Commands::Sessions { action } => neurox::cli::sessions(action).await,
+        Commands::Approvals { action } => neurox::cli::approvals(action).await,
+        Commands::Models => neurox::cli::models().await,
+        Commands::CoucouHook {
+            event,
+            payload,
+            session,
+        } => {
+            let payload = match payload {
+                Some(p) => serde_json::from_str(&p)
+                    .with_context(|| format!("--payload no es JSON válido: {p}"))?,
+                None => serde_json::json!({}),
+            };
+            neurox::coucou_hook::hook(&event, payload, session).await
+        }
+        // Los despacha el `match` de main antes de llegar acá.
+        Commands::Serve { .. }
+        | Commands::Agents { .. }
+        | Commands::Providers { .. }
+        | Commands::Users { .. } => unreachable!("comando no-cliente"),
+    }
 }
 
 async fn serve(

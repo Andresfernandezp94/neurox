@@ -43,6 +43,9 @@ chrono = { workspace = true }
 sqlx = { workspace = true }
 thiserror = "1"
 dirs = { workspace = true }
+# La CLI pide la contraseña sin eco: escribirla a stdout la dejaría en el
+# historial del terminal y en cualquier captura de pantalla.
+rpassword = "7"
 percent-encoding = { workspace = true }
 parking_lot = { workspace = true }
 rayon = { workspace = true }

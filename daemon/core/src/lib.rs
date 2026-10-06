@@ -1,8 +1,11 @@
 pub mod approval;
 pub mod auth;
+pub mod cli;
+pub mod cli_client;
 pub mod clients;
 pub mod config;
 pub mod coucou;
+pub mod coucou_hook;
 pub mod env_catalog;
 pub mod env_watcher;
 pub mod errors;
