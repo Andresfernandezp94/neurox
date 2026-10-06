@@ -1,17 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Marca de neurox: hexágono con un punto, como en el logo del panel.
-     Se usa en el launcher en lugar de fetching el favicon del panel. -->
+<!-- Marca de neurox, vectorial: el mismo hexágono de client/web/public/icon.svg.
+     Se mantiene como vector (no solo PNG) para poder usarla en la UI sin
+     perder nitidez en pantallas densas.
+
+     El color es el ámbar del logo canónico (#efb05e), NO el púrpura
+     #9B8CFF de LoginScreen/ServerConfigScreen: el icono launcher ya lo
+     lleva y el logo tiene que ser el del producto. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- Marco hexagonal: estructura / orquestación -->
     <path
-        android:pathData="M54,28 L75,41 L75,67 L54,80 L33,67 L33,41 Z"
-        android:strokeColor="#818CF8"
-        android:strokeWidth="3"
-        android:fillColor="#0F0F14" />
+        android:pathData="M256,32 L456,144 L456,368 L256,480 L56,368 L56,144 Z"
+        android:strokeColor="#EFB05E"
+        android:strokeWidth="24"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+
+    <!-- Líneas de conexión: ejecución de tools / delegación -->
     <path
-        android:pathData="M54,49 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0"
-        android:fillColor="#818CF8" />
+        android:pathData="M256,208 L256,108"
+        android:strokeColor="#EFB05E"
+        android:strokeWidth="16"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M297,280 L380,330"
+        android:strokeColor="#EFB05E"
+        android:strokeWidth="16"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M215,280 L132,330"
+        android:strokeColor="#EFB05E"
+        android:strokeWidth="16"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Nodo central: el agente -->
+    <path
+        android:pathData="M256,208 m-48,0 a48,48 0 1,0 96,0 a48,48 0 1,0 -96,0"
+        android:fillColor="#EFB05E" />
+
+    <!-- Nodos externos: tools / workspaces conectados -->
+    <path
+        android:pathData="M256,76 m-20,0 a20,20 0 1,0 40,0 a20,20 0 1,0 -40,0"
+        android:fillColor="#EFB05E" />
+    <path
+        android:pathData="M392,344 m-20,0 a20,20 0 1,0 40,0 a20,20 0 1,0 -40,0"
+        android:fillColor="#EFB05E" />
+    <path
+        android:pathData="M120,344 m-20,0 a20,20 0 1,0 40,0 a20,20 0 1,0 -40,0"
+        android:fillColor="#EFB05E" />
 </vector>
