@@ -47,6 +47,21 @@ pub struct AuthConfigSection {
     /// `google_client_id` when empty.
     #[serde(default)]
     pub google_audience: String,
+
+    // ── AWS Cognito ──
+    //
+    // Region del user pool, por ejemplo `us-east-1`. Con cualquiera de los dos
+    // campos de abajo vacío el proveedor queda DESACTIVADO: `/health` reporta
+    // "cognito": false y `POST /v1/auth/cognito` responde 404.
+    #[serde(default)]
+    pub cognito_region: String,
+    /// El id del user pool, con su prefijo de región incluido
+    /// (`us-east-1_AbCdEf123`). No es el client id.
+    #[serde(default)]
+    pub cognito_user_pool_id: String,
+    /// App client id del pool: el `aud` del ID token.
+    #[serde(default)]
+    pub cognito_client_id: String,
 }
 
 pub(crate) fn default_refresh_store_path() -> PathBuf {
@@ -90,6 +105,9 @@ impl Default for AuthConfigSection {
             google_client_id: String::new(),
             google_client_secret: String::new(),
             google_audience: String::new(),
+            cognito_region: String::new(),
+            cognito_user_pool_id: String::new(),
+            cognito_client_id: String::new(),
         }
     }
 }

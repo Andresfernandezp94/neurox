@@ -497,6 +497,9 @@ async fn serve(
             google_client_secret: std::env::var("NEUROX_GOOGLE_CLIENT_SECRET")
                 .unwrap_or(auth_cfg.google_client_secret.clone()),
             google_audience: auth_cfg.google_audience.clone(),
+            cognito_region: auth_cfg.cognito_region.clone(),
+            cognito_user_pool_id: auth_cfg.cognito_user_pool_id.clone(),
+            cognito_client_id: auth_cfg.cognito_client_id.clone(),
         };
 
         if auth_state.google_client_id.is_empty() {

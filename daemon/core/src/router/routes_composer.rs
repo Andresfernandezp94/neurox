@@ -158,6 +158,7 @@ pub fn router(state: AppState) -> axum::Router {
             "/v1/auth/refresh-token",
             "/v1/auth/revoke-token",
             "/v1/auth/google",
+            "/v1/auth/cognito",
         ];
         axum::Router::new()
             .route("/health", get(http::health))

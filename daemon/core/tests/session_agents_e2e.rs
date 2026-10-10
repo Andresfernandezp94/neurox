@@ -190,6 +190,9 @@ impl TestRig {
         google_client_id: String::new(),
         google_client_secret: String::new(),
         google_audience: String::new(),
+        cognito_region: String::new(),
+        cognito_user_pool_id: String::new(),
+        cognito_client_id: String::new(),
         };
         state.auth = state.auth.with_auth(auth_state);
         let token = issue_token(&secret, Uuid::new_v4(), "tester", Role::Admin, 1).unwrap();

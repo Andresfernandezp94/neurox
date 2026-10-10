@@ -195,6 +195,22 @@ auth:
   # ni del fichero de configuración.
   # google_audience: ""   # si está vacío se usa google_client_id
 
+  # ── AWS Cognito ──
+  # Igual que Google: con el pool o el client id vacío el proveedor queda
+  # DESACTIVADO (/health reporta "cognito": false, el endpoint da 404).
+  #
+  # OJO: `cognito_user_pool_id` NO es el client id. El pool lleva el prefijo de
+  # región delante (us-east-1_AbCdEf123) y el client id es el `aud` del token.
+  # El jwks_uri y el issuer se DERIVAN de región + pool, no se configuran: así
+  # no pueden dejar de coincidir entre sí.
+  # cognito_region: "us-east-1"
+  # cognito_user_pool_id: "us-east-1_AbCdEf123"
+  # cognito_client_id: "1example23456789"
+  #
+  # El endpoint espera el ID token del pool, NO el access token. Se distinguen
+  # por el claim `token_use` y el daemon lo comprueba: Cognito firma ambos con
+  # las mismas claves del pool, así que la firma sola no alcanza.
+
 # ─── Session agents (un subproceso por sesión de chat) ─────────────────────
 # `default` es un SESSION agent: cada sesión (pestaña web, sidebar, clientes
 # concurrentes) spawnea su PROPIO subproceso `agent`. Esto da paralelismo real

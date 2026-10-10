@@ -64,6 +64,9 @@ async fn spawn_daemon(tmp: &tempfile::TempDir) -> (String, String, Arc<AppState>
         google_client_id: String::new(),
         google_client_secret: String::new(),
         google_audience: String::new(),
+        cognito_region: String::new(),
+        cognito_user_pool_id: String::new(),
+        cognito_client_id: String::new(),
     });
 
     // alpha tiene key; beta es local (sin api_key_env ⇒ siempre

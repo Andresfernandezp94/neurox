@@ -39,6 +39,13 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
         .auth
         .as_ref()
         .is_some_and(crate::auth::google::is_configured);
+    // Igual que `google`: los clientes leen el flag para pintar el botón, y lo
+    // hacen antes de tener token.
+    let cognito_available = state
+        .auth
+        .auth
+        .as_ref()
+        .is_some_and(crate::auth::cognito::is_configured);
 
     // Per-session detail: gather pid/process + model from SQLite +
     // message count.
@@ -81,6 +88,7 @@ pub async fn health(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
         "uptime_seconds": uptime_seconds,
         "auth_required": auth_required,
         "google": google_available,
+        "cognito": cognito_available,
         "sessions": {
             "running": details.len(),
             "specs": state.lifecycle.session_agents.list_specs().await.len(),

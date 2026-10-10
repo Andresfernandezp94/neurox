@@ -70,6 +70,9 @@ async fn build_app_with_auth(admin_password: &str) -> TestEnv {
         google_client_id: String::new(),
         google_client_secret: String::new(),
         google_audience: String::new(),
+        cognito_region: String::new(),
+        cognito_user_pool_id: String::new(),
+        cognito_client_id: String::new(),
     };
 
     let auth_cfg = AuthConfig {
@@ -239,6 +242,56 @@ async fn health_endpoint_is_public() {
 /// pelado como los de `handlers_tests.rs`: una ruta que canjea una credencial
 /// larga por un JWT solo sirve si es pública, y montarla sin la capa lo
 /// esconde justo del test que lo comprueba.
+/// Los endpoints de login de IdP externos tienen que ser públicos.
+///
+/// Monta el router COMPLETO con `JwtAuthLayer`, no `auth_routes()` pelado: una
+/// ruta de login que queda detrás de la capa JWT devuelve 401 siempre, porque
+/// no hay token todavía, que es justo cuando se necesita. Es un bug que no se
+/// ve en los tests de `handlers_tests.rs` porque esos no montan la capa.
+///
+/// Se prueban los tres porque comparten el mismo modo de fallo y el mismo
+/// olvido: son tres líneas en una lista y basta con no tocar una.
+#[tokio::test]
+async fn login_de_idp_externos_es_publico() {
+    let env = build_app_with_auth("admin-password-1").await;
+    let client = reqwest::Client::new();
+
+    // Los IdP: sin configurar responden 404. Lo que NO puede pasar es 401, que
+    // sería la capa JWT diciendo "sin token" cuando justamente no hay token
+    // todavía.
+    for path in ["/v1/auth/google", "/v1/auth/cognito"] {
+        let resp = client
+            .post(format!("http://127.0.0.1:{port}{path}", port = env.port))
+            .json(&json!({ "id_token": "lo-que-sea" }))
+            .send()
+            .await
+            .unwrap();
+        assert_ne!(
+            resp.status(),
+            401,
+            "{path} exige Bearer ⇒ no se puede usar para iniciar sesión"
+        );
+    }
+
+    // `/v1/auth/login` se prueba aparte y con credenciales BUENAS: con malas da
+    // 401 legítimamente, y entonces el assert no distinguiría el bug de un
+    // password incorrecto. Ese era el hueco de la primera versión del test.
+    let resp = client
+        .post(format!(
+            "http://127.0.0.1:{port}/v1/auth/login",
+            port = env.port
+        ))
+        .json(&json!({ "username": "admin", "password": "admin-password-1" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        200,
+        "con credenciales válidas el login tiene que funcionar sin Bearer"
+    );
+}
+
 #[tokio::test]
 async fn refresh_token_endpoint_is_public_and_rotates() {
     let env = build_app_with_auth("admin-password-1").await;

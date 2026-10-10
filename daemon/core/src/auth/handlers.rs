@@ -33,6 +33,10 @@ pub struct AuthState {
     pub google_client_id: String,
     pub google_client_secret: String,
     pub google_audience: String,
+    /// AWS Cognito. Vacío ⇒ el proveedor está desactivado.
+    pub cognito_region: String,
+    pub cognito_user_pool_id: String,
+    pub cognito_client_id: String,
 }
 
 /// EP-0014 C-005: short-lived tokens for sensitive operations. Each
@@ -562,6 +566,8 @@ pub fn auth_routes() -> Router {
         .route("/v1/auth/revoke-token", post(revoke_refresh_token))
         // Google Sign-In. 404 while `auth.google_client_id` is empty.
         .route("/v1/auth/google", post(super::google::google_sign_in))
+        // AWS Cognito. 404 while the pool or the client id is empty.
+        .route("/v1/auth/cognito", post(super::cognito::cognito_sign_in))
 }
 
 /// Admin user CRUD (mounted at `/v1/users*`).

@@ -55,6 +55,9 @@ async fn build_auth_router_with(tmp: &TempDir, create_user: bool) -> axum::Route
         google_client_id: String::new(),
         google_client_secret: String::new(),
         google_audience: String::new(),
+    cognito_region: String::new(),
+    cognito_user_pool_id: String::new(),
+    cognito_client_id: String::new(),
     };
 
     super::handlers::auth_routes().layer(axum::Extension(state))
@@ -272,6 +275,71 @@ async fn refresh_store_survives_a_restart() {
 }
 
 #[tokio::test]
+async fn cognito_sign_in_is_404_when_not_configured() {
+    let tmp = TempDir::new().unwrap();
+    let app = build_auth_router(&tmp).await;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/v1/auth/cognito")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({ "id_token": "lo-que-sea" }).to_string(),
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.expect("response");
+
+    assert_eq!(
+        res.status(),
+        StatusCode::NOT_FOUND,
+        "sin pool configurado el provider debe estar ausente, no fallar de otra forma"
+    );
+}
+
+#[tokio::test]
+async fn cognito_rejects_a_forged_token() {
+    // Daemon con Cognito configurado, para que el 404 no tape el 401.
+    let tmp = TempDir::new().unwrap();
+    let user_store = UserStore::load(&tmp.path().join("users.json")).unwrap();
+    user_store.create(USERNAME, PASSWORD, Role::Admin).unwrap();
+    let state = AuthState {
+        user_store: Arc::new(user_store),
+        secret: Arc::new(JwtSecret::generate()),
+        expiry_hours: 1,
+        reauth_tokens: Arc::new(ReauthTokens::new()),
+        refresh_store: Arc::new(RefreshStore::in_memory()),
+        refresh_ttl_days: 30,
+        google_client_id: String::new(),
+        google_client_secret: String::new(),
+        google_audience: String::new(),
+        cognito_region: "us-east-1".into(),
+        cognito_user_pool_id: "us-east-1_TEST".into(),
+        cognito_client_id: "testclient".into(),
+    };
+    let app = super::handlers::auth_routes().layer(axum::Extension(state));
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/v1/auth/cognito")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({
+                // Header y payload con forma de JWT, firma inventada.
+                "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IngifQ.eyJzdWIiOiJhIn0.firma-falsa"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let res = app.oneshot(req).await.expect("response");
+
+    assert_eq!(
+        res.status(),
+        StatusCode::UNAUTHORIZED,
+        "un ID token con firma inventada no puede abrir sesión"
+    );
+}
+
+#[tokio::test]
 async fn google_sign_in_is_404_when_not_configured() {
     let tmp = TempDir::new().unwrap();
     let app = build_auth_router(&tmp).await;
@@ -312,6 +380,9 @@ async fn google_sign_in_rejects_a_forged_token() {
         google_client_id: "123.apps.googleusercontent.com".into(),
         google_client_secret: "secreto".into(),
         google_audience: String::new(),
+    cognito_region: String::new(),
+    cognito_user_pool_id: String::new(),
+    cognito_client_id: String::new(),
     };
     let app = super::handlers::auth_routes().layer(axum::Extension(state));
 

@@ -10,6 +10,7 @@
 // `CoreConfig`. When disabled, no middleware runs and the legacy
 // `api_token` behavior applies.
 
+pub mod cognito;
 pub mod google;
 pub mod handlers;
 #[cfg(test)]
@@ -41,6 +42,9 @@ pub struct AuthConfig {
     pub google_client_id: String,
     pub google_client_secret: String,
     pub google_audience: String,
+    pub cognito_region: String,
+    pub cognito_user_pool_id: String,
+    pub cognito_client_id: String,
 }
 
 impl Default for AuthConfig {
@@ -60,6 +64,9 @@ impl Default for AuthConfig {
             google_client_id: String::new(),
             google_client_secret: String::new(),
             google_audience: String::new(),
+            cognito_region: String::new(),
+            cognito_user_pool_id: String::new(),
+            cognito_client_id: String::new(),
         }
     }
 }
@@ -76,6 +83,9 @@ impl AuthConfig {
             google_client_id: core.auth.google_client_id.clone(),
             google_client_secret: core.auth.google_client_secret.clone(),
             google_audience: core.auth.google_audience.clone(),
+            cognito_region: core.auth.cognito_region.clone(),
+            cognito_user_pool_id: core.auth.cognito_user_pool_id.clone(),
+            cognito_client_id: core.auth.cognito_client_id.clone(),
         }
     }
 }
